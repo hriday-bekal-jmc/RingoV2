@@ -1,14 +1,11 @@
 import { NavLink } from 'react-router-dom';
-
-const navItems = [
-  { to: '/dashboard', label: 'ダッシュボード', icon: '▦' },
-  { to: '/applications/new', label: '新規申請', icon: '＋' },
-  { to: '/approvals', label: '承認待ち', icon: '🔔' },
-  { to: '/history', label: '履歴', icon: '⟲' },
-  { to: '/accounting', label: '経理', icon: '▤' },
-];
+import { useAuth } from '../../context/AuthContext';
+import { getPermissions } from '../../config/permissions';
 
 export default function Sidebar() {
+  const { user } = useAuth();
+  const perms = getPermissions(user?.role);
+
   return (
     <aside className="w-56 bg-ringo-700 text-cream-50 min-h-screen flex flex-col">
       <div className="px-6 py-6 border-b border-ringo-800">
@@ -17,11 +14,13 @@ export default function Sidebar() {
           <span className="text-xl font-bold tracking-wide">リンゴ</span>
         </div>
       </div>
+
       <nav className="flex-1 px-3 py-4 space-y-1">
-        {navItems.map((item) => (
+        {perms.navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
+            end={item.to === '/dashboard'}
             className={({ isActive }) =>
               `flex items-center gap-3 px-4 py-2.5 rounded-md text-sm font-medium transition-colors ${
                 isActive
@@ -35,8 +34,11 @@ export default function Sidebar() {
           </NavLink>
         ))}
       </nav>
-      <div className="px-6 py-4 text-xs text-cream-200/70 border-t border-ringo-800">
-        RINGO v0.1
+
+      {/* Role badge */}
+      <div className="px-6 py-4 border-t border-ringo-800 space-y-1">
+        <div className="text-xs font-semibold text-cream-200/90">{perms.label}</div>
+        <div className="text-xs text-cream-200/50">RINGO v0.1</div>
       </div>
     </aside>
   );

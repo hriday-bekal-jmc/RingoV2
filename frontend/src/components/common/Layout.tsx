@@ -1,7 +1,13 @@
-import Sidebar from './Sidebar.jsx';
-import Header from './Header.jsx';
+import { ReactNode } from 'react';
+import Sidebar from './Sidebar';
+import Header from './Header';
 
-export default function Layout({ title, children }) {
+interface LayoutProps {
+  title: string;
+  children: ReactNode;
+}
+
+export default function Layout({ title, children }: LayoutProps) {
   return (
     <div className="min-h-screen flex bg-cream-100">
       <Sidebar />

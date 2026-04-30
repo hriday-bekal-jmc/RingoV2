@@ -1,14 +1,36 @@
 import { useForm } from 'react-hook-form';
-import StandardInput from './StandardInput.jsx';
+import StandardInput from './StandardInput';
 
-export default function DynamicForm({ template, onSubmit, isSettlementPhase = false }) {
+// データベースから来るひな形(Template)の型を定義
+interface FormField {
+  name: string;
+  label: string;
+  type: string;
+  required?: boolean;
+  multiple?: boolean;
+}
+
+interface Template {
+  id: string;
+  title_ja: string;
+  schema_definition: { fields: FormField[] };
+  settlement_schema: { fields: FormField[] };
+}
+
+// コンポーネントが受け取る引数(Props)の型を定義
+interface DynamicFormProps {
+  template: Template;
+  onSubmit: (data: any) => Promise<void>;
+  isSettlementPhase?: boolean;
+  disabled?: boolean;
+}
+
+export default function DynamicForm({ template, onSubmit, isSettlementPhase = false, disabled = false }: DynamicFormProps) {
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm();
 
-  // Pick the schema based on whether we are in the Ringi phase or Settlement phase
   const activeSchema = isSettlementPhase ? template.settlement_schema : template.schema_definition;
 
-  const handleFormSubmit = async (data) => {
-    // Wrap data to match our backend expectations
+  const handleFormSubmit = async (data: any) => {
     await onSubmit({
       template_id: template.id,
       stage: isSettlementPhase ? 'SETTLEMENT' : 'RINGI',
@@ -45,7 +67,7 @@ export default function DynamicForm({ template, onSubmit, isSettlementPhase = fa
         <button type="button" className="btn-tertiary" disabled={isSubmitting}>
           下書き保存 (Save Draft)
         </button>
-        <button type="submit" className="btn-primary" disabled={isSubmitting}>
+        <button type="submit" className="btn-primary" disabled={isSubmitting || disabled}>
           {isSubmitting ? '送信中...' : '申請 (Submit)'}
         </button>
       </div>

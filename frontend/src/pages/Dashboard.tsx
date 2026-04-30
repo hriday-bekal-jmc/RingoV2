@@ -1,5 +1,6 @@
-import Layout from '../components/common/Layout.jsx';
-import { useAuth } from '../context/AuthContext.jsx';
+import { Link } from 'react-router-dom';
+import Layout from '../components/common/Layout.js';
+import { useAuth } from '../context/AuthContext.js';
 
 const stats = [
   { label: '私の承認待ち', value: 4, badge: '4' },
@@ -51,9 +52,10 @@ export default function Dashboard() {
           <h3 className="text-lg font-bold text-warmgray-800 mb-3">利用可能なフォームテンプレート</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {templates.map((t) => (
-              <div
+              <Link
                 key={t.code}
-                className="card hover:shadow-card-hover cursor-pointer transition-shadow group"
+                to={`/applications/new/${t.code}`}
+                className="card hover:shadow-card-hover cursor-pointer transition-shadow group block"
               >
                 <div className="flex items-start justify-between mb-2">
                   <h4 className="font-bold text-warmgray-800 group-hover:text-ringo-600">
@@ -64,10 +66,10 @@ export default function Dashboard() {
                   </span>
                 </div>
                 {t.desc && <p className="text-xs text-warmgray-600 mb-3">{t.desc}</p>}
-                <button className="text-sm font-semibold text-ringo-600 hover:text-ringo-700 flex items-center gap-1">
+                <span className="text-sm font-semibold text-ringo-600 group-hover:text-ringo-700 flex items-center gap-1">
                   新規作成 <span>›</span>
-                </button>
-              </div>
+                </span>
+              </Link>
             ))}
           </div>
         </>
