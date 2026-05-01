@@ -1,3 +1,7 @@
+# Uploaded files — local storage only, swap to Drive when service account ready
+backend/uploads/*
+!backend/uploads/.gitkeep
+
 # Dependencies
 node_modules/
 .pnp

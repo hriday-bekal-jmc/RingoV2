@@ -8,6 +8,7 @@ export interface User {
   role: string;
   department_id?: string;
   department_name?: string;
+  avatar_url?: string | null;
 }
 
 interface AuthContextType {

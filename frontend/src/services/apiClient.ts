@@ -12,18 +12,19 @@ async function fetchClient(endpoint: string, options: RequestOptions = {}) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
 
+  const isFormData = data instanceof FormData;
+
   const config: RequestInit = {
     ...customConfig,
     credentials: 'include', // Cookie（JWT）を送信するため
-    headers: {
-      'Content-Type': 'application/json',
-      ...headers,
-    },
+    headers: isFormData
+      ? { ...headers }  // Let browser set Content-Type with boundary for FormData
+      : { 'Content-Type': 'application/json', ...headers },
     signal: controller.signal,
   };
 
   if (data) {
-    config.body = JSON.stringify(data);
+    config.body = isFormData ? data : JSON.stringify(data);
   }
 
   try {

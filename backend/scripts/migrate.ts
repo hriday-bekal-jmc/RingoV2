@@ -1,12 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { pool } from '../src/config/db.js';
+import { pool } from '../src/config/db';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsDir = path.join(__dirname, '..', 'migrations');
 
-async function ensureMigrationsTable() {
+async function ensureMigrationsTable(): Promise<void> {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       id VARCHAR(255) PRIMARY KEY,
@@ -15,12 +13,12 @@ async function ensureMigrationsTable() {
   `);
 }
 
-async function getApplied() {
+async function getApplied(): Promise<Set<string>> {
   const { rows } = await pool.query('SELECT id FROM schema_migrations');
-  return new Set(rows.map((r) => r.id));
+  return new Set(rows.map((r: { id: string }) => r.id));
 }
 
-async function run() {
+async function run(): Promise<void> {
   await ensureMigrationsTable();
   const applied = await getApplied();
   const files = fs.readdirSync(migrationsDir)
@@ -43,7 +41,7 @@ async function run() {
       console.log(`[done]  ${file}`);
     } catch (err) {
       await client.query('ROLLBACK');
-      console.error(`[fail]  ${file}:`, err.message);
+      console.error(`[fail]  ${file}:`, (err as Error).message);
       process.exit(1);
     } finally {
       client.release();

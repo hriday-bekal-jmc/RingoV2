@@ -7,36 +7,160 @@
     height: 100%;
   }
   body {
-    @apply text-warmgray-800 antialiased bg-cream-100;
+    @apply text-warmgray-800 antialiased;
+    background-color: #F4F2EF;
+    background-image:
+      radial-gradient(ellipse at 15% 40%, rgba(199,91,71,0.09) 0px, transparent 55%),
+      radial-gradient(ellipse at 85% 15%, rgba(201,162,39,0.07) 0px, transparent 55%),
+      radial-gradient(ellipse at 60% 85%, rgba(199,91,71,0.05) 0px, transparent 50%);
+    background-attachment: fixed;
+    font-feature-settings: 'cv11', 'ss01';
   }
 }
 
 @layer components {
-  .btn {
-    @apply inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  /* ── Glass cards ── */
+  .glass {
+    background: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    box-shadow: 0 4px 24px rgba(60, 40, 20, 0.08), 0 1px 2px rgba(60, 40, 20, 0.04);
   }
-  .btn-primary {
-    @apply btn bg-ringo-500 text-white hover:bg-ringo-600 shadow-sm;
-  }
-  .btn-secondary {
-    @apply btn bg-mustard-500 text-white hover:bg-mustard-600 shadow-sm;
-  }
-  .btn-tertiary {
-    @apply btn bg-cream-300 text-warmgray-800 hover:bg-ringo-200;
-  }
-  .btn-danger {
-    @apply btn bg-ringo-700 text-white hover:bg-ringo-800;
-  }
-  .input {
-    @apply block w-full rounded-md border border-ringo-200 bg-cream-50 px-3 py-2 text-sm text-warmgray-800 focus:outline-none focus:ring-2 focus:ring-ringo-500 focus:border-ringo-500;
-  }
-  .label {
-    @apply block text-sm font-semibold text-warmgray-800 mb-1;
+  .glass-dark {
+    background: rgba(160, 67, 43, 0.88);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
   }
   .card {
-    @apply bg-cream-50 rounded-lg shadow-card border border-ringo-200 p-6;
+    @apply glass rounded-2xl p-6;
+  }
+  .card-sm {
+    @apply glass rounded-xl p-4;
+  }
+  .card-hover {
+    @apply glass rounded-2xl p-6 cursor-pointer
+           transition-all duration-200
+           hover:shadow-[0_8px_32px_rgba(60,40,20,0.12)]
+           hover:-translate-y-0.5;
   }
   .stat-card {
-    @apply bg-cream-50 rounded-lg shadow-card border border-ringo-200 p-5 hover:shadow-card-hover transition-shadow;
+    @apply glass rounded-2xl p-5
+           transition-all duration-200
+           hover:shadow-[0_8px_32px_rgba(60,40,20,0.12)]
+           hover:-translate-y-0.5;
   }
+
+  /* ── Buttons ── */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold
+           transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ringo-500 focus-visible:ring-offset-2;
+  }
+  .btn-primary {
+    @apply btn bg-ringo-500 text-white hover:bg-ringo-600 active:scale-[0.98]
+           shadow-[0_2px_8px_rgba(199,91,71,0.35)];
+  }
+  .btn-secondary {
+    @apply btn bg-warmgray-800 text-white hover:bg-warmgray-900 active:scale-[0.98] shadow-sm;
+  }
+  .btn-outline {
+    @apply btn bg-white/60 text-warmgray-700 border border-white/80
+           hover:bg-white/90 hover:border-surface-300 shadow-sm backdrop-blur-sm;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent text-warmgray-500 hover:bg-white/60 hover:text-warmgray-800;
+  }
+  .btn-danger {
+    @apply btn bg-red-500 text-white hover:bg-red-600 active:scale-[0.98]
+           shadow-[0_2px_8px_rgba(239,68,68,0.30)];
+  }
+  .btn-mustard {
+    @apply btn bg-mustard-500 text-white hover:bg-mustard-600 active:scale-[0.98]
+           shadow-[0_2px_8px_rgba(201,162,39,0.35)];
+  }
+  .btn-sm  { @apply btn px-3 py-1.5 text-xs rounded-lg; }
+  .btn-lg  { @apply btn px-6 py-3.5 text-base rounded-2xl; }
+
+  /* ── Inputs ── */
+  .input {
+    @apply block w-full rounded-xl border border-white/70 bg-white/60 backdrop-blur-sm
+           px-3.5 py-2.5 text-sm text-warmgray-800 placeholder-warmgray-400
+           transition-all duration-150
+           focus:outline-none focus:ring-2 focus:ring-ringo-400/50 focus:border-ringo-400 focus:bg-white/90
+           disabled:bg-white/30 disabled:text-warmgray-400 disabled:cursor-not-allowed;
+  }
+  .label {
+    @apply block text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1.5;
+  }
+  .label-normal {
+    @apply block text-sm font-medium text-warmgray-600 mb-1.5;
+  }
+
+  /* ── Badges ── */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold;
+  }
+  .badge-pending  { @apply badge bg-amber-100/80  text-amber-700   border border-amber-200/80  backdrop-blur-sm; }
+  .badge-approved { @apply badge bg-emerald-100/80 text-emerald-700 border border-emerald-200/80 backdrop-blur-sm; }
+  .badge-rejected { @apply badge bg-red-100/80    text-red-700     border border-red-200/80    backdrop-blur-sm; }
+  .badge-returned { @apply badge bg-orange-100/80 text-orange-700  border border-orange-200/80 backdrop-blur-sm; }
+  .badge-draft    { @apply badge bg-surface-100/80 text-warmgray-500 border border-surface-200/80 backdrop-blur-sm; }
+  .badge-ringo    { @apply badge bg-ringo-100/80   text-ringo-700   border border-ringo-200/80   backdrop-blur-sm; }
+  .badge-mustard  { @apply badge bg-mustard-400/10 text-mustard-600 border border-mustard-400/30; }
+
+  /* ── Table ── */
+  .table-base            { @apply w-full text-sm text-left; }
+  .table-base thead      { @apply border-b border-white/40; }
+  .table-base thead th   { @apply px-4 py-3.5 text-[11px] font-bold uppercase tracking-widest text-warmgray-400; }
+  .table-base tbody tr   { @apply border-b border-white/30 hover:bg-white/40 transition-colors duration-100; }
+  .table-base tbody td   { @apply px-4 py-3.5 text-warmgray-800; }
+  .table-base tbody tr:last-child { @apply border-b-0; }
+
+  /* ── Misc ── */
+  .divider { @apply border-t border-white/40 my-4; }
+  .section-title {
+    @apply text-[10px] font-bold uppercase tracking-[0.12em] text-warmgray-400 mb-3;
+  }
+  .step-dot          { @apply w-2 h-2 rounded-full; }
+  .step-dot-done     { @apply step-dot bg-emerald-500; }
+  .step-dot-active   { @apply step-dot bg-ringo-500 ring-2 ring-ringo-300; }
+  .step-dot-waiting  { @apply step-dot bg-surface-300; }
+
+  /* ── Gradient accent bars ── */
+  .accent-bar {
+    @apply h-1 w-10 rounded-full bg-gradient-to-r from-ringo-500 to-mustard-500;
+  }
+
+  /* ── Glow effects ── */
+  .glow-ringo  { box-shadow: 0 0 24px rgba(199, 91, 71, 0.20); }
+  .glow-mustard { box-shadow: 0 0 24px rgba(201, 162, 39, 0.18); }
 }
+
+/* ── Animations ── */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-fade-up   { animation: fadeInUp 0.35s ease-out both; }
+.animate-scale-in  { animation: scaleIn  0.25s ease-out both; }
+
+/* Stagger children */
+.stagger > *:nth-child(1) { animation-delay: 0.05s; }
+.stagger > *:nth-child(2) { animation-delay: 0.10s; }
+.stagger > *:nth-child(3) { animation-delay: 0.15s; }
+.stagger > *:nth-child(4) { animation-delay: 0.20s; }
+.stagger > *:nth-child(5) { animation-delay: 0.25s; }
+.stagger > *:nth-child(6) { animation-delay: 0.30s; }
+.stagger > *:nth-child(7) { animation-delay: 0.35s; }
+.stagger > *:nth-child(8) { animation-delay: 0.40s; }

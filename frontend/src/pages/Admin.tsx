@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import { ROLE_MAP, Role } from '../config/permissions';
+import ConfirmDialog from '../components/common/ConfirmDialog';
+import Toast, { useToast } from '../components/common/Toast';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -14,13 +16,10 @@ interface User {
   is_active: boolean;
   department_name?: string;
   department_id?: string;
+  avatar_url?: string | null;
 }
 
-interface Department {
-  id: string;
-  name: string;
-  code: string;
-}
+interface Department { id: string; name: string; code: string }
 
 interface RouteStep {
   id: string;
@@ -29,6 +28,7 @@ interface RouteStep {
   action_type: string;
   approver_name?: string;
   approver_id?: string;
+  approver_avatar?: string | null;
 }
 
 interface ApprovalRoute {
@@ -42,13 +42,57 @@ interface ApprovalRoute {
   steps: RouteStep[];
 }
 
-interface Template {
-  id: string;
-  code: string;
-  title_ja: string;
-}
+interface Template { id: string; code: string; title_ja: string }
 
 const ROLES = ['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ACCOUNTING', 'ADMIN'];
+
+// ─── Shared helpers ───────────────────────────────────────────────────────────
+
+function nameToGradient(name: string): string {
+  const opts = [
+    'from-ringo-400 to-ringo-600', 'from-mustard-400 to-mustard-600',
+    'from-teal-500 to-teal-700', 'from-indigo-400 to-violet-600', 'from-emerald-400 to-teal-600',
+  ];
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffff;
+  return opts[h % opts.length];
+}
+
+function UserAvatar({ name, avatarUrl, size = 8 }: { name: string; avatarUrl?: string | null; size?: number }) {
+  const grad = nameToGradient(name);
+  if (avatarUrl) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={name}
+        className={`w-${size} h-${size} rounded-full object-cover ring-2 ring-white/60 shrink-0`}
+      />
+    );
+  }
+  return (
+    <div className={`w-${size} h-${size} rounded-full bg-gradient-to-br ${grad} flex items-center justify-center text-white text-xs font-bold shrink-0 ring-2 ring-white/60`}>
+      {name.slice(0, 1)}
+    </div>
+  );
+}
+
+function RoleBadge({ role }: { role: string }) {
+  const colors: Record<string, string> = {
+    ADMIN:      'bg-ringo-500 text-white',
+    PRESIDENT:  'bg-warmgray-800 text-white',
+    SENMU:      'bg-indigo-500 text-white',
+    GM:         'bg-violet-500 text-white',
+    MANAGER:    'bg-sky-500 text-white',
+    ACCOUNTING: 'bg-mustard-500 text-white',
+    SOUMU:      'bg-teal-500 text-white',
+    EMPLOYEE:   'bg-surface-200 text-warmgray-600',
+  };
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${colors[role] ?? 'bg-surface-200 text-warmgray-500'}`}>
+      {role}
+    </span>
+  );
+}
 
 // ─── User Edit Modal ──────────────────────────────────────────────────────────
 
@@ -63,12 +107,12 @@ interface UserModalProps {
 function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalProps) {
   const isNew = !user;
   const [form, setForm] = useState({
-    full_name: user?.full_name ?? '',
-    email: user?.email ?? '',
-    password: '',
-    role: user?.role ?? 'EMPLOYEE',
+    full_name:     user?.full_name ?? '',
+    email:         user?.email ?? '',
+    password:      '',
+    role:          user?.role ?? 'EMPLOYEE',
     department_id: user?.department_id ?? '',
-    is_active: user?.is_active ?? true,
+    is_active:     user?.is_active ?? true,
   });
 
   const set = (k: string, v: any) => setForm((p) => ({ ...p, [k]: v }));
@@ -80,9 +124,17 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-warmgray-900/40 px-4">
-      <div className="card w-full max-w-lg space-y-4">
-        <h3 className="text-lg font-bold text-warmgray-800">{isNew ? 'ユーザー新規作成' : 'プロフィール編集'}</h3>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-warmgray-900/50 backdrop-blur-sm px-4">
+      <div className="glass rounded-3xl w-full max-w-lg p-8 space-y-5 shadow-2xl animate-scale-in">
+        <div className="flex items-center gap-3">
+          {!isNew && <UserAvatar name={form.full_name || '?'} avatarUrl={user?.avatar_url} size={10} />}
+          <div>
+            <h3 className="text-lg font-bold text-warmgray-800">
+              {isNew ? 'ユーザー新規作成' : 'プロフィール編集'}
+            </h3>
+            {!isNew && <p className="text-xs text-warmgray-400">{user?.email}</p>}
+          </div>
+        </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div className="col-span-2">
@@ -111,7 +163,7 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
             </select>
           </div>
           {!isNew && (
-            <div className="col-span-2 flex items-center gap-2">
+            <div className="col-span-2 flex items-center gap-3 bg-surface-100/50 rounded-xl px-4 py-3">
               <input
                 type="checkbox"
                 id="is_active"
@@ -119,15 +171,19 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
                 onChange={(e) => set('is_active', e.target.checked)}
                 className="w-4 h-4 accent-ringo-500"
               />
-              <label htmlFor="is_active" className="text-sm text-warmgray-800">アカウント有効</label>
+              <label htmlFor="is_active" className="text-sm font-medium text-warmgray-700">アカウント有効</label>
             </div>
           )}
         </div>
 
-        <div className="flex justify-end gap-2 pt-2">
-          <button className="btn-tertiary" onClick={onClose}>キャンセル</button>
-          <button className="btn-primary" onClick={handleSave} disabled={isSaving || !form.full_name || !form.email}>
-            {isSaving ? '保存中...' : '保存'}
+        <div className="flex justify-end gap-3 pt-2">
+          <button className="btn-outline" onClick={onClose}>キャンセル</button>
+          <button
+            className="btn-primary"
+            onClick={handleSave}
+            disabled={isSaving || !form.full_name || !form.email}
+          >
+            {isSaving ? '保存中...' : '保存する'}
           </button>
         </div>
       </div>
@@ -137,9 +193,11 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
 
 // ─── Users Tab ────────────────────────────────────────────────────────────────
 
-function UsersTab() {
+function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error' | 'info') => void }) {
   const queryClient = useQueryClient();
-  const [editUser, setEditUser] = useState<User | null | 'new'>( null);
+  const [editUser, setEditUser] = useState<User | null | 'new'>(null);
+  const [search, setSearch] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
 
   const { data: users = [], isLoading } = useQuery<User[]>({
     queryKey: ['admin', 'users'],
@@ -153,29 +211,48 @@ function UsersTab() {
 
   const createUser = useMutation({
     mutationFn: async (data: Record<string, any>) => (await apiClient.post('/admin/users', data)).data,
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['admin', 'users'] }); setEditUser(null); },
-    onError: (err: any) => alert(`作成失敗: ${err.message}`),
-  });
-
-  const deleteUser = useMutation({
-    mutationFn: async ({ id, hard }: { id: string; hard: boolean }) =>
-      (await apiClient.delete(`/admin/users/${id}${hard ? '?hard=true' : ''}`)).data,
-    onSuccess: (data) => { queryClient.invalidateQueries({ queryKey: ['admin', 'users'] }); alert(data.message); },
-    onError: (err: any) => alert(`削除失敗: ${err.message}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+      setEditUser(null);
+      showToast('ユーザーを作成しました');
+    },
+    onError: (err: any) => showToast(`作成失敗: ${err.message}`, 'error'),
   });
 
   const updateUser = useMutation({
     mutationFn: async ({ id, ...patch }: { id: string } & Record<string, any>) =>
       (await apiClient.patch(`/admin/users/${id}`, patch)).data,
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['admin', 'users'] }); setEditUser(null); },
-    onError: (err: any) => alert(`更新失敗: ${err.message}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+      setEditUser(null);
+      showToast('ユーザーを更新しました');
+    },
+    onError: (err: any) => showToast(`更新失敗: ${err.message}`, 'error'),
   });
 
-  if (isLoading) return <p className="text-warmgray-600">読み込み中...</p>;
+  const deleteUser = useMutation({
+    mutationFn: async ({ id, hard }: { id: string; hard: boolean }) =>
+      (await apiClient.delete(`/admin/users/${id}${hard ? '?hard=true' : ''}`)).data,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+      setDeleteTarget(null);
+      showToast(data.message);
+    },
+    onError: (err: any) => showToast(`削除失敗: ${err.message}`, 'error'),
+  });
+
+  const filtered = search
+    ? users.filter((u) =>
+        u.full_name.toLowerCase().includes(search.toLowerCase()) ||
+        u.email.toLowerCase().includes(search.toLowerCase()) ||
+        u.role.includes(search.toUpperCase())
+      )
+    : users;
 
   return (
     <>
-      {(editUser === 'new') && (
+      {/* User edit modal */}
+      {editUser === 'new' && (
         <UserModal
           departments={departments}
           onClose={() => setEditUser(null)}
@@ -193,69 +270,130 @@ function UsersTab() {
         />
       )}
 
-      <div className="flex justify-end mb-4">
-        <button className="btn-primary" onClick={() => setEditUser('new')}>＋ ユーザー追加</button>
+      {/* Delete confirm — 3 options: hard delete / disable / cancel */}
+      {deleteTarget && (
+        <ConfirmDialog
+          isOpen={true}
+          title={`「${deleteTarget.full_name}」を削除`}
+          message="完全削除するとユーザーのデータが失われます。無効化の場合はログインできなくなりますが、データは保持されます。"
+          confirmLabel="完全削除する"
+          confirmClass="btn-danger"
+          cancelLabel="キャンセル"
+          onConfirm={() => deleteUser.mutate({ id: deleteTarget.id, hard: true })}
+          onCancel={() => setDeleteTarget(null)}
+          extraActions={
+            <button
+              className="btn-outline w-full"
+              onClick={() => deleteUser.mutate({ id: deleteTarget.id, hard: false })}
+            >
+              無効化のみ（データ保持）
+            </button>
+          }
+        />
+      )}
+
+      <div className="flex items-center gap-3 mb-5">
+        <input
+          className="input max-w-xs"
+          placeholder="氏名 / メール / ロールで検索..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <span className="text-sm text-warmgray-400">{filtered.length} 名</span>
+        <div className="flex-1" />
+        <button className="btn-primary" onClick={() => setEditUser('new')}>
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+          ユーザー追加
+        </button>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-ringo-200 text-left text-warmgray-600">
-              <th className="pb-3 pr-4">氏名</th>
-              <th className="pb-3 pr-4">メール</th>
-              <th className="pb-3 pr-4">ロール</th>
-              <th className="pb-3 pr-4">部署</th>
-              <th className="pb-3 pr-4">状態</th>
-              <th className="pb-3"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-ringo-200">
-            {users.map((u) => (
-              <tr key={u.id} className="hover:bg-cream-100">
-                <td className="py-3 pr-4 font-semibold text-warmgray-800">{u.full_name}</td>
-                <td className="py-3 pr-4 text-warmgray-600 text-xs">{u.email}</td>
-                <td className="py-3 pr-4">
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded bg-ringo-100 text-ringo-700">{u.role}</span>
-                </td>
-                <td className="py-3 pr-4 text-warmgray-600">{u.department_name ?? '—'}</td>
-                <td className="py-3 pr-4">
-                  <span className={`text-xs font-semibold px-2 py-0.5 rounded ${u.is_active ? 'bg-green-100 text-green-700' : 'bg-warmgray-200 text-warmgray-600'}`}>
-                    {u.is_active ? '有効' : '無効'}
-                  </span>
-                </td>
-                <td className="py-3">
-                  <div className="flex items-center gap-3">
-                    <button className="text-xs text-ringo-600 hover:text-ringo-700 font-semibold" onClick={() => setEditUser(u)}>
-                      編集
-                    </button>
-                    <button
-                      className="text-xs text-ringo-400 hover:text-ringo-600"
-                      onClick={() => {
-                        const hard = confirm(`「${u.full_name}」を完全削除しますか？\n\n「キャンセル」で無効化のみ行います。`);
-                        deleteUser.mutate({ id: u.id, hard });
-                      }}
-                    >
-                      削除
-                    </button>
-                  </div>
-                </td>
+      {isLoading ? (
+        <div className="text-warmgray-400 text-sm py-8 text-center">読み込み中...</div>
+      ) : (
+        <div className="card !p-0 overflow-hidden">
+          <table className="table-base">
+            <thead>
+              <tr>
+                <th>ユーザー</th>
+                <th>ロール</th>
+                <th>部署</th>
+                <th>状態</th>
+                <th></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {filtered.map((u) => (
+                <tr key={u.id}>
+                  <td>
+                    <div className="flex items-center gap-3">
+                      <UserAvatar name={u.full_name} avatarUrl={u.avatar_url} />
+                      <div>
+                        <p className="font-semibold text-warmgray-800">{u.full_name}</p>
+                        <p className="text-[11px] text-warmgray-400">{u.email}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td><RoleBadge role={u.role} /></td>
+                  <td className="text-warmgray-500 text-xs">{u.department_name ?? '—'}</td>
+                  <td>
+                    <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                      u.is_active
+                        ? 'bg-emerald-100/80 text-emerald-700 border border-emerald-200/80'
+                        : 'bg-surface-100 text-warmgray-500 border border-surface-200'
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${u.is_active ? 'bg-emerald-500' : 'bg-warmgray-400'}`} />
+                      {u.is_active ? '有効' : '無効'}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="flex items-center gap-3 justify-end">
+                      <button
+                        className="text-xs font-semibold text-ringo-500 hover:text-ringo-700 transition-colors"
+                        onClick={() => setEditUser(u)}
+                      >
+                        編集
+                      </button>
+                      <button
+                        className="text-xs text-warmgray-400 hover:text-red-500 transition-colors"
+                        onClick={() => setDeleteTarget(u)}
+                      >
+                        削除
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filtered.length === 0 && (
+            <div className="py-12 text-center text-warmgray-400 text-sm">ユーザーが見つかりません</div>
+          )}
+        </div>
+      )}
     </>
   );
 }
 
 // ─── Routes Tab ───────────────────────────────────────────────────────────────
 
-function RoutesTab() {
+function ChainArrow() {
+  return (
+    <svg className="w-4 h-4 text-warmgray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+    </svg>
+  );
+}
+
+function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error' | 'info') => void }) {
   const queryClient = useQueryClient();
   const [addingStepToRoute, setAddingStepToRoute] = useState<string | null>(null);
   const [newStep, setNewStep] = useState({ approver_id: '', label: '', action_type: 'APPROVE' });
   const [showNewRoute, setShowNewRoute] = useState(false);
   const [newRoute, setNewRoute] = useState({ template_id: '', department_id: '', name: '', stage: 'RINGI' });
+  const [deleteRouteTarget, setDeleteRouteTarget] = useState<ApprovalRoute | null>(null);
+  const [deleteStepTarget, setDeleteStepTarget] = useState<{ id: string; label: string } | null>(null);
 
   const { data: routes = [], isLoading } = useQuery<ApprovalRoute[]>({
     queryKey: ['admin', 'routes'],
@@ -277,50 +415,85 @@ function RoutesTab() {
     queryFn: async () => (await apiClient.get('/admin/templates')).data,
   });
 
+  const refetch = () => queryClient.invalidateQueries({ queryKey: ['admin', 'routes'] });
+
   const addStep = useMutation({
     mutationFn: async ({ routeId, ...step }: { routeId: string; approver_id: string; label: string; action_type: string }) =>
       (await apiClient.post(`/admin/routes/${routeId}/steps`, step)).data,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'routes'] });
+      refetch();
       setAddingStepToRoute(null);
       setNewStep({ approver_id: '', label: '', action_type: 'APPROVE' });
+      showToast('ステップを追加しました');
     },
-    onError: (err: any) => alert(`ステップ追加失敗: ${err.message}`),
+    onError: (err: any) => showToast(`ステップ追加失敗: ${err.message}`, 'error'),
   });
 
   const deleteStep = useMutation({
     mutationFn: async (stepId: string) => (await apiClient.delete(`/admin/route-steps/${stepId}`)).data,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'routes'] }),
-    onError: (err: any) => alert(`削除失敗: ${err.message}`),
+    onSuccess: () => { refetch(); setDeleteStepTarget(null); showToast('ステップを削除しました'); },
+    onError: (err: any) => showToast(`削除失敗: ${err.message}`, 'error'),
   });
 
   const createRoute = useMutation({
     mutationFn: async (route: typeof newRoute) => (await apiClient.post('/admin/routes', route)).data,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'routes'] });
+      refetch();
       setShowNewRoute(false);
       setNewRoute({ template_id: '', department_id: '', name: '', stage: 'RINGI' });
+      showToast('ルートを作成しました');
     },
-    onError: (err: any) => alert(`ルート作成失敗: ${err.message}`),
+    onError: (err: any) => showToast(`ルート作成失敗: ${err.message}`, 'error'),
   });
 
   const deleteRoute = useMutation({
     mutationFn: async (id: string) => (await apiClient.delete(`/admin/routes/${id}`)).data,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'routes'] }),
-    onError: (err: any) => alert(`削除失敗: ${err.message}`),
+    onSuccess: () => { refetch(); setDeleteRouteTarget(null); showToast('ルートを削除しました'); },
+    onError: (err: any) => showToast(`削除失敗: ${err.message}`, 'error'),
   });
 
-  if (isLoading) return <p className="text-warmgray-600">読み込み中...</p>;
+  if (isLoading) return <div className="text-warmgray-400 text-sm py-8 text-center">読み込み中...</div>;
 
   return (
     <div className="space-y-4">
+      {/* Confirm dialogs */}
+      {deleteRouteTarget && (
+        <ConfirmDialog
+          isOpen={true}
+          title={`ルート「${deleteRouteTarget.name}」を削除`}
+          message="このルートとすべてのステップが完全に削除されます。この操作は元に戻せません。"
+          confirmLabel="削除する"
+          onConfirm={() => deleteRoute.mutate(deleteRouteTarget.id)}
+          onCancel={() => setDeleteRouteTarget(null)}
+        />
+      )}
+      {deleteStepTarget && (
+        <ConfirmDialog
+          isOpen={true}
+          title="ステップを削除"
+          message={`「${deleteStepTarget.label}」を承認ルートから削除します。`}
+          confirmLabel="削除する"
+          onConfirm={() => deleteStep.mutate(deleteStepTarget.id)}
+          onCancel={() => setDeleteStepTarget(null)}
+        />
+      )}
+
       <div className="flex justify-end">
-        <button className="btn-primary" onClick={() => setShowNewRoute(true)}>＋ ルート追加</button>
+        <button className="btn-primary" onClick={() => setShowNewRoute(true)}>
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+          ルート追加
+        </button>
       </div>
 
+      {/* New route form */}
       {showNewRoute && (
-        <div className="card border-2 border-ringo-500 space-y-3">
-          <h4 className="font-bold text-warmgray-800">新規承認ルート</h4>
+        <div className="card border-2 border-ringo-300/50 space-y-4 animate-scale-in">
+          <div className="flex items-center gap-2">
+            <div className="w-1 h-5 rounded-full bg-gradient-to-b from-ringo-400 to-mustard-500" />
+            <h4 className="font-bold text-warmgray-800">新規承認ルート</h4>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">テンプレート</label>
@@ -339,74 +512,122 @@ function RoutesTab() {
             <div>
               <label className="label">ステージ</label>
               <select className="input" value={newRoute.stage} onChange={(e) => setNewRoute({ ...newRoute, stage: e.target.value })}>
-                <option value="RINGI">RINGI (稟議)</option>
-                <option value="SETTLEMENT">SETTLEMENT (精算)</option>
+                <option value="RINGI">RINGI（稟議）</option>
+                <option value="SETTLEMENT">SETTLEMENT（精算）</option>
               </select>
             </div>
             <div>
               <label className="label">ルート名</label>
-              <input className="input" placeholder="例: 出張伺い / DX / 稟議" value={newRoute.name} onChange={(e) => setNewRoute({ ...newRoute, name: e.target.value })} />
+              <input className="input" placeholder="例: 総務部 出張稟議" value={newRoute.name} onChange={(e) => setNewRoute({ ...newRoute, name: e.target.value })} />
             </div>
           </div>
           <div className="flex gap-2 justify-end">
-            <button className="btn-tertiary" onClick={() => setShowNewRoute(false)}>キャンセル</button>
+            <button className="btn-ghost" onClick={() => setShowNewRoute(false)}>キャンセル</button>
             <button
               className="btn-primary"
               onClick={() => createRoute.mutate(newRoute)}
               disabled={!newRoute.template_id || !newRoute.department_id || !newRoute.name || createRoute.isPending}
             >
-              作成
+              {createRoute.isPending ? '作成中...' : '作成する'}
             </button>
           </div>
         </div>
       )}
 
+      {/* Route cards */}
       {routes.map((route) => (
-        <div key={route.id} className="card space-y-3">
+        <div key={route.id} className="card space-y-4">
           <div className="flex items-start justify-between">
-            <div>
+            <div className="space-y-1.5">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className={`text-xs font-bold px-2 py-0.5 rounded ${route.stage === 'RINGI' ? 'bg-ringo-500 text-white' : 'bg-mustard-500 text-white'}`}>
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold ${route.stage === 'RINGI' ? 'bg-ringo-500 text-white' : 'bg-mustard-500 text-white'}`}>
                   {route.stage}
                 </span>
                 <h4 className="font-bold text-warmgray-800">{route.name}</h4>
-                {!route.is_active && <span className="text-xs text-warmgray-600 bg-cream-300 px-2 py-0.5 rounded">無効</span>}
+                {!route.is_active && (
+                  <span className="text-[10px] text-warmgray-500 bg-surface-100 border border-surface-200 px-2 py-0.5 rounded-full">無効</span>
+                )}
               </div>
-              <p className="text-xs text-warmgray-600 mt-0.5">{route.template_name} / {route.department_name}</p>
+              <p className="text-[11px] text-warmgray-400">{route.template_name} · {route.department_name}</p>
             </div>
             <button
-              className="text-xs text-ringo-500 hover:text-ringo-700"
-              onClick={() => { if (confirm('このルートを削除しますか？')) deleteRoute.mutate(route.id); }}
+              className="text-[11px] text-warmgray-400 hover:text-red-500 transition-colors font-medium"
+              onClick={() => setDeleteRouteTarget(route)}
             >
               削除
             </button>
           </div>
 
-          <div className="space-y-2">
-            {route.steps.map((step, i) => (
-              <div key={step.id} className="flex items-center gap-3 bg-cream-100 rounded px-3 py-2">
-                <span className="w-6 h-6 rounded-full bg-ringo-500 text-white text-xs flex items-center justify-center font-bold shrink-0">
-                  {step.step_order}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-warmgray-800 truncate">{step.label}</p>
-                  <p className="text-xs text-warmgray-600">{step.approver_name ?? '(未割当)'} · {step.action_type}</p>
-                </div>
-                {i > 0 && (
-                  <button className="text-xs text-ringo-500 hover:text-ringo-700 shrink-0" onClick={() => deleteStep.mutate(step.id)}>
-                    削除
-                  </button>
-                )}
+          {/* Visual chain with avatars */}
+          <div className="bg-surface-50/60 rounded-2xl p-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              {/* Applicant node */}
+              <div className="flex flex-col items-center gap-1.5">
+                <div className="w-10 h-10 rounded-full bg-surface-200 border-2 border-surface-300 flex items-center justify-center text-sm font-bold text-warmgray-600">申</div>
+                <span className="text-[10px] text-warmgray-400">申請者</span>
               </div>
-            ))}
+
+              {route.steps.length === 0 ? (
+                <p className="text-xs text-warmgray-400 italic ml-2">ステップが未設定です</p>
+              ) : (
+                route.steps.map((step) => (
+                  <div key={step.id} className="flex items-center gap-3">
+                    <ChainArrow />
+                    <div className="flex flex-col items-center gap-1 group/step relative">
+                      {/* Avatar or step number */}
+                      <div className="relative">
+                        {step.approver_avatar ? (
+                          <img
+                            src={step.approver_avatar}
+                            alt={step.approver_name ?? ''}
+                            className="w-10 h-10 rounded-full object-cover ring-2 ring-white shadow-sm"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-ringo-400 to-ringo-600 flex items-center justify-center text-white text-xs font-bold shadow-sm">
+                            {step.approver_name ? step.approver_name.slice(0, 1) : step.step_order}
+                          </div>
+                        )}
+                        {/* Delete button (hover) */}
+                        {step.step_order > 1 && (
+                          <button
+                            className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] items-center justify-center hidden group-hover/step:flex shadow-sm"
+                            onClick={() => setDeleteStepTarget({ id: step.id, label: step.label })}
+                            title="削除"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                      <div className="text-center max-w-[72px]">
+                        <p className="text-[10px] font-semibold text-warmgray-700 leading-tight truncate">
+                          {step.approver_name ?? '(未割当)'}
+                        </p>
+                        <p className="text-[9px] text-warmgray-400">{step.label}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+
+              {/* End node */}
+              <div className="flex items-center gap-3">
+                <ChainArrow />
+                <div className="flex flex-col items-center gap-1.5">
+                  <div className="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center text-white text-sm shadow-sm">✓</div>
+                  <span className="text-[10px] text-warmgray-400">完了</span>
+                </div>
+              </div>
+            </div>
           </div>
 
+          {/* Add step */}
           {addingStepToRoute === route.id ? (
-            <div className="bg-cream-100 rounded p-3 space-y-2">
-              <div className="grid grid-cols-3 gap-2">
+            <div className="bg-surface-50/60 rounded-2xl p-4 space-y-3 border-2 border-dashed border-ringo-200">
+              <p className="text-xs font-bold text-warmgray-700 uppercase tracking-wide">ステップ追加</p>
+              <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="label text-xs">承認者</label>
-                  <select className="input text-xs py-1" value={newStep.approver_id} onChange={(e) => setNewStep({ ...newStep, approver_id: e.target.value })}>
+                  <label className="label">承認者</label>
+                  <select className="input text-xs py-2" value={newStep.approver_id} onChange={(e) => setNewStep({ ...newStep, approver_id: e.target.value })}>
                     <option value="">選択...</option>
                     {users.filter((u) => u.is_active).map((u) => (
                       <option key={u.id} value={u.id}>{u.full_name} ({u.role})</option>
@@ -414,39 +635,46 @@ function RoutesTab() {
                   </select>
                 </div>
                 <div>
-                  <label className="label text-xs">ステップ名</label>
-                  <input className="input text-xs py-1" placeholder="例: 総務承認" value={newStep.label} onChange={(e) => setNewStep({ ...newStep, label: e.target.value })} />
+                  <label className="label">ステップ名</label>
+                  <input className="input text-xs py-2" placeholder="例: 総務承認" value={newStep.label} onChange={(e) => setNewStep({ ...newStep, label: e.target.value })} />
                 </div>
                 <div>
-                  <label className="label text-xs">アクション</label>
-                  <select className="input text-xs py-1" value={newStep.action_type} onChange={(e) => setNewStep({ ...newStep, action_type: e.target.value })}>
+                  <label className="label">アクション</label>
+                  <select className="input text-xs py-2" value={newStep.action_type} onChange={(e) => setNewStep({ ...newStep, action_type: e.target.value })}>
                     <option value="APPROVE">APPROVE</option>
                     <option value="CONFIRM">CONFIRM</option>
                   </select>
                 </div>
               </div>
               <div className="flex gap-2 justify-end">
-                <button className="btn-tertiary text-xs" onClick={() => setAddingStepToRoute(null)}>キャンセル</button>
+                <button className="btn-ghost text-xs" onClick={() => setAddingStepToRoute(null)}>キャンセル</button>
                 <button
                   className="btn-primary text-xs"
                   disabled={!newStep.approver_id || addStep.isPending}
                   onClick={() => addStep.mutate({ routeId: route.id, ...newStep })}
                 >
-                  追加
+                  {addStep.isPending ? '追加中...' : 'ステップ追加'}
                 </button>
               </div>
             </div>
           ) : (
-            <button className="text-xs text-ringo-600 hover:text-ringo-700 font-semibold" onClick={() => setAddingStepToRoute(route.id)}>
-              ＋ ステップ追加
+            <button
+              className="w-full py-2 text-xs font-semibold text-warmgray-400 hover:text-ringo-600 hover:bg-ringo-50/50 rounded-xl transition-all duration-150 border border-dashed border-warmgray-200 hover:border-ringo-200 flex items-center justify-center gap-1"
+              onClick={() => setAddingStepToRoute(route.id)}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              ステップを追加する
             </button>
           )}
         </div>
       ))}
 
       {routes.length === 0 && (
-        <div className="card text-center text-warmgray-600 py-8">
-          承認ルートがまだありません。「＋ ルート追加」から作成してください。
+        <div className="card flex flex-col items-center justify-center py-20 gap-4 text-warmgray-400">
+          <span className="text-5xl">🗂️</span>
+          <p className="text-sm">承認ルートがまだありません</p>
         </div>
       )}
     </div>
@@ -464,21 +692,30 @@ interface AppRecord {
   applicant_email: string;
   department_name: string;
   created_at: string;
-  form_data: Record<string, any>;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  PENDING_APPROVAL: 'bg-mustard-500 text-white',
-  APPROVED: 'bg-green-100 text-green-700',
-  REJECTED: 'bg-ringo-100 text-ringo-700',
-  RETURNED: 'bg-orange-100 text-orange-700',
-  DRAFT: 'bg-cream-300 text-warmgray-600',
-  CANCELLED: 'bg-warmgray-200 text-warmgray-500',
+const STATUS_BADGE: Record<string, string> = {
+  PENDING_APPROVAL: 'badge-pending',
+  APPROVED:         'badge-approved',
+  REJECTED:         'badge-rejected',
+  RETURNED:         'badge-returned',
+  DRAFT:            'badge-draft',
+  CANCELLED:        'badge-draft',
 };
 
-function ApplicationsTab() {
+const STATUS_LABEL: Record<string, string> = {
+  PENDING_APPROVAL: '承認待ち',
+  APPROVED:         '承認済み',
+  REJECTED:         '却下',
+  RETURNED:         '差し戻し',
+  DRAFT:            '下書き',
+  CANCELLED:        'キャンセル',
+};
+
+function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error' | 'info') => void }) {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<AppRecord | null>(null);
 
   const { data: apps = [], isLoading } = useQuery<AppRecord[]>({
     queryKey: ['admin', 'applications'],
@@ -487,8 +724,12 @@ function ApplicationsTab() {
 
   const deleteApp = useMutation({
     mutationFn: async (id: string) => (await apiClient.delete(`/admin/applications/${id}`)).data,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'applications'] }),
-    onError: (err: any) => alert(`削除失敗: ${err.message}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'applications'] });
+      setDeleteTarget(null);
+      showToast('申請を削除しました');
+    },
+    onError: (err: any) => showToast(`削除失敗: ${err.message}`, 'error'),
   });
 
   const filtered = filter
@@ -500,73 +741,80 @@ function ApplicationsTab() {
       )
     : apps;
 
-  if (isLoading) return <p className="text-warmgray-600">読み込み中...</p>;
-
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
+      {deleteTarget && (
+        <ConfirmDialog
+          isOpen={true}
+          title={`申請「${deleteTarget.template_name}」を削除`}
+          message={`${deleteTarget.applicant_name} の申請を完全削除します。この操作は元に戻せません。`}
+          confirmLabel="完全削除する"
+          onConfirm={() => deleteApp.mutate(deleteTarget.id)}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
       <div className="flex items-center gap-3">
         <input
-          className="input max-w-xs"
+          className="input max-w-sm"
           placeholder="氏名 / テンプレート / 申請番号で検索..."
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
-        <span className="text-sm text-warmgray-600">{filtered.length} 件</span>
+        <span className="text-sm text-warmgray-400">{filtered.length} 件</span>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-ringo-200 text-left text-warmgray-600">
-              <th className="pb-3 pr-3">申請番号</th>
-              <th className="pb-3 pr-3">テンプレート</th>
-              <th className="pb-3 pr-3">申請者</th>
-              <th className="pb-3 pr-3">部署</th>
-              <th className="pb-3 pr-3">ステータス</th>
-              <th className="pb-3 pr-3">申請日</th>
-              <th className="pb-3"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-ringo-200">
-            {filtered.map((a) => (
-              <tr key={a.id} className="hover:bg-cream-100">
-                <td className="py-2.5 pr-3 font-mono text-xs text-warmgray-600">
-                  {a.application_number ?? '—'}
-                </td>
-                <td className="py-2.5 pr-3 font-semibold text-warmgray-800">{a.template_name}</td>
-                <td className="py-2.5 pr-3">
-                  <div className="text-warmgray-800">{a.applicant_name}</div>
-                  <div className="text-xs text-warmgray-600">{a.applicant_email}</div>
-                </td>
-                <td className="py-2.5 pr-3 text-warmgray-600">{a.department_name ?? '—'}</td>
-                <td className="py-2.5 pr-3">
-                  <span className={`text-xs font-bold px-2 py-0.5 rounded ${STATUS_COLORS[a.status] ?? 'bg-cream-300 text-warmgray-600'}`}>
-                    {a.status}
-                  </span>
-                </td>
-                <td className="py-2.5 pr-3 text-xs text-warmgray-600">
-                  {new Date(a.created_at).toLocaleDateString('ja-JP')}
-                </td>
-                <td className="py-2.5">
-                  <button
-                    className="text-xs text-ringo-500 hover:text-ringo-700 font-semibold"
-                    onClick={() => {
-                      if (confirm(`申請「${a.template_name}」を完全削除しますか？この操作は元に戻せません。`)) {
-                        deleteApp.mutate(a.id);
-                      }
-                    }}
-                  >
-                    削除
-                  </button>
-                </td>
+      {isLoading ? (
+        <div className="text-warmgray-400 text-sm py-8 text-center">読み込み中...</div>
+      ) : (
+        <div className="card !p-0 overflow-hidden">
+          <table className="table-base">
+            <thead>
+              <tr>
+                <th>申請番号</th>
+                <th>テンプレート</th>
+                <th>申請者</th>
+                <th>部署</th>
+                <th>ステータス</th>
+                <th>申請日</th>
+                <th></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {filtered.length === 0 && (
-          <div className="text-center text-warmgray-600 py-8">申請データがありません</div>
-        )}
-      </div>
+            </thead>
+            <tbody>
+              {filtered.map((a) => (
+                <tr key={a.id}>
+                  <td><span className="font-mono text-[11px] text-warmgray-500">{a.application_number ?? '—'}</span></td>
+                  <td className="font-semibold text-warmgray-800">{a.template_name}</td>
+                  <td>
+                    <div>
+                      <p className="text-sm font-medium text-warmgray-800">{a.applicant_name}</p>
+                      <p className="text-[10px] text-warmgray-400">{a.applicant_email}</p>
+                    </div>
+                  </td>
+                  <td className="text-warmgray-500 text-xs">{a.department_name ?? '—'}</td>
+                  <td>
+                    <span className={STATUS_BADGE[a.status] ?? 'badge-draft'}>
+                      {STATUS_LABEL[a.status] ?? a.status}
+                    </span>
+                  </td>
+                  <td className="text-[11px] text-warmgray-400">{new Date(a.created_at).toLocaleDateString('ja-JP')}</td>
+                  <td>
+                    <button
+                      className="text-xs text-warmgray-400 hover:text-red-500 transition-colors font-medium"
+                      onClick={() => setDeleteTarget(a)}
+                    >
+                      削除
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filtered.length === 0 && (
+            <div className="py-12 text-center text-warmgray-400 text-sm">申請データがありません</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -574,55 +822,67 @@ function ApplicationsTab() {
 // ─── Role Permissions Tab ─────────────────────────────────────────────────────
 
 function PermissionsTab() {
-  const check = (v: boolean) => v
-    ? <span className="text-green-600 font-bold">✓</span>
-    : <span className="text-warmgray-400">—</span>;
+  const check = (v: boolean) =>
+    v ? (
+      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 text-xs font-bold">✓</span>
+    ) : (
+      <span className="text-surface-300 text-lg font-light">—</span>
+    );
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-warmgray-600">
-        ロールはユーザー管理タブで個別に変更できます。ロールを変更後、対象ユーザーは再ログインが必要です。
-      </p>
+      <div className="flex items-start gap-3 bg-mustard-400/10 border border-mustard-400/30 rounded-2xl px-5 py-4">
+        <span className="text-xl">💡</span>
+        <p className="text-sm text-warmgray-700">
+          ロールは<strong>ユーザー管理</strong>タブで個別に変更できます。変更後、対象ユーザーは再ログインが必要です。
+        </p>
+      </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm border-collapse">
+      <div className="card !p-0 overflow-hidden">
+        <table className="table-base">
           <thead>
-            <tr className="bg-ringo-700 text-cream-50">
-              <th className="text-left px-4 py-3 rounded-tl-lg">ロール</th>
-              <th className="text-left px-4 py-3">表示名</th>
-              <th className="px-4 py-3 text-center">申請</th>
-              <th className="px-4 py-3 text-center">承認</th>
-              <th className="px-4 py-3 text-center">経理</th>
-              <th className="px-4 py-3 text-center rounded-tr-lg">管理</th>
+            <tr>
+              <th>ロール</th>
+              <th>表示名 / 説明</th>
+              <th className="text-center">申請</th>
+              <th className="text-center">承認</th>
+              <th className="text-center">経理</th>
+              <th className="text-center">管理</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-ringo-200">
+          <tbody>
             {(Object.entries(ROLE_MAP) as [Role, typeof ROLE_MAP[Role]][]).map(([role, p]) => (
-              <tr key={role} className="hover:bg-cream-100">
-                <td className="px-4 py-3 font-mono text-xs font-bold text-ringo-700 bg-cream-50">{role}</td>
-                <td className="px-4 py-3">
-                  <div className="font-semibold text-warmgray-800">{p.label}</div>
-                  <div className="text-xs text-warmgray-600 mt-0.5">{p.description}</div>
+              <tr key={role}>
+                <td><RoleBadge role={role} /></td>
+                <td>
+                  <div className="font-semibold text-warmgray-800 text-sm">{p.label}</div>
+                  <div className="text-[11px] text-warmgray-400 mt-0.5">{p.description}</div>
                 </td>
-                <td className="px-4 py-3 text-center">{check(p.canSubmit)}</td>
-                <td className="px-4 py-3 text-center">{check(p.canApprove)}</td>
-                <td className="px-4 py-3 text-center">{check(p.canSettle)}</td>
-                <td className="px-4 py-3 text-center">{check(p.canAdmin)}</td>
+                <td className="text-center">{check(p.canSubmit)}</td>
+                <td className="text-center">{check(p.canApprove)}</td>
+                <td className="text-center">{check(p.canSettle)}</td>
+                <td className="text-center">{check(p.canAdmin)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      <div className="card bg-mustard-400/10 border-mustard-500">
-        <h4 className="font-bold text-warmgray-800 mb-2 text-sm">ロール割り当てルール</h4>
-        <ul className="text-xs text-warmgray-600 space-y-1 list-disc list-inside">
-          <li>Googleログインで初回サインインしたユーザーは <strong>EMPLOYEE</strong> に自動設定されます</li>
-          <li>管理者がユーザー管理タブでロールを変更します</li>
-          <li>ロール変更は次回ログイン時に反映されます（JWT再発行が必要）</li>
-          <li>承認ルートの各ステップには特定ユーザーを割り当てます（管理者が設定）</li>
-          <li><strong>ADMIN</strong> は全ステップを代理承認できます</li>
-        </ul>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {[
+          { icon: '🔑', title: 'Google ログイン', body: '初回サインインユーザーは EMPLOYEE に自動設定されます' },
+          { icon: '🔄', title: 'ロール変更', body: '次回ログイン時に反映（JWT 再発行が必要）' },
+          { icon: '📋', title: '承認ルート', body: '各ステップには特定ユーザーを割り当て（管理者が設定）' },
+          { icon: '🛡️', title: 'ADMIN 特権', body: '全ステップを代理承認できます' },
+        ].map((item) => (
+          <div key={item.title} className="card-sm flex items-start gap-3">
+            <span className="text-xl">{item.icon}</span>
+            <div>
+              <p className="text-sm font-semibold text-warmgray-800">{item.title}</p>
+              <p className="text-xs text-warmgray-500 mt-0.5">{item.body}</p>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -632,36 +892,46 @@ function PermissionsTab() {
 
 type Tab = 'routes' | 'users' | 'applications' | 'permissions';
 
+const TAB_CONFIG: { key: Tab; label: string; icon: string }[] = [
+  { key: 'routes',       label: '承認ルート', icon: '🔀' },
+  { key: 'users',        label: 'ユーザー管理', icon: '👥' },
+  { key: 'applications', label: '申請管理',   icon: '📋' },
+  { key: 'permissions',  label: 'ロール権限', icon: '🛡️' },
+];
+
 export default function Admin() {
   const [tab, setTab] = useState<Tab>('routes');
-
-  const tabs: { key: Tab; label: string }[] = [
-    { key: 'routes',       label: '承認ルート' },
-    { key: 'users',        label: 'ユーザー管理' },
-    { key: 'applications', label: '申請管理' },
-    { key: 'permissions',  label: 'ロール権限' },
-  ];
+  const { toast, show: showToast, dismiss } = useToast();
 
   return (
     <Layout title="管理画面">
-      <div className="max-w-5xl mx-auto">
-        <div className="flex gap-1 mb-6 border-b border-ringo-200">
-          {tabs.map((t) => (
+      {toast && <Toast {...toast} onDismiss={dismiss} />}
+
+      <div className="max-w-5xl mx-auto space-y-6">
+        {/* Pill tab bar */}
+        <div className="animate-fade-up inline-flex items-center gap-1 bg-white/50 backdrop-blur-sm border border-white/70 rounded-2xl p-1.5 shadow-sm">
+          {TAB_CONFIG.map((t) => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`px-5 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
-                tab === t.key ? 'border-ringo-500 text-ringo-600' : 'border-transparent text-warmgray-600 hover:text-warmgray-800'
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-150 ${
+                tab === t.key
+                  ? 'bg-warmgray-800 text-white shadow-sm'
+                  : 'text-warmgray-500 hover:text-warmgray-800 hover:bg-white/60'
               }`}
             >
+              <span className="text-base leading-none">{t.icon}</span>
               {t.label}
             </button>
           ))}
         </div>
-        {tab === 'routes'       && <RoutesTab />}
-        {tab === 'users'        && <UsersTab />}
-        {tab === 'applications' && <ApplicationsTab />}
-        {tab === 'permissions'  && <PermissionsTab />}
+
+        <div className="animate-fade-up">
+          {tab === 'routes'       && <RoutesTab showToast={showToast} />}
+          {tab === 'users'        && <UsersTab showToast={showToast} />}
+          {tab === 'applications' && <ApplicationsTab showToast={showToast} />}
+          {tab === 'permissions'  && <PermissionsTab />}
+        </div>
       </div>
     </Layout>
   );

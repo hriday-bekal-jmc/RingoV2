@@ -1,78 +1,225 @@
 import { Link } from 'react-router-dom';
-import Layout from '../components/common/Layout.js';
-import { useAuth } from '../context/AuthContext.js';
+import { useQuery } from '@tanstack/react-query';
+import Layout from '../components/common/Layout';
+import { useAuth } from '../context/AuthContext';
+import { getPermissions } from '../config/permissions';
+import apiClient from '../services/apiClient';
 
-const stats = [
-  { label: '私の承認待ち', value: 4, badge: '4' },
-  { label: '私の提出状況', value: '12件中アクティブ', badge: '12' },
-  { label: '今月の精算', value: 6, badge: '6' },
-  { label: '下書き', value: 2, badge: '2' },
+interface TemplateCard { code: string; label: string; desc: string; icon: string; gradient: string }
+
+const TEMPLATES: TemplateCard[] = [
+  { code: 'INQUIRY',            label: '伺書',               desc: '一般稟議・伺い書',          icon: '📋', gradient: 'from-ringo-400/20 to-ringo-600/10' },
+  { code: 'BUSINESS_TRIP',      label: '出張伺い',           desc: '出張前申請',                icon: '✈️', gradient: 'from-sky-400/20 to-blue-500/10' },
+  { code: 'OFFICE_OVERTIME',    label: '早出・延長申請',     desc: '早出・事務所閉鎖・延長',    icon: '🕐', gradient: 'from-amber-400/20 to-orange-500/10' },
+  { code: 'EQUIPMENT_PURCHASE', label: '備品・消耗品購入',   desc: '備品・消耗品の購入申請',    icon: '🛒', gradient: 'from-emerald-400/20 to-green-500/10' },
+  { code: 'PC_TAKEOUT',         label: 'PC持ち出し',         desc: '社外へのPC持ち出し申請',    icon: '💻', gradient: 'from-indigo-400/20 to-violet-500/10' },
+  { code: 'LEAVE',              label: '有休・代休・特別休暇',desc: '休暇の申請',               icon: '📅', gradient: 'from-violet-400/20 to-purple-500/10' },
+  { code: 'TARDINESS',          label: '遅刻・早退',         desc: '控除対象の勤怠申請',        icon: '⏰', gradient: 'from-orange-400/20 to-red-500/10' },
+  { code: 'INCIDENT_REPORT',    label: '始末書',             desc: '事故・インシデント報告',    icon: '⚠️', gradient: 'from-red-400/20 to-ringo-600/10' },
 ];
 
-const templates = [
-  { code: 'INQUIRY', label: '伺書', desc: '一般稟議書' },
-  { code: 'BUSINESS_TRIP', label: '出張伺い', desc: '出張前申請' },
-  { code: 'OFFICE_OVERTIME', label: '事務所閉鎖時・早出・作業延長', desc: '' },
-  { code: 'EQUIPMENT_PURCHASE', label: '備品／消耗品購入申請', desc: '備品・消耗品を購入する際に申請してください' },
-  { code: 'PC_TAKEOUT', label: 'PC持ち出し', desc: '社外へPCを持ち出す際に申請してください' },
-  { code: 'LEAVE', label: '有休・代休・特別休暇', desc: '' },
-  { code: 'TARDINESS', label: '遅刻・早退', desc: '※控除対象' },
-  { code: 'INCIDENT_REPORT', label: '始末書', desc: '' },
-];
+function statusBadge(status: string): JSX.Element {
+  const map: Record<string, { cls: string; label: string }> = {
+    PENDING_APPROVAL: { cls: 'badge-pending',  label: '承認待ち' },
+    APPROVED:         { cls: 'badge-approved', label: '承認済み' },
+    REJECTED:         { cls: 'badge-rejected', label: '却下' },
+    RETURNED:         { cls: 'badge-returned', label: '差し戻し' },
+    DRAFT:            { cls: 'badge-draft',    label: '下書き' },
+    COMPLETED:        { cls: 'badge-approved', label: '完了' },
+    CANCELLED:        { cls: 'badge-draft',    label: 'キャンセル' },
+  };
+  const s = map[status] ?? { cls: 'badge-draft', label: status };
+  return <span className={s.cls}>{s.label}</span>;
+}
+
+function MiniStepDots({ current, total }: { current: number | null; total: number }) {
+  if (!current || !total || total === 0) return null;
+  return (
+    <div className="flex items-center gap-1 mt-1">
+      {Array.from({ length: Number(total) }).map((_, i) => {
+        const n = i + 1;
+        if (n < current) return <span key={i} className="w-1.5 h-1.5 rounded-full bg-emerald-400" />;
+        if (n === current) return <span key={i} className="w-1.5 h-1.5 rounded-full bg-ringo-500 ring-1 ring-ringo-300" />;
+        return <span key={i} className="w-1.5 h-1.5 rounded-full bg-surface-300" />;
+      })}
+      <span className="text-[10px] text-warmgray-400 ml-0.5">{current}/{total}</span>
+    </div>
+  );
+}
+
+interface StatCardProps { label: string; value: number | string; icon: string; color: string }
+
+function StatCard({ label, value, icon, color }: StatCardProps) {
+  return (
+    <div className={`stat-card animate-fade-up relative overflow-hidden`}>
+      <div className={`absolute inset-0 bg-gradient-to-br ${color} opacity-40 rounded-2xl`} />
+      <div className="relative">
+        <div className="flex items-start justify-between mb-3">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-warmgray-500">{label}</span>
+          <span className="text-xl">{icon}</span>
+        </div>
+        <p className="text-3xl font-bold text-warmgray-800">{value}</p>
+      </div>
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const { user, loading } = useAuth();
-  const greeting = user?.full_name ? `Welcome back, ${user.full_name}!` : 'Welcome back!';
+  const perms = getPermissions(user?.role);
+
+  const { data: myApps = [] } = useQuery<any[]>({
+    queryKey: ['myApplications'],
+    queryFn: async () => (await apiClient.get('/applications')).data,
+    enabled: !loading,
+    refetchInterval: 60_000,
+  });
+
+  const { data: pendingApprovals = [] } = useQuery<any[]>({
+    queryKey: ['pendingApprovals'],
+    queryFn: async () => (await apiClient.get('/approvals/pending')).data,
+    enabled: !loading && perms.canApprove,
+    refetchInterval: 30_000,
+  });
+
+  const pendingCount = myApps.filter((a) => a.status === 'PENDING_APPROVAL').length;
+  const draftCount   = myApps.filter((a) => a.status === 'DRAFT').length;
+  // Count apps submitted in last 7 days
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const weekCount = myApps.filter((a) => a.submitted_at && new Date(a.submitted_at).getTime() > weekAgo).length;
+  const recentApps = [...myApps].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 5);
+  const firstName     = user?.full_name?.split(' ')[0] ?? 'ゲスト';
+
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'おはようございます' : hour < 18 ? 'こんにちは' : 'お疲れ様です';
 
   return (
     <Layout title="ダッシュボード">
       {loading ? (
-        <div className="text-warmgray-600">読み込み中...</div>
+        <div className="flex items-center justify-center h-32 text-warmgray-400 text-sm">読み込み中...</div>
       ) : (
-        <>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold text-warmgray-800">{greeting}</h2>
-            <button className="btn-secondary">＋ 新規申請を作成</button>
+        <div className="max-w-6xl mx-auto space-y-8">
+
+          {/* Greeting */}
+          <div className="animate-fade-up">
+            <p className="text-xs font-semibold uppercase tracking-widest text-warmgray-400 mb-1">{greeting}</p>
+            <h2 className="text-2xl font-bold text-warmgray-800">{firstName}さん 👋</h2>
+            <p className="text-sm text-warmgray-400 mt-1">
+              {new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
+            </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            {stats.map((s) => (
-              <div key={s.label} className="stat-card">
-                <div className="flex items-start justify-between mb-2">
-                  <span className="text-sm text-warmgray-600">{s.label}</span>
-                  <span className="px-2 py-0.5 text-xs font-bold rounded bg-ringo-500 text-white">
-                    {s.badge}
-                  </span>
-                </div>
-                <div className="text-2xl font-bold text-warmgray-800">{s.value}</div>
+          {/* Stats */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 stagger">
+            <StatCard label="承認待ち"   value={pendingCount}  icon="📤" color="from-amber-200/50 to-transparent" />
+            <StatCard label="今週の申請" value={weekCount}     icon="📅" color="from-sky-200/50 to-transparent" />
+            <StatCard label="下書き"     value={draftCount}    icon="📝" color="from-surface-200/80 to-transparent" />
+            {perms.canApprove
+              ? <StatCard label="要承認" value={pendingApprovals.length} icon="🔔" color="from-ringo-200/50 to-transparent" />
+              : <StatCard label="全申請数" value={myApps.length} icon="📁" color="from-indigo-200/30 to-transparent" />
+            }
+          </div>
+
+          {/* Two-column layout */}
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+
+            {/* Template grid */}
+            <div className="lg:col-span-3 space-y-3">
+              <h3 className="section-title">申請フォーム</h3>
+              <div className="grid grid-cols-2 gap-3 stagger">
+                {TEMPLATES.map((t) => (
+                  <Link
+                    key={t.code}
+                    to={`/applications/new/${t.code}`}
+                    className="card-hover group !p-4 flex items-start gap-3 animate-fade-up"
+                  >
+                    <div className={`flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br ${t.gradient} flex items-center justify-center text-xl border border-white/60`}>
+                      {t.icon}
+                    </div>
+                    <div className="min-w-0 pt-0.5">
+                      <p className="text-sm font-semibold text-warmgray-800 leading-tight group-hover:text-ringo-600 transition-colors">
+                        {t.label}
+                      </p>
+                      {t.desc && (
+                        <p className="text-[11px] text-warmgray-400 mt-0.5 leading-tight">{t.desc}</p>
+                      )}
+                    </div>
+                  </Link>
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
 
-          <h3 className="text-lg font-bold text-warmgray-800 mb-3">利用可能なフォームテンプレート</h3>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {templates.map((t) => (
-              <Link
-                key={t.code}
-                to={`/applications/new/${t.code}`}
-                className="card hover:shadow-card-hover cursor-pointer transition-shadow group block"
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <h4 className="font-bold text-warmgray-800 group-hover:text-ringo-600">
-                    {t.label}
-                  </h4>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-mustard-500 text-white font-semibold">
-                    新規
-                  </span>
+            {/* Sidebar column */}
+            <div className="lg:col-span-2 space-y-4">
+              {/* Recent applications */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="section-title mb-0">最近の申請</h3>
+                  {draftCount > 0 && (
+                    <Link to="/history" className="text-[11px] font-semibold text-ringo-500 hover:text-ringo-600 transition-colors">
+                      下書き {draftCount}件 →
+                    </Link>
+                  )}
                 </div>
-                {t.desc && <p className="text-xs text-warmgray-600 mb-3">{t.desc}</p>}
-                <span className="text-sm font-semibold text-ringo-600 group-hover:text-ringo-700 flex items-center gap-1">
-                  新規作成 <span>›</span>
-                </span>
-              </Link>
-            ))}
+                <div className="card !p-0 overflow-hidden">
+                  {recentApps.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 text-warmgray-400">
+                      <span className="text-3xl mb-2">📭</span>
+                      <p className="text-sm">申請がまだありません</p>
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-white/30">
+                      {recentApps.map((app) => (
+                        <li key={app.id} className="flex items-center gap-3 px-4 py-3 hover:bg-white/30 transition-colors">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-warmgray-800 truncate">{app.template_name}</p>
+                            <p className="text-[11px] text-warmgray-400 mt-0.5">
+                              {new Date(app.created_at).toLocaleDateString('ja-JP')}
+                            </p>
+                            {app.status === 'PENDING_APPROVAL' && (
+                              <MiniStepDots
+                                current={app.current_step ? Number(app.current_step) : null}
+                                total={Number(app.total_steps ?? 0)}
+                              />
+                            )}
+                          </div>
+                          {statusBadge(app.status)}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="px-4 py-3 border-t border-white/30">
+                    <Link to="/history" className="text-xs font-semibold text-ringo-500 hover:text-ringo-600 transition-colors">
+                      全申請履歴を見る →
+                    </Link>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pending approvals mini-list */}
+              {perms.canApprove && pendingApprovals.length > 0 && (
+                <div>
+                  <h3 className="section-title">要承認</h3>
+                  <div className="card !p-0 overflow-hidden">
+                    <ul className="divide-y divide-white/30">
+                      {pendingApprovals.slice(0, 3).map((app) => (
+                        <li key={app.id} className="px-4 py-3 hover:bg-white/30 transition-colors">
+                          <p className="text-sm font-semibold text-warmgray-800 truncate">{app.template_name}</p>
+                          <p className="text-[11px] text-warmgray-400 mt-0.5">{app.applicant_name}</p>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="px-4 py-3 border-t border-white/30">
+                      <Link to="/approvals" className="text-xs font-semibold text-ringo-500 hover:text-ringo-600 transition-colors">
+                        承認画面へ →
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-        </>
+        </div>
       )}
     </Layout>
   );

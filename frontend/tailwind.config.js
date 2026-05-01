@@ -4,18 +4,17 @@ export default {
   theme: {
     extend: {
       colors: {
-        // RINGO warm palette — terracotta/coral/cream
         ringo: {
-          50:  '#FBF6EE',  // lightest cream
-          100: '#F5EFE6',  // main bg cream
-          200: '#EDE2CE',  // card border
-          300: '#E0CCAA',  // muted tan
-          400: '#C9A07A',  // soft tan
-          500: '#C75B47',  // primary coral red (main CTA)
-          600: '#B04634',  // hover coral
-          700: '#A0432B',  // sidebar bg deep terracotta
-          800: '#7E3322',  // dark terracotta
-          900: '#5C2418',  // deepest brick
+          50:  '#FBF6EE',
+          100: '#F5EFE6',
+          200: '#EDE2CE',
+          300: '#E0CCAA',
+          400: '#C9A07A',
+          500: '#C75B47',
+          600: '#B04634',
+          700: '#A0432B',
+          800: '#7E3322',
+          900: '#5C2418',
         },
         cream: {
           50:  '#FFFAF2',
@@ -28,21 +27,39 @@ export default {
           500: '#C9A227',
           600: '#B8941F',
         },
-        teal: {
-          accent: '#5A8A87',
-        },
         warmgray: {
+          400: '#9E8E84',
+          500: '#7E6E64',
           600: '#6B5E54',
+          700: '#4E4540',
           800: '#3D3530',
           900: '#2A2520',
+        },
+        // Neutral for modern surfaces
+        surface: {
+          0:   '#FFFFFF',
+          50:  '#FAFAFA',
+          100: '#F4F4F5',
+          200: '#E4E4E7',
+          300: '#D4D4D8',
         },
       },
       fontFamily: {
         sans: ['Inter', 'Hiragino Sans', 'Yu Gothic', 'Meiryo', 'sans-serif'],
       },
       boxShadow: {
-        card: '0 1px 3px rgba(60, 40, 20, 0.08), 0 1px 2px rgba(60, 40, 20, 0.04)',
-        'card-hover': '0 4px 12px rgba(60, 40, 20, 0.10)',
+        xs:          '0 1px 2px rgba(0,0,0,0.05)',
+        sm:          '0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)',
+        card:        '0 1px 4px rgba(60,40,20,0.07), 0 0 0 1px rgba(60,40,20,0.05)',
+        'card-hover':'0 4px 16px rgba(60,40,20,0.11), 0 0 0 1px rgba(60,40,20,0.07)',
+        focus:       '0 0 0 3px rgba(199,91,71,0.18)',
+      },
+      borderRadius: {
+        xl:  '0.75rem',
+        '2xl': '1rem',
+      },
+      transitionTimingFunction: {
+        smooth: 'cubic-bezier(0.4,0,0.2,1)',
       },
     },
   },

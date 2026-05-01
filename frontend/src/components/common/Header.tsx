@@ -1,32 +1,63 @@
 import { useAuth } from '../../context/AuthContext';
 
-interface HeaderProps {
-  title: string;
+interface HeaderProps { title: string }
+
+function nameToColor(name: string): string {
+  const colors = ['from-ringo-400 to-ringo-600', 'from-mustard-400 to-mustard-600', 'from-teal-500 to-teal-700', 'from-warmgray-500 to-warmgray-700'];
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffff;
+  return colors[h % colors.length];
 }
 
 export default function Header({ title }: HeaderProps) {
   const { user, logout } = useAuth();
   const displayName = user?.full_name || 'ゲスト';
   const dept = user?.department_name || '';
-  const role = user?.role || '';
+  const gradient = nameToColor(displayName);
 
   return (
-    <header className="bg-cream-50 border-b border-ringo-200 px-8 py-4 flex items-center justify-between">
-      <h1 className="text-xl font-bold text-warmgray-800">{title}</h1>
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-ringo-300 flex items-center justify-center text-ringo-800 font-semibold text-sm">
-            {displayName.slice(0, 1)}
-          </div>
-          <div className="text-right leading-tight">
-            <div className="text-sm font-semibold text-warmgray-800">{displayName}</div>
-            <div className="text-xs text-warmgray-600">{dept}{role && ` (${role})`}</div>
-          </div>
+    <header className="glass border-b border-white/40 px-8 py-0 flex items-center justify-between h-14 shrink-0 sticky top-0 z-30">
+      {/* Title */}
+      <div className="flex items-center gap-3">
+        <div className="accent-bar" />
+        <h1 className="text-sm font-bold text-warmgray-800">{title}</h1>
+      </div>
+
+      {/* Right */}
+      <div className="flex items-center gap-3">
+        {dept && (
+          <span className="hidden sm:inline-flex items-center px-2.5 py-1 rounded-full
+                           bg-white/50 backdrop-blur-sm text-[11px] font-medium text-warmgray-500
+                           border border-white/60">
+            {dept}
+          </span>
+        )}
+
+        <div className="flex items-center gap-2.5">
+          {user?.avatar_url ? (
+            <img
+              src={user.avatar_url}
+              alt={displayName}
+              className="w-8 h-8 rounded-full object-cover ring-2 ring-white/60 shrink-0"
+            />
+          ) : (
+            <div className={`w-8 h-8 rounded-full bg-gradient-to-br ${gradient} flex items-center justify-center text-white text-xs font-bold shadow-sm shrink-0`}>
+              {displayName.slice(0, 1)}
+            </div>
+          )}
+          <span className="hidden md:block text-sm font-medium text-warmgray-700">{displayName}</span>
         </div>
+
+        <div className="h-4 w-px bg-warmgray-200" />
+
         <button
           onClick={logout}
-          className="text-xs text-warmgray-600 hover:text-ringo-600 border border-ringo-200 rounded px-3 py-1.5 transition-colors"
+          className="flex items-center gap-1.5 text-xs text-warmgray-400 hover:text-ringo-600
+                     transition-colors duration-150 font-medium"
         >
+          <svg viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+            <path fillRule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clipRule="evenodd" />
+          </svg>
           ログアウト
         </button>
       </div>
