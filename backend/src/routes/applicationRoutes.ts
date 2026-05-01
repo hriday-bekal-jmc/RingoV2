@@ -176,6 +176,109 @@ router.post('/:id/submit', async (req: Request, res: Response): Promise<void> =>
   }
 });
 
+// POST /applications/:id/start-settlement — APPROVED app → PENDING_SETTLEMENT
+router.post('/:id/start-settlement', async (req: Request, res: Response): Promise<void> => {
+  const { settlement_data, route_id: chosen_route_id } = req.body as {
+    settlement_data: Record<string, unknown>;
+    route_id?: string;
+  };
+  const applicant_id = req.user!.id;
+  const department_id = req.user!.department_id;
+
+  if (!department_id) { res.status(422).json({ error: '部署が設定されていません' }); return; }
+
+  try {
+    const result = await withTransaction(async (client: pg.PoolClient) => {
+      // Load and lock — must be APPROVED and owned by applicant
+      const appRes = await client.query(
+        `SELECT a.id, a.template_id
+         FROM applications a
+         WHERE a.id = $1 AND a.applicant_id = $2 AND a.status = 'APPROVED'
+         FOR UPDATE`,
+        [req.params.id, applicant_id],
+      );
+      if (appRes.rows.length === 0) {
+        throw Object.assign(new Error('対象の申請が見つかりません（申請者本人かつ承認済みのみ精算可能）'), { status: 404 });
+      }
+      const { template_id } = appRes.rows[0] as { template_id: string };
+
+      // Confirm template has settlement_schema
+      const tmplRes = await client.query(
+        `SELECT id FROM form_templates WHERE id = $1 AND settlement_schema IS NOT NULL`,
+        [template_id],
+      );
+      if (tmplRes.rows.length === 0) {
+        throw Object.assign(new Error('このテンプレートは精算に対応していません'), { status: 422 });
+      }
+
+      // Resolve SETTLEMENT route
+      let route_id: string = chosen_route_id || '';
+      if (!route_id) {
+        const routeRes = await client.query(
+          `SELECT id FROM approval_routes
+           WHERE template_id = $1 AND department_id = $2 AND stage = 'SETTLEMENT'
+             AND is_active = TRUE AND is_default = TRUE
+           LIMIT 1`,
+          [template_id, department_id],
+        );
+        if (routeRes.rows.length === 0) {
+          throw Object.assign(
+            new Error('精算承認ルートが設定されていません。管理者にお問い合わせください。'),
+            { status: 422 },
+          );
+        }
+        route_id = routeRes.rows[0].id as string;
+      }
+
+      // Load settlement steps
+      const stepsRes = await client.query(
+        `SELECT step_order, approver_id, label, action_type
+         FROM approval_route_steps WHERE route_id = $1 ORDER BY step_order ASC`,
+        [route_id],
+      );
+      if (stepsRes.rows.length === 0) {
+        throw Object.assign(new Error('精算ルートにステップがありません'), { status: 422 });
+      }
+
+      // Update application
+      await client.query(
+        `UPDATE applications
+         SET settlement_data = $2::jsonb, status = 'PENDING_SETTLEMENT',
+             settlement_submitted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [req.params.id, JSON.stringify(settlement_data)],
+      );
+
+      // Create SETTLEMENT approval steps
+      for (let i = 0; i < stepsRes.rows.length; i++) {
+        const s = stepsRes.rows[i] as { step_order: number; approver_id: string | null; label: string; action_type: string };
+        await client.query(
+          `INSERT INTO approval_steps (application_id, step_order, stage, approver_id, label, action_type, status)
+           VALUES ($1, $2, 'SETTLEMENT', $3, $4, $5, $6)`,
+          [req.params.id, s.step_order, s.approver_id, s.label, s.action_type, i === 0 ? 'PENDING' : 'WAITING'],
+        );
+      }
+
+      await client.query(
+        `INSERT INTO audit_logs (action, entity_type, entity_id)
+         VALUES ('SETTLEMENT_START', 'application', $1)`,
+        [req.params.id],
+      );
+
+      return { id: req.params.id, status: 'PENDING_SETTLEMENT', total_settlement_steps: stepsRes.rows.length };
+    });
+
+    const { emitAll } = await import('./sseRoutes');
+    emitAll('APPLICATION_SUBMITTED', { type: 'settlement_start', applicationId: req.params.id });
+    res.json({ message: '精算申請を提出しました', application: result });
+  } catch (err: unknown) {
+    const e = err as { status?: number; message?: string };
+    if (e.status) { res.status(e.status).json({ error: e.message }); return; }
+    console.error('[applications] start-settlement failed:', err);
+    res.status(500).json({ error: '精算申請の提出に失敗しました' });
+  }
+});
+
 // POST /applications — submit new ringi
 router.post('/', async (req: Request, res: Response): Promise<void> => {
   const { template_id, stage, form_data, route_id: chosen_route_id } = req.body as {
@@ -276,11 +379,18 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
     const result = await query(
       `SELECT
          a.id, a.application_number, a.status, a.created_at, a.submitted_at,
+         a.settlement_submitted_at,
          t.title_ja AS template_name, t.code AS template_code,
-         -- step progress for PENDING_APPROVAL
-         (SELECT s.step_order FROM approval_steps s
-          WHERE s.application_id = a.id AND s.stage = 'RINGI' AND s.status = 'PENDING'
-          LIMIT 1) AS current_step,
+         t.settlement_schema IS NOT NULL AS has_settlement,
+         -- current step (either RINGI or SETTLEMENT pending)
+         COALESCE(
+           (SELECT s.step_order FROM approval_steps s
+            WHERE s.application_id = a.id AND s.stage = 'SETTLEMENT' AND s.status = 'PENDING'
+            LIMIT 1),
+           (SELECT s.step_order FROM approval_steps s
+            WHERE s.application_id = a.id AND s.stage = 'RINGI' AND s.status = 'PENDING'
+            LIMIT 1)
+         ) AS current_step,
          (SELECT COUNT(*) FROM approval_steps s
           WHERE s.application_id = a.id AND s.stage = 'RINGI') AS total_steps
        FROM applications a
@@ -301,9 +411,11 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
   try {
     const appRes = await query(
       `SELECT a.id, a.application_number, a.status, a.form_data, a.version,
+              a.settlement_data, a.settlement_submitted_at,
               a.template_id, a.created_at, a.submitted_at, a.completed_at,
               t.title_ja AS template_name, t.code AS template_code,
               t.schema_definition, t.settlement_schema,
+              t.settlement_schema IS NOT NULL AS has_settlement,
               u.full_name AS applicant_name
        FROM applications a
        JOIN form_templates t ON a.template_id = t.id

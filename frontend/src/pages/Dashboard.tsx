@@ -4,6 +4,7 @@ import Layout from '../components/common/Layout';
 import { useAuth } from '../context/AuthContext';
 import { getPermissions } from '../config/permissions';
 import apiClient from '../services/apiClient';
+import { useSSE } from '../hooks/useSSE';
 
 interface TemplateCard { code: string; label: string; desc: string; icon: string; gradient: string }
 
@@ -13,9 +14,10 @@ const TEMPLATES: TemplateCard[] = [
   { code: 'OFFICE_OVERTIME',    label: '早出・延長申請',     desc: '早出・事務所閉鎖・延長',    icon: '🕐', gradient: 'from-amber-400/20 to-orange-500/10' },
   { code: 'EQUIPMENT_PURCHASE', label: '備品・消耗品購入',   desc: '備品・消耗品の購入申請',    icon: '🛒', gradient: 'from-emerald-400/20 to-green-500/10' },
   { code: 'PC_TAKEOUT',         label: 'PC持ち出し',         desc: '社外へのPC持ち出し申請',    icon: '💻', gradient: 'from-indigo-400/20 to-violet-500/10' },
-  { code: 'LEAVE',              label: '有休・代休・特別休暇',desc: '休暇の申請',               icon: '📅', gradient: 'from-violet-400/20 to-purple-500/10' },
+  { code: 'LEAVE',              label: '有休・代休・特別休暇', desc: '休暇の申請',              icon: '📅', gradient: 'from-violet-400/20 to-purple-500/10' },
   { code: 'TARDINESS',          label: '遅刻・早退',         desc: '控除対象の勤怠申請',        icon: '⏰', gradient: 'from-orange-400/20 to-red-500/10' },
   { code: 'INCIDENT_REPORT',    label: '始末書',             desc: '事故・インシデント報告',    icon: '⚠️', gradient: 'from-red-400/20 to-ringo-600/10' },
+  { code: 'EXPENSE_CLAIM',      label: '立替精算申請',       desc: '経費立替・精算申請',        icon: '💴', gradient: 'from-teal-400/20 to-emerald-500/10' },
 ];
 
 function statusBadge(status: string): JSX.Element {
@@ -42,16 +44,17 @@ function MiniStepDots({ current, total }: { current: number | null; total: numbe
         if (n === current) return <span key={i} className="w-1.5 h-1.5 rounded-full bg-ringo-500 ring-1 ring-ringo-300" />;
         return <span key={i} className="w-1.5 h-1.5 rounded-full bg-surface-300" />;
       })}
-      <span className="text-[10px] text-warmgray-400 ml-0.5">{current}/{total}</span>
+      <span className="text-[10px] text-warmgray-400 ml-0.5">{current}/{total} ステップ</span>
     </div>
   );
 }
 
-interface StatCardProps { label: string; value: number | string; icon: string; color: string }
-
-function StatCard({ label, value, icon, color }: StatCardProps) {
-  return (
-    <div className={`stat-card animate-fade-up relative overflow-hidden`}>
+// ── Stat card (clickable) ────────────────────────────────────────────────────
+function StatCard({ label, value, icon, color, to }: {
+  label: string; value: number | string; icon: string; color: string; to?: string;
+}) {
+  const inner = (
+    <div className={`stat-card animate-fade-up relative overflow-hidden ${to ? 'cursor-pointer' : ''}`}>
       <div className={`absolute inset-0 bg-gradient-to-br ${color} opacity-40 rounded-2xl`} />
       <div className="relative">
         <div className="flex items-start justify-between mb-3">
@@ -62,63 +65,38 @@ function StatCard({ label, value, icon, color }: StatCardProps) {
       </div>
     </div>
   );
-}
-
-function ProgressStatCard({ apps }: { apps: any[] }) {
-  const pending = apps.filter((a) => a.status === 'PENDING_APPROVAL' && a.current_step && a.total_steps);
-  return (
-    <div className="stat-card animate-fade-up relative overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-indigo-200/50 to-transparent opacity-40 rounded-2xl" />
-      <div className="relative h-full flex flex-col">
-        <div className="flex items-start justify-between mb-3">
-          <span className="text-[11px] font-bold uppercase tracking-widest text-warmgray-500">申請の進捗</span>
-          <span className="text-xl">🔄</span>
-        </div>
-        {pending.length === 0 ? (
-          <p className="text-3xl font-bold text-warmgray-800">—</p>
-        ) : (
-          <div className="space-y-2.5 mt-0.5">
-            {pending.slice(0, 3).map((app) => (
-              <div key={app.id} className="min-w-0">
-                <p className="text-[11px] text-warmgray-500 truncate leading-tight mb-1">{app.template_name}</p>
-                <MiniStepDots current={Number(app.current_step)} total={Number(app.total_steps)} />
-              </div>
-            ))}
-            {pending.length > 3 && (
-              <p className="text-[10px] text-warmgray-400">+{pending.length - 3} 件</p>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  if (to) return <Link to={to} className="block">{inner}</Link>;
+  return inner;
 }
 
 export default function Dashboard() {
   const { user, loading } = useAuth();
   const perms = getPermissions(user?.role);
 
+  // Real-time updates via SSE
+  useSSE();
+
   const { data: myApps = [] } = useQuery<any[]>({
     queryKey: ['myApplications'],
     queryFn: async () => (await apiClient.get('/applications')).data,
     enabled: !loading,
-    refetchInterval: 60_000,
+    staleTime: 30_000,
   });
 
   const { data: pendingApprovals = [] } = useQuery<any[]>({
     queryKey: ['pendingApprovals'],
     queryFn: async () => (await apiClient.get('/approvals/pending')).data,
     enabled: !loading && perms.canApprove,
-    refetchInterval: 30_000,
+    staleTime: 30_000,
   });
 
-  const pendingCount = myApps.filter((a) => a.status === 'PENDING_APPROVAL').length;
-  const draftCount   = myApps.filter((a) => a.status === 'DRAFT').length;
-  // Count apps submitted in last 7 days
-  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const weekCount = myApps.filter((a) => a.submitted_at && new Date(a.submitted_at).getTime() > weekAgo).length;
-  const recentApps = [...myApps].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 5);
-  const firstName     = user?.full_name?.split(' ')[0] ?? 'ゲスト';
+  const pendingCount  = myApps.filter((a) => a.status === 'PENDING_APPROVAL').length;
+  const draftCount    = myApps.filter((a) => a.status === 'DRAFT').length;
+  const returnedCount = myApps.filter((a) => a.status === 'RETURNED').length;
+  const recentApps    = [...myApps]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 5);
+  const firstName = user?.full_name?.split(' ')[0] ?? 'ゲスト';
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'おはようございます' : hour < 18 ? 'こんにちは' : 'お疲れ様です';
@@ -139,14 +117,26 @@ export default function Dashboard() {
             </p>
           </div>
 
-          {/* Stats */}
+          {/* Stats — all clickable */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 stagger">
-            <StatCard label="承認待ち"   value={pendingCount}  icon="📤" color="from-amber-200/50 to-transparent" />
-            <StatCard label="今週の申請" value={weekCount}     icon="📅" color="from-sky-200/50 to-transparent" />
-            <StatCard label="下書き"     value={draftCount}    icon="📝" color="from-surface-200/80 to-transparent" />
+            <StatCard
+              label="承認待ち" value={pendingCount} icon="📤"
+              color="from-amber-200/50 to-transparent"
+              to="/history?filter=PENDING_APPROVAL"
+            />
+            <StatCard
+              label="差し戻し" value={returnedCount} icon="↩"
+              color="from-orange-200/50 to-transparent"
+              to="/history?filter=RETURNED"
+            />
+            <StatCard
+              label="下書き" value={draftCount} icon="📝"
+              color="from-surface-200/80 to-transparent"
+              to="/history?filter=DRAFT"
+            />
             {perms.canApprove
-              ? <StatCard label="要承認" value={pendingApprovals.length} icon="🔔" color="from-ringo-200/50 to-transparent" />
-              : <StatCard label="全申請数" value={myApps.length} icon="📁" color="from-indigo-200/30 to-transparent" />
+              ? <StatCard label="要承認" value={pendingApprovals.length} icon="🔔" color="from-ringo-200/50 to-transparent" to="/approvals" />
+              : <StatCard label="全申請数" value={myApps.length} icon="📁" color="from-indigo-200/30 to-transparent" to="/history" />
             }
           </div>
 
@@ -181,12 +171,13 @@ export default function Dashboard() {
 
             {/* Sidebar column */}
             <div className="lg:col-span-2 space-y-4">
-              {/* Recent applications */}
+
+              {/* Recent applications — each item links directly to application */}
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="section-title mb-0">最近の申請</h3>
                   {draftCount > 0 && (
-                    <Link to="/history" className="text-[11px] font-semibold text-ringo-500 hover:text-ringo-600 transition-colors">
+                    <Link to="/history?filter=DRAFT" className="text-[11px] font-semibold text-ringo-500 hover:text-ringo-600 transition-colors">
                       下書き {draftCount}件 →
                     </Link>
                   )}
@@ -199,21 +190,26 @@ export default function Dashboard() {
                     </div>
                   ) : (
                     <ul className="divide-y divide-white/30">
-                      {recentApps.map((app) => (
-                        <li key={app.id} className="flex items-center gap-3 px-4 py-3 hover:bg-white/30 transition-colors">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-warmgray-800 truncate">{app.template_name}</p>
-                            <p className="text-[11px] text-warmgray-400 mt-0.5">
-                              {new Date(app.created_at).toLocaleDateString('ja-JP')}
-                            </p>
-                            {app.status === 'PENDING_APPROVAL' && (
-                              <MiniStepDots
-                                current={app.current_step ? Number(app.current_step) : null}
-                                total={Number(app.total_steps ?? 0)}
-                              />
-                            )}
-                          </div>
-                          {statusBadge(app.status)}
+                      {recentApps.map((app, i) => (
+                        <li key={app.id} className="animate-fade-up" style={{ animationDelay: `${i * 55}ms` }}>
+                          <Link
+                            to={`/history`}
+                            className="flex items-center gap-3 px-4 py-3 hover:bg-white/30 transition-colors"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-warmgray-800 truncate">{app.template_name}</p>
+                              <p className="text-[11px] text-warmgray-400 mt-0.5">
+                                {new Date(app.created_at).toLocaleDateString('ja-JP')}
+                              </p>
+                              {app.status === 'PENDING_APPROVAL' && (
+                                <MiniStepDots
+                                  current={app.current_step ? Number(app.current_step) : null}
+                                  total={Number(app.total_steps ?? 0)}
+                                />
+                              )}
+                            </div>
+                            {statusBadge(app.status)}
+                          </Link>
                         </li>
                       ))}
                     </ul>
@@ -232,10 +228,19 @@ export default function Dashboard() {
                   <h3 className="section-title">要承認</h3>
                   <div className="card !p-0 overflow-hidden">
                     <ul className="divide-y divide-white/30">
-                      {pendingApprovals.slice(0, 3).map((app) => (
-                        <li key={app.id} className="px-4 py-3 hover:bg-white/30 transition-colors">
-                          <p className="text-sm font-semibold text-warmgray-800 truncate">{app.template_name}</p>
-                          <p className="text-[11px] text-warmgray-400 mt-0.5">{app.applicant_name}</p>
+                      {pendingApprovals.slice(0, 3).map((app, i) => (
+                        <li
+                          key={app.id}
+                          className="animate-fade-up"
+                          style={{ animationDelay: `${i * 55}ms` }}
+                        >
+                          <Link
+                            to="/approvals"
+                            className="block px-4 py-3 hover:bg-white/30 transition-colors"
+                          >
+                            <p className="text-sm font-semibold text-warmgray-800 truncate">{app.template_name}</p>
+                            <p className="text-[11px] text-warmgray-400 mt-0.5">{app.applicant_name}</p>
+                          </Link>
                         </li>
                       ))}
                     </ul>

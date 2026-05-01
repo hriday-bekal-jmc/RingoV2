@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
+import ConfirmDialog from '../components/common/ConfirmDialog';
 
 interface Application {
   id: string;
@@ -10,6 +11,7 @@ interface Application {
   status: string;
   template_name: string;
   template_code?: string;
+  has_settlement?: boolean;
   created_at: string;
   form_data: Record<string, any>;
 }
@@ -26,7 +28,7 @@ const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
   CANCELLED:          { label: 'キャンセル', cls: 'badge-draft' },
 };
 
-const ALL_STATUSES = ['全て', 'DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'RETURNED', 'COMPLETED'];
+const ALL_STATUSES = ['全て', 'DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PENDING_SETTLEMENT', 'REJECTED', 'RETURNED', 'COMPLETED'];
 
 function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
   return (
@@ -41,8 +43,11 @@ function Toast({ message, type }: { message: string; type: 'success' | 'error' }
 export default function History() {
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState('全て');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Application | null>(null);
+  const [confirmSubmit, setConfirmSubmit] = useState<Application | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -52,6 +57,7 @@ export default function History() {
   useEffect(() => {
     if (searchParams.get('submitted') === '1') showToast('申請が完了しました 🎉');
     if (searchParams.get('drafted') === '1') showToast('下書きを保存しました 📝');
+    if (searchParams.get('settled') === '1') showToast('精算申請を提出しました 💴 承認フローが開始されました');
   }, [searchParams]);
 
   const { data: applications = [], isLoading } = useQuery<Application[]>({
@@ -90,6 +96,26 @@ export default function History() {
   return (
     <Layout title="申請履歴">
       {toast && <Toast message={toast.message} type={toast.type} />}
+
+      {/* Confirm dialogs */}
+      <ConfirmDialog
+        isOpen={!!confirmDelete}
+        title="下書きを削除"
+        message={`「${confirmDelete?.template_name}」の下書きを削除します。この操作は元に戻せません。`}
+        confirmLabel="削除する"
+        confirmClass="btn-danger"
+        onConfirm={() => { if (confirmDelete) { deleteDraft.mutate(confirmDelete.id); setConfirmDelete(null); } }}
+        onCancel={() => setConfirmDelete(null)}
+      />
+      <ConfirmDialog
+        isOpen={!!confirmSubmit}
+        title="申請を提出"
+        message={`「${confirmSubmit?.template_name}」を申請します。提出後は承認フローが開始されます。`}
+        confirmLabel="申請する"
+        confirmClass="btn-primary"
+        onConfirm={() => { if (confirmSubmit) { submitDraft.mutate(confirmSubmit.id); setConfirmSubmit(null); } }}
+        onCancel={() => setConfirmSubmit(null)}
+      />
 
       <div className="max-w-5xl mx-auto space-y-6">
 
@@ -159,6 +185,8 @@ export default function History() {
                 const isDraft = app.status === 'DRAFT';
                 const isReturned = app.status === 'RETURNED';
 
+                const isSettleable = app.status === 'APPROVED' && app.has_settlement;
+
                 return (
                   <li
                     key={app.id}
@@ -169,6 +197,7 @@ export default function History() {
                     <div className={`w-2 h-2 rounded-full shrink-0 ${
                       isDraft ? 'bg-warmgray-400' :
                       app.status === 'PENDING_APPROVAL' ? 'bg-amber-400' :
+                      app.status === 'PENDING_SETTLEMENT' ? 'bg-teal-400' :
                       app.status === 'APPROVED' || app.status === 'COMPLETED' ? 'bg-emerald-400' :
                       app.status === 'REJECTED' ? 'bg-red-400' :
                       app.status === 'RETURNED' ? 'bg-orange-400' :
@@ -201,11 +230,7 @@ export default function History() {
                           <button
                             className="btn-primary text-xs px-3 py-1.5 rounded-lg"
                             disabled={submitDraft.isPending}
-                            onClick={() => {
-                              if (confirm('この下書きを申請しますか？')) {
-                                submitDraft.mutate(app.id);
-                              }
-                            }}
+                            onClick={() => setConfirmSubmit(app)}
                           >
                             申請する
                           </button>
@@ -217,13 +242,20 @@ export default function History() {
                           </Link>
                           <button
                             className="text-[11px] text-warmgray-400 hover:text-red-500 transition-colors font-medium"
-                            onClick={() => {
-                              if (confirm('下書きを削除しますか？')) deleteDraft.mutate(app.id);
-                            }}
+                            onClick={() => setConfirmDelete(app)}
                           >
                             削除
                           </button>
                         </>
+                      )}
+                      {/* 精算入力 — APPROVED + has settlement template */}
+                      {isSettleable && (
+                        <button
+                          className="btn-primary text-xs px-3 py-1.5 rounded-lg bg-teal-500 hover:bg-teal-600 border-teal-500 hover:border-teal-600"
+                          onClick={() => navigate(`/applications/${app.id}/settlement`)}
+                        >
+                          💴 精算入力
+                        </button>
                       )}
                       {!isDraft && (
                         <Link

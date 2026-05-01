@@ -10,6 +10,7 @@ import NewApplication from './pages/NewApplication';
 import Approvals from './pages/Approvals';
 import History from './pages/History';
 import ApplicationDetail from './pages/ApplicationDetail';
+import Settlement from './pages/Settlement';
 import Admin from './pages/Admin';
 
 // ─── ログイン認証ガード ───
@@ -62,8 +63,17 @@ export default function App() {
         </RequireAuth>
       } />
       
-      {/* 申請詳細・精算画面 */}
+      {/* 申請詳細 */}
       <Route path="/applications/:id" element={<RequireAuth><ApplicationDetail /></RequireAuth>} />
+
+      {/* 精算入力 */}
+      <Route path="/applications/:id/settlement" element={
+        <RequireAuth>
+          <RequirePermission check={(p) => p.canSubmit}>
+            <Settlement />
+          </RequirePermission>
+        </RequireAuth>
+      } />
       
       {/* 承認待ち */}
       <Route path="/approvals" element={

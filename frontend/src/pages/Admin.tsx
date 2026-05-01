@@ -38,13 +38,16 @@ interface ApprovalRoute {
   is_active: boolean;
   template_name: string;
   template_code: string;
+  template_id: string;
   department_name: string;
+  department_id: string;
   steps: RouteStep[];
 }
 
 interface Template { id: string; code: string; title_ja: string }
 
-const ROLES = ['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ACCOUNTING', 'ADMIN'];
+// ACCOUNTING is kept in DB for backward compat but 総務部 handles financial tasks now
+const ROLES = ['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ADMIN'];
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -197,6 +200,9 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
   const queryClient = useQueryClient();
   const [editUser, setEditUser] = useState<User | null | 'new'>(null);
   const [search, setSearch] = useState('');
+  const [deptFilter, setDeptFilter] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
 
   const { data: users = [], isLoading } = useQuery<User[]>({
@@ -241,13 +247,16 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
     onError: (err: any) => showToast(`削除失敗: ${err.message}`, 'error'),
   });
 
-  const filtered = search
-    ? users.filter((u) =>
-        u.full_name.toLowerCase().includes(search.toLowerCase()) ||
-        u.email.toLowerCase().includes(search.toLowerCase()) ||
-        u.role.includes(search.toUpperCase())
-      )
-    : users;
+  const filtered = users.filter((u) => {
+    if (search && !u.full_name.toLowerCase().includes(search.toLowerCase()) &&
+        !u.email.toLowerCase().includes(search.toLowerCase()) &&
+        !u.role.includes(search.toUpperCase())) return false;
+    if (deptFilter && u.department_id !== deptFilter) return false;
+    if (roleFilter && u.role !== roleFilter) return false;
+    if (activeFilter === 'active' && !u.is_active) return false;
+    if (activeFilter === 'inactive' && u.is_active) return false;
+    return true;
+  });
 
   return (
     <>
@@ -292,21 +301,51 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
         />
       )}
 
-      <div className="flex items-center gap-3 mb-5">
-        <input
-          className="input max-w-xs"
-          placeholder="氏名 / メール / ロールで検索..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <span className="text-sm text-warmgray-400">{filtered.length} 名</span>
-        <div className="flex-1" />
-        <button className="btn-primary" onClick={() => setEditUser('new')}>
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
-          ユーザー追加
-        </button>
+      {/* Filters */}
+      <div className="space-y-3 mb-5">
+        <div className="flex items-center gap-3 flex-wrap">
+          <input
+            className="input max-w-xs"
+            placeholder="氏名 / メール / ロールで検索..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <select
+            className="input w-40 text-sm"
+            value={deptFilter}
+            onChange={(e) => setDeptFilter(e.target.value)}
+          >
+            <option value="">全部署</option>
+            {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+          <select
+            className="input w-36 text-sm"
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value)}
+          >
+            <option value="">全ロール</option>
+            {ROLES.filter(r => r !== 'ACCOUNTING').map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+          <div className="flex rounded-xl overflow-hidden border border-white/70">
+            {(['all', 'active', 'inactive'] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => setActiveFilter(v)}
+                className={`px-3 py-1.5 text-xs font-semibold transition-colors ${activeFilter === v ? 'bg-warmgray-800 text-white' : 'bg-white/60 text-warmgray-500 hover:bg-white/90'}`}
+              >
+                {v === 'all' ? '全員' : v === 'active' ? '有効' : '無効'}
+              </button>
+            ))}
+          </div>
+          <span className="text-sm text-warmgray-400">{filtered.length} 名</span>
+          <div className="flex-1" />
+          <button className="btn-primary" onClick={() => setEditUser('new')}>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            ユーザー追加
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -394,6 +433,9 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
   const [newRoute, setNewRoute] = useState({ template_id: '', department_id: '', name: '', stage: 'RINGI' });
   const [deleteRouteTarget, setDeleteRouteTarget] = useState<ApprovalRoute | null>(null);
   const [deleteStepTarget, setDeleteStepTarget] = useState<{ id: string; label: string } | null>(null);
+  const [routeDeptFilter, setRouteDeptFilter] = useState('');
+  const [routeTemplateFilter, setRouteTemplateFilter] = useState('');
+  const [routeStageFilter, setRouteStageFilter] = useState('');
 
   const { data: routes = [], isLoading } = useQuery<ApprovalRoute[]>({
     queryKey: ['admin', 'routes'],
@@ -452,6 +494,13 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
     onError: (err: any) => showToast(`削除失敗: ${err.message}`, 'error'),
   });
 
+  const filteredRoutes = routes.filter((r) => {
+    if (routeDeptFilter && r.department_id !== routeDeptFilter) return false;
+    if (routeTemplateFilter && r.template_id !== routeTemplateFilter) return false;
+    if (routeStageFilter && r.stage !== routeStageFilter) return false;
+    return true;
+  });
+
   if (isLoading) return <div className="text-warmgray-400 text-sm py-8 text-center">読み込み中...</div>;
 
   return (
@@ -478,7 +527,26 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
         />
       )}
 
-      <div className="flex justify-end">
+      {/* Route filters */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <select className="input w-40 text-sm" value={routeDeptFilter} onChange={(e) => setRouteDeptFilter(e.target.value)}>
+          <option value="">全部署</option>
+          {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+        <select className="input w-44 text-sm" value={routeTemplateFilter} onChange={(e) => setRouteTemplateFilter(e.target.value)}>
+          <option value="">全フォーム</option>
+          {templates.map((t) => <option key={t.id} value={t.id}>{t.title_ja}</option>)}
+        </select>
+        <div className="flex rounded-xl overflow-hidden border border-white/70">
+          {(['', 'RINGI', 'SETTLEMENT'] as const).map((s) => (
+            <button key={s} onClick={() => setRouteStageFilter(s)}
+              className={`px-3 py-1.5 text-xs font-semibold transition-colors ${routeStageFilter === s ? 'bg-warmgray-800 text-white' : 'bg-white/60 text-warmgray-500 hover:bg-white/90'}`}>
+              {s === '' ? '全ステージ' : s}
+            </button>
+          ))}
+        </div>
+        <span className="text-sm text-warmgray-400">{filteredRoutes.length} ルート</span>
+        <div className="flex-1" />
         <button className="btn-primary" onClick={() => setShowNewRoute(true)}>
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -535,7 +603,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
       )}
 
       {/* Route cards */}
-      {routes.map((route) => (
+      {filteredRoutes.map((route) => (
         <div key={route.id} className="card space-y-4">
           <div className="flex items-start justify-between">
             <div className="space-y-1.5">
@@ -671,7 +739,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
         </div>
       ))}
 
-      {routes.length === 0 && (
+      {filteredRoutes.length === 0 && (
         <div className="card flex flex-col items-center justify-center py-20 gap-4 text-warmgray-400">
           <span className="text-5xl">🗂️</span>
           <p className="text-sm">承認ルートがまだありません</p>
@@ -714,12 +782,19 @@ const STATUS_LABEL: Record<string, string> = {
 
 function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error' | 'info') => void }) {
   const queryClient = useQueryClient();
-  const [filter, setFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const [deptFilter, setDeptFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<AppRecord | null>(null);
 
   const { data: apps = [], isLoading } = useQuery<AppRecord[]>({
     queryKey: ['admin', 'applications'],
     queryFn: async () => (await apiClient.get('/admin/applications')).data,
+  });
+
+  const { data: departments = [] } = useQuery<Department[]>({
+    queryKey: ['admin', 'departments'],
+    queryFn: async () => (await apiClient.get('/admin/departments')).data,
   });
 
   const deleteApp = useMutation({
@@ -732,14 +807,12 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
     onError: (err: any) => showToast(`削除失敗: ${err.message}`, 'error'),
   });
 
-  const filtered = filter
-    ? apps.filter((a) =>
-        a.applicant_name?.includes(filter) ||
-        a.template_name?.includes(filter) ||
-        a.application_number?.includes(filter) ||
-        a.status?.includes(filter.toUpperCase()),
-      )
-    : apps;
+  const filtered = apps.filter((a) => {
+    if (search && !a.applicant_name?.includes(search) && !a.template_name?.includes(search) && !a.application_number?.includes(search)) return false;
+    if (deptFilter && a.department_name !== deptFilter) return false;
+    if (statusFilter && a.status !== statusFilter) return false;
+    return true;
+  });
 
   return (
     <div className="space-y-5">
@@ -754,14 +827,31 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
         />
       )}
 
-      <div className="flex items-center gap-3">
+      {/* Filters */}
+      <div className="flex items-center gap-3 flex-wrap">
         <input
-          className="input max-w-sm"
-          placeholder="氏名 / テンプレート / 申請番号で検索..."
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
+          className="input max-w-xs"
+          placeholder="氏名 / テンプレート / 申請番号..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
         />
+        <select className="input w-40 text-sm" value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}>
+          <option value="">全部署</option>
+          {departments.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
+        </select>
+        <select className="input w-36 text-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="">全ステータス</option>
+          {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
         <span className="text-sm text-warmgray-400">{filtered.length} 件</span>
+        {(search || deptFilter || statusFilter) && (
+          <button
+            className="text-xs text-ringo-500 hover:text-ringo-700 font-semibold"
+            onClick={() => { setSearch(''); setDeptFilter(''); setStatusFilter(''); }}
+          >
+            クリア ✕
+          </button>
+        )}
       </div>
 
       {isLoading ? (

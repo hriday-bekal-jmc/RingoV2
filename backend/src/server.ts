@@ -18,6 +18,7 @@ import approvalRoutes from './routes/approvalRoutes';
 import settlementRoutes from './routes/settlementRoutes';
 import adminRoutes from './routes/adminRoutes';
 import uploadRoutes from './routes/uploadRoutes';
+import sseRoutes from './routes/sseRoutes';
 
 dotenv.config();
 
@@ -55,6 +56,7 @@ app.use('/api/approvals',    approvalRoutes);
 app.use('/api/settlements',  settlementRoutes);
 app.use('/api/admin',        adminRoutes);
 app.use('/api/uploads',      uploadRoutes);
+app.use('/api/events',       sseRoutes);
 
 app.use(errorHandler);
 

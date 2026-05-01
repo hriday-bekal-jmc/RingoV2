@@ -71,17 +71,18 @@ const ROLE_MAP: Record<Role, RolePermissions> = {
     ],
   },
   SOUMU: {
-    label: '総務',
-    description: '総務ステップの承認を担当します。',
+    label: '総務部',
+    description: '総務ステップの承認・精算確認・領収書確認を担当します（経理機能含む）。',
     canSubmit: true,
     canApprove: true,
-    canSettle: false,
+    canSettle: true,  // 総務部が経理業務を兼務
     canAdmin: false,
     approverRoles: ['SOUMU'],
     navItems: [
-      { to: '/dashboard', label: 'ダッシュボード', icon: '▦' },
-      { to: '/approvals', label: '承認待ち',       icon: '🔔' },
-      { to: '/history',   label: '申請履歴',       icon: '⟲' },
+      { to: '/dashboard',  label: 'ダッシュボード', icon: '▦' },
+      { to: '/approvals',  label: '承認待ち',       icon: '🔔' },
+      { to: '/accounting', label: '精算管理',       icon: '▤' },
+      { to: '/history',    label: '申請履歴',       icon: '⟲' },
     ],
   },
   SENMU: {
