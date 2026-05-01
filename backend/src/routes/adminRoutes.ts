@@ -53,15 +53,37 @@ router.patch('/users/:id', async (req: Request, res: Response): Promise<void> =>
     full_name?: string; email?: string; role?: string;
     department_id?: string | null; password?: string; is_active?: boolean;
   };
+
   try {
+    // ─── SUPER ADMIN SAFEGUARD (スーパー管理者の保護) ───
+    const targetRes = await query(`SELECT email FROM users WHERE id = $1`, [id]);
+    if (targetRes.rows.length > 0) {
+      const targetEmail = targetRes.rows[0].email;
+      const superAdminEmail = process.env.SUPER_ADMIN_EMAIL?.toLowerCase().trim();
+
+      if (superAdminEmail && targetEmail === superAdminEmail) {
+        if (is_active === false) {
+          res.status(403).json({ error: 'システム管理者のアカウントは無効化できません。' });
+          return;
+        }
+        if (role && role !== 'ADMIN') {
+          res.status(403).json({ error: 'システム管理者の権限（ロール）は変更できません。' });
+          return;
+        }
+      }
+    }
+    // ────────────────────────────────────────────────
+
     const params: unknown[] = [full_name, email?.toLowerCase().trim(), role, department_id ?? null, is_active];
     let q = `UPDATE users SET full_name=$1, email=$2, role=$3, department_id=$4, is_active=$5`;
+    
     if (password) {
       params.push(await argon2.hash(password));
       q += `, password_hash=$${params.length}`;
     }
     q += ` WHERE id=$${params.length + 1}`;
     params.push(id);
+    
     await query(q, params);
     res.json({ message: 'ユーザーを更新しました' });
   } catch (err: unknown) {
@@ -74,6 +96,19 @@ router.patch('/users/:id', async (req: Request, res: Response): Promise<void> =>
 
 router.delete('/users/:id', async (req: Request, res: Response): Promise<void> => {
   try {
+    // ─── SUPER ADMIN SAFEGUARD (スーパー管理者の保護) ───
+    const targetRes = await query(`SELECT email FROM users WHERE id = $1`, [req.params.id]);
+    if (targetRes.rows.length > 0) {
+      const targetEmail = targetRes.rows[0].email;
+      const superAdminEmail = process.env.SUPER_ADMIN_EMAIL?.toLowerCase().trim();
+
+      if (superAdminEmail && targetEmail === superAdminEmail) {
+        res.status(403).json({ error: 'システム管理者のアカウントは削除できません。' });
+        return;
+      }
+    }
+    // ────────────────────────────────────────────────
+
     if (req.query.hard === 'true') {
       await query(`DELETE FROM users WHERE id = $1`, [req.params.id]);
     } else {

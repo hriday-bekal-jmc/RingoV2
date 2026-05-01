@@ -301,8 +301,9 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
   try {
     const appRes = await query(
       `SELECT a.id, a.application_number, a.status, a.form_data, a.version,
-              a.created_at, a.submitted_at, a.completed_at,
-              t.title_ja AS template_name,
+              a.template_id, a.created_at, a.submitted_at, a.completed_at,
+              t.title_ja AS template_name, t.code AS template_code,
+              t.schema_definition, t.settlement_schema,
               u.full_name AS applicant_name
        FROM applications a
        JOIN form_templates t ON a.template_id = t.id

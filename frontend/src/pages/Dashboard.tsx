@@ -64,6 +64,36 @@ function StatCard({ label, value, icon, color }: StatCardProps) {
   );
 }
 
+function ProgressStatCard({ apps }: { apps: any[] }) {
+  const pending = apps.filter((a) => a.status === 'PENDING_APPROVAL' && a.current_step && a.total_steps);
+  return (
+    <div className="stat-card animate-fade-up relative overflow-hidden">
+      <div className="absolute inset-0 bg-gradient-to-br from-indigo-200/50 to-transparent opacity-40 rounded-2xl" />
+      <div className="relative h-full flex flex-col">
+        <div className="flex items-start justify-between mb-3">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-warmgray-500">申請の進捗</span>
+          <span className="text-xl">🔄</span>
+        </div>
+        {pending.length === 0 ? (
+          <p className="text-3xl font-bold text-warmgray-800">—</p>
+        ) : (
+          <div className="space-y-2.5 mt-0.5">
+            {pending.slice(0, 3).map((app) => (
+              <div key={app.id} className="min-w-0">
+                <p className="text-[11px] text-warmgray-500 truncate leading-tight mb-1">{app.template_name}</p>
+                <MiniStepDots current={Number(app.current_step)} total={Number(app.total_steps)} />
+              </div>
+            ))}
+            {pending.length > 3 && (
+              <p className="text-[10px] text-warmgray-400">+{pending.length - 3} 件</p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const { user, loading } = useAuth();
   const perms = getPermissions(user?.role);

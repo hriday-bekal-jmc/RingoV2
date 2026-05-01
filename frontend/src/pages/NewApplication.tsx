@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query'; // ←★ useQueryClient を追加
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import DynamicForm from '../components/forms/DynamicForm';
@@ -84,6 +84,7 @@ function RoutePreviewCard({ route }: { route: ApprovalRoute }) {
 export default function NewApplication() {
   const { templateCode } = useParams<{ templateCode: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient(); // ←★ キャッシュ操作ツールを準備
   const [selectedRouteId, setSelectedRouteId] = useState<string>('');
 
   const { data: template, isLoading: templateLoading, isError: templateError } = useQuery({
@@ -119,6 +120,8 @@ export default function NewApplication() {
         ...payload,
         route_id: selectedRouteId || undefined,
       });
+      // ★送信成功時にキャッシュをリセットして履歴を最新にする！
+      queryClient.invalidateQueries({ queryKey: ['myApplications'] });
       navigate('/history?submitted=1');
     } catch (error: any) {
       console.error('送信エラー:', error);
@@ -129,6 +132,8 @@ export default function NewApplication() {
   const handleDraft = async (payload: any) => {
     try {
       await apiClient.post('/applications/draft', payload);
+      // ★下書き成功時にもキャッシュをリセット！
+      queryClient.invalidateQueries({ queryKey: ['myApplications'] });
       navigate('/history?drafted=1');
     } catch (error: any) {
       alert(`下書き保存に失敗しました: ${error.message}`);
