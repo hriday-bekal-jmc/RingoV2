@@ -403,6 +403,7 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
                         confirmLabel="完全削除"
                         triggerClass="text-xs text-warmgray-400 hover:text-red-500 transition-colors"
                         disabled={deleteUser.isPending}
+                        reservedWidth={280}
                         extraActions={
                           <button
                             type="button"

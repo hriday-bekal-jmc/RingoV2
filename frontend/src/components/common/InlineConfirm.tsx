@@ -6,13 +6,12 @@
 //   need scroll/positioning math. For admin row actions where the user is
 //   already intentional, inline confirmation is faster and cleaner.
 //
-// Pattern (used by GitHub, Linear, Notion):
-//   Default state:    [削除]
-//   Active state:     ⚠️ 削除? [削除する] [×]
-//
-// State management:
-//   Caller stores a single `confirmingId: string | null` and compares
-//   against each row's id. Only one row can be in confirm state at a time.
+// Layout-stability:
+//   Both the trigger and the active confirm strip render inside a wrapper
+//   that always reserves `reservedWidth` of horizontal space — passed by
+//   the caller per-tab so it fits the widest active state. This means the
+//   table column does NOT reflow when toggling between trigger and confirm;
+//   no other rows shift, no flicker, no layout chop.
 //
 // Usage:
 //   <InlineConfirm
@@ -20,7 +19,7 @@
 //     onTrigger={() => setConfirmingId(row.id)}
 //     onConfirm={() => { mutate(row.id); setConfirmingId(null); }}
 //     onCancel={() => setConfirmingId(null)}
-//     message="ルートを削除"
+//     reservedWidth={210}             // px — wider than the confirm strip
 //   />
 
 import { useEffect, useRef } from 'react';
@@ -42,6 +41,13 @@ interface Props {
   extraActions?: React.ReactNode;
   /** Disable confirm/trigger while a mutation is in-flight. */
   disabled?: boolean;
+  /**
+   * Pixel width reserved for the action area in BOTH states (trigger + active).
+   * Set wider than the active confirm strip to prevent column reflow when
+   * swapping. Default 210px fits the simple "削除しますか？ [削除する] [×]" strip.
+   * Bump to ~280 when extraActions are passed.
+   */
+  reservedWidth?: number;
 }
 
 export default function InlineConfirm({
@@ -55,6 +61,7 @@ export default function InlineConfirm({
   triggerClass = 'text-xs font-medium text-warmgray-400 hover:text-red-500 transition-colors',
   extraActions,
   disabled,
+  reservedWidth = 210,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -75,48 +82,55 @@ export default function InlineConfirm({
     };
   }, [isActive, onCancel]);
 
-  if (!isActive) {
-    return (
-      <button
-        type="button"
-        className={triggerClass}
-        onClick={onTrigger}
-        disabled={disabled}
-      >
-        {triggerLabel}
-      </button>
-    );
-  }
-
+  // Wrapper reserves the same horizontal space in both states.
+  // - inline-flex right-aligned so the trigger sits flush right (matches the
+  //   old layout where the delete button was at row's right edge).
+  // - inline-style width: caller-tunable via `reservedWidth`.
   return (
     <div
       ref={rootRef}
-      className="inline-flex items-center gap-1.5 animate-fade-in"
-      role="alert"
+      className="inline-flex items-center justify-end gap-1.5"
+      style={{ width: reservedWidth }}
     >
-      <span className="text-[10px] text-red-600 font-semibold whitespace-nowrap">
-        {message}
-      </span>
-      <button
-        type="button"
-        onClick={onConfirm}
-        disabled={disabled}
-        className="text-[11px] font-bold text-white bg-red-500 hover:bg-red-600 disabled:opacity-50 rounded-md px-2 py-0.5 transition-colors"
-      >
-        {confirmLabel}
-      </button>
-      {extraActions}
-      <button
-        type="button"
-        onClick={onCancel}
-        disabled={disabled}
-        aria-label="キャンセル"
-        className="text-warmgray-400 hover:text-warmgray-600 disabled:opacity-50 transition-colors"
-      >
-        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
+      {!isActive ? (
+        <button
+          type="button"
+          className={triggerClass}
+          onClick={onTrigger}
+          disabled={disabled}
+        >
+          {triggerLabel}
+        </button>
+      ) : (
+        <div
+          className="inline-flex items-center gap-1.5 animate-fade-in"
+          role="alert"
+        >
+          <span className="text-[10px] text-red-600 font-semibold whitespace-nowrap">
+            {message}
+          </span>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={disabled}
+            className="text-[11px] font-bold text-white bg-red-500 hover:bg-red-600 disabled:opacity-50 rounded-md px-2 py-0.5 transition-colors"
+          >
+            {confirmLabel}
+          </button>
+          {extraActions}
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={disabled}
+            aria-label="キャンセル"
+            className="text-warmgray-400 hover:text-warmgray-600 disabled:opacity-50 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
