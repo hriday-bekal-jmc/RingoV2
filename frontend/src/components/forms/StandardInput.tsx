@@ -11,9 +11,7 @@ import apiClient from '../../services/apiClient';
 import CalendarPicker from './CalendarPicker';
 import CustomSelect from './CustomSelect';
 
-const API_BASE =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace('/api', '') ||
-  'http://localhost:3000';
+// File URLs are same-origin (vite proxy /api in dev, reverse proxy in prod)
 
 interface FormField {
   name: string;
@@ -44,14 +42,14 @@ interface StandardInputProps {
 }
 
 /** Parse a stored file URL back into a display object.
- *  URL format: /uploads/{timestamp}_{sanitized_original_name}
+ *  Modern URL: /api/files/<uuid>  (gated, served via authz check)
+ *  Legacy URL: /uploads/{timestamp}_{sanitized_original_name}
+ *  Both relative — same-origin in prod, vite proxy in dev → cookies sent.
  */
 function parseFileUrl(url: string, index: number): UploadedFile {
-  const fullUrl = url.startsWith('http') ? url : `${API_BASE}${url}`;
   const filename = url.split('/').pop() ?? `file_${index + 1}`;
-  // Strip leading timestamp prefix (e.g. "1735123456789_") to recover original name
   const original_name = decodeURIComponent(filename.replace(/^\d+_/, ''));
-  return { id: url, url: fullUrl, original_name };
+  return { id: url, url, original_name };
 }
 
 export default function StandardInput({
@@ -113,7 +111,8 @@ export default function StandardInput({
       const res = await apiClient.post('/uploads', formData);
       const newFiles: UploadedFile[] = (res.data.files as UploadedFile[]).map((f: UploadedFile) => ({
         ...f,
-        url: f.url.startsWith('http') ? f.url : `${API_BASE}${f.url}`,
+        // Keep URL relative — same-origin in prod / vite proxy in dev means cookie auto-sent
+        url: f.url,
       }));
       const updated = [...uploadedFiles, ...newFiles];
       setUploadedFiles(updated);

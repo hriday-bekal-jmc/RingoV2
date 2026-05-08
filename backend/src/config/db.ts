@@ -1,21 +1,30 @@
 import pg, { type QueryResult } from 'pg';
-import dotenv from 'dotenv';
-
-dotenv.config();
+import fs from 'fs';
+import { env } from './env';
 
 const { Pool } = pg;
 
+// Strict TLS in prod: validate server cert against CA bundle (e.g. AWS RDS
+// combined CA) when PGSSLROOTCERT is set. rejectUnauthorized=true means
+// MITM-resistant — never silently downgrade.
+function buildSslConfig(): { rejectUnauthorized: boolean; ca?: string } | false {
+  if (env.NODE_ENV !== 'production') return false;
+  const cfg: { rejectUnauthorized: boolean; ca?: string } = { rejectUnauthorized: true };
+  if (env.PGSSLROOTCERT) cfg.ca = fs.readFileSync(env.PGSSLROOTCERT, 'utf8');
+  return cfg;
+}
+
 export const pool = new Pool({
-  host:     process.env.PGHOST,
-  port:     Number(process.env.PGPORT) || 5432,
-  user:     process.env.PGUSER,
-  password: process.env.PGPASSWORD,
-  database: process.env.PGDATABASE,
-  min:      Number(process.env.PG_POOL_MIN) || 2,
-  max:      Number(process.env.PG_POOL_MAX) || 20,
+  host:     env.PGHOST,
+  port:     env.PGPORT,
+  user:     env.PGUSER,
+  password: env.PGPASSWORD,
+  database: env.PGDATABASE,
+  min:      env.PG_POOL_MIN,
+  max:      env.PG_POOL_MAX,
   idleTimeoutMillis:    30_000,
   connectionTimeoutMillis: 5_000,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  ssl: buildSslConfig(),
 });
 
 pool.on('error', (err: Error) => {

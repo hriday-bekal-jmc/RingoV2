@@ -6,9 +6,7 @@ import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import { useLang } from '../context/LanguageContext';
 
-const API_BASE =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace('/api', '') ||
-  'http://localhost:3000';
+// File URLs are same-origin (vite proxy /api in dev, reverse proxy in prod) — no base prefix needed
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Settlement {
@@ -169,11 +167,8 @@ function ProofUploader({
     }
   };
 
-  const fullUrl = proofUrl
-    ? proofUrl.startsWith('http')
-      ? proofUrl
-      : `${API_BASE}${proofUrl}`
-    : null;
+  // Same-origin URLs (vite proxy in dev, reverse proxy in prod)
+  const fullUrl = proofUrl ?? null;
 
   return (
     <div className="flex items-center gap-2">
@@ -208,12 +203,10 @@ function CloseButton({
   settlementId,
   transferDate,
   proofUrl,
-  t,
 }: {
   settlementId: string;
   transferDate: string | null;
   proofUrl: string | null;
-  t: (k: any) => string;
 }) {
   const queryClient = useQueryClient();
   const mutation = useMutation({
@@ -354,7 +347,7 @@ export default function Accounting() {
 
   const downloadCSV = () => {
     const ids = selected.size > 0 ? [...selected].join(',') : '';
-    const url = `${API_BASE}/api/accounting/settlements/csv${ids ? `?ids=${ids}` : ''}`;
+    const url = `/api/accounting/settlements/csv${ids ? `?ids=${ids}` : ''}`;
     const a = document.createElement('a');
     a.href = url;
     a.download = '';
@@ -549,7 +542,6 @@ export default function Accounting() {
                               settlementId={s.settlement_id}
                               transferDate={s.transfer_date}
                               proofUrl={s.transfer_proof_url}
-                              t={t}
                             />
                           ) : s.app_status === 'PENDING_SETTLEMENT' ? (
                             /* Phase 1: still in approval flow → action in Approvals page */

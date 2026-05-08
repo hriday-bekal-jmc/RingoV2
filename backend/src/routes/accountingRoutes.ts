@@ -111,98 +111,11 @@ router.get('/settlements', async (req: Request, res: Response): Promise<void> =>
   }
 });
 
-// ── POST /accounting/settlements/:id/approve ──────────────────────────────────
-// Quick-approve the current pending SETTLEMENT step from the accounting page
-router.post('/settlements/:id/approve', async (req: Request, res: Response): Promise<void> => {
-  const { comment } = req.body as { comment?: string };
-  const userId = req.user!.id;
-  const role   = req.user!.role;
-
-  try {
-    const result = await withTransaction(async (client: pg.PoolClient) => {
-      // Find the pending step for this settlement
-      const stepRes = await client.query(
-        `SELECT st.id, st.step_order, st.approver_id, st.stage, a.id AS application_id, a.status
-         FROM settlements s
-         JOIN applications a ON a.id = s.application_id
-         JOIN approval_steps st
-           ON st.application_id = a.id AND st.stage = 'SETTLEMENT' AND st.status = 'PENDING'
-         WHERE s.id = $1
-         ORDER BY st.step_order ASC LIMIT 1`,
-        [req.params.id],
-      );
-      if (stepRes.rows.length === 0) {
-        throw Object.assign(new Error('承認待ちステップが見つかりません'), { status: 404 });
-      }
-      const step = stepRes.rows[0] as {
-        id: string; step_order: number; approver_id: string | null;
-        stage: string; application_id: string; status: string;
-      };
-
-      // Auth check
-      if (role !== 'ADMIN' && step.approver_id && step.approver_id !== userId) {
-        throw Object.assign(new Error('このステップの承認権限がありません'), { status: 403 });
-      }
-
-      // Approve this step
-      await client.query(
-        `UPDATE approval_steps
-         SET status = 'APPROVED', comment = $2, acted_at = CURRENT_TIMESTAMP, acted_by = $3
-         WHERE id = $1`,
-        [step.id, comment ?? null, userId],
-      );
-
-      // Advance to next or finalise
-      const nextRes = await client.query(
-        `SELECT id FROM approval_steps
-         WHERE application_id = $1 AND stage = 'SETTLEMENT' AND status = 'WAITING'
-         ORDER BY step_order ASC LIMIT 1`,
-        [step.application_id],
-      );
-
-      let newStatus: string;
-      if (nextRes.rows.length > 0) {
-        await client.query(`UPDATE approval_steps SET status = 'PENDING' WHERE id = $1`, [nextRes.rows[0].id]);
-        newStatus = 'PENDING_SETTLEMENT'; // still in progress
-      } else {
-        // Final step — complete
-        const seqRow = await client.query(`SELECT nextval('application_number_seq') AS n`);
-        const year   = new Date().getFullYear();
-        const appNum = `RNG-${year}-${String(seqRow.rows[0].n).padStart(6, '0')}`;
-        await client.query(
-          `UPDATE applications
-           SET status = 'COMPLETED',
-               application_number = COALESCE(application_number, $2),
-               completed_at = CURRENT_TIMESTAMP
-           WHERE id = $1`,
-          [step.application_id, appNum],
-        );
-        await client.query(
-          `UPDATE settlements SET status = 'PROCESSED', processed_at = CURRENT_TIMESTAMP, processed_by = $2 WHERE application_id = $1`,
-          [step.application_id, userId],
-        );
-        newStatus = 'COMPLETED';
-      }
-
-      await client.query(
-        `INSERT INTO audit_logs (action, entity_type, entity_id)
-         VALUES ('ACCOUNTING_APPROVE', 'application', $1)`,
-        [step.application_id],
-      );
-
-      return { application_id: step.application_id, new_status: newStatus };
-    });
-
-    const appId = (result as { application_id: string }).application_id;
-    emitAll('APPROVAL_ACTION', { type: 'accounting_approve', applicationId: appId });
-    res.json({ message: '承認しました', result });
-  } catch (err: unknown) {
-    const e = err as { status?: number; message?: string };
-    if (e.status) { res.status(e.status).json({ error: e.message }); return; }
-    console.error('[accounting] approve failed:', err);
-    res.status(500).json({ error: '承認処理に失敗しました' });
-  }
-});
+// REMOVED: POST /accounting/settlements/:id/approve
+// Old code-path bypassed transfer_date + proof checks. All settlement
+// finalisation must now go via /close (which enforces both). Workflow-step
+// approvals happen via the normal /api/approvals/:id/approve flow on the
+// Approvals page; accounting only does the final close.
 
 // ── PATCH /accounting/settlements/:id ────────────────────────────────────────
 router.patch('/settlements/:id', async (req: Request, res: Response): Promise<void> => {

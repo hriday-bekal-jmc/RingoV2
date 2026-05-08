@@ -105,14 +105,10 @@ function SettlementDataViewer({ app, t }: { app: ApplicationDetail; t: (k: any) 
       const n = Number(val);
       return isNaN(n) ? String(val) : `¥${n.toLocaleString('ja-JP')}`;
     }
-    // File URLs — show as links
-    if (typeof val === 'string' && val.includes('/uploads/')) return val;
+    // File URLs — show as links (modern: /api/files/<id>, legacy: /uploads/<file>)
+    if (typeof val === 'string' && (val.includes('/uploads/') || val.includes('/api/files/'))) return val;
     return String(val);
   };
-
-  const API_BASE =
-    (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace('/api', '') ||
-    'http://localhost:3000';
 
   return (
     <div className="space-y-4">
@@ -148,7 +144,7 @@ function SettlementDataViewer({ app, t }: { app: ApplicationDetail; t: (k: any) 
               <dt className="text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-2">{f.label}</dt>
               <ul className="space-y-1.5">
                 {urls.map((url, i) => {
-                  const full = url.startsWith('http') ? url : `${API_BASE}${url}`;
+                  const full = url.startsWith('http') ? url : url;
                   const filename = url.split('/').pop() ?? `file_${i + 1}`;
                   return (
                     <li key={i} className="flex items-center gap-2 bg-white/60 border border-white/80 rounded-lg px-3 py-2">
@@ -195,7 +191,7 @@ function SettlementDataViewer({ app, t }: { app: ApplicationDetail; t: (k: any) 
                 <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{t('accounting_proof_view')}</dt>
                 <dd>
                   <a
-                    href={app.transfer_proof_url.startsWith('http') ? app.transfer_proof_url : `${API_BASE}${app.transfer_proof_url}`}
+                    href={app.transfer_proof_url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 text-xs font-semibold text-teal-600 hover:text-teal-700 bg-teal-50 border border-teal-200/60 px-3 py-1.5 rounded-lg"

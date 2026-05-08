@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../config/db';
 import { requireAuth } from '../middlewares/authMiddleware';
+import { assertCanReadApp, assertValidRouteForTemplate } from '../middlewares/authz';
 import { emitAll } from './sseRoutes';
 import type pg from 'pg';
 
@@ -146,6 +147,9 @@ router.post('/:id/resubmit', async (req: Request, res: Response): Promise<void> 
           throw Object.assign(new Error('承認ルートが設定されていません'), { status: 422 });
         }
         route_id = routeRes.rows[0].id as string;
+      } else if (chosen_route_id) {
+        // Caller-supplied route — must match template+dept+stage+active
+        await assertValidRouteForTemplate(client, route_id, template_id, department_id, 'RINGI');
       }
 
       // Load new RINGI steps (with role resolution)
@@ -276,6 +280,9 @@ router.post('/:id/submit', async (req: Request, res: Response): Promise<void> =>
         );
         if (routeRes.rows.length === 0) throw Object.assign(new Error('承認ルートが設定されていません'), { status: 422 });
         route_id = routeRes.rows[0].id as string;
+      } else {
+        // Client-supplied route — must match template+dept+stage+active
+        await assertValidRouteForTemplate(client, route_id, template_id, department_id, 'RINGI');
       }
 
       // Load steps (with approver_role for role-based resolution)
@@ -391,6 +398,9 @@ router.post('/:id/start-settlement', async (req: Request, res: Response): Promis
           );
         }
         route_id = routeRes.rows[0].id as string;
+      } else {
+        // Caller-supplied route — must match template+dept+SETTLEMENT+active
+        await assertValidRouteForTemplate(client, route_id, template_id, department_id, 'SETTLEMENT');
       }
 
       // Load settlement steps
@@ -542,6 +552,9 @@ router.post('/:id/resubmit-settlement', async (req: Request, res: Response): Pro
           throw Object.assign(new Error('精算承認ルートが設定されていません'), { status: 422 });
         }
         route_id = routeRes.rows[0].id as string;
+      } else {
+        // Caller-supplied — validate scope
+        await assertValidRouteForTemplate(client, route_id, template_id, department_id, 'SETTLEMENT');
       }
 
       // Load & resolve SETTLEMENT steps
@@ -804,6 +817,10 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
 // GET /applications/:id — full detail + approval timeline
 router.get('/:id', async (req: Request, res: Response): Promise<void> => {
   try {
+    // ── Authorization: must be applicant, assigned approver, prior actor,
+    //    same-dept manager+, ACCOUNTING, or ADMIN
+    await assertCanReadApp({ id: req.user!.id, role: req.user!.role }, String(req.params.id));
+
     const appRes = await query(
       `SELECT a.id, a.application_number, a.status, a.form_data, a.version,
               a.settlement_data, a.settlement_submitted_at,
@@ -838,6 +855,8 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
 
     res.json({ ...appRes.rows[0], steps: stepsRes.rows });
   } catch (err) {
+    const e = err as { status?: number; message?: string };
+    if (e.status) { res.status(e.status).json({ error: e.message }); return; }
     console.error('[applications] detail failed:', err);
     res.status(500).json({ error: '申請詳細の取得に失敗しました' });
   }

@@ -7,7 +7,7 @@ import Toast, { useToast } from '../components/common/Toast';
 import { useLang } from '../context/LanguageContext';
 import { useAuth } from '../context/AuthContext';
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:4000/api';
+// File URLs are same-origin (vite proxy /api in dev, reverse proxy in prod)
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface FormField { name: string; label: string; type: string; required?: boolean }
@@ -117,7 +117,8 @@ function FormDataViewer({ formData, schema, tFn }: {
               {isFile && val ? (
                 <div className="flex flex-wrap gap-2 mt-1">
                   {String(val).split(',').filter(Boolean).map((url, i) => {
-                    const fullUrl = url.startsWith('http') ? url : `${API_BASE.replace('/api', '')}${url}`;
+                    // Same-origin (vite proxy /api in dev, reverse proxy in prod) — cookie auto-sent
+                    const fullUrl = url.startsWith('http') ? url : url;
                     return (
                       <a key={i} href={fullUrl} target="_blank" rel="noopener noreferrer"
                         className="inline-flex items-center gap-1.5 text-xs text-ringo-600 hover:text-ringo-700 bg-ringo-50/60 border border-ringo-200/60 px-2.5 py-1 rounded-lg font-medium transition-colors">
@@ -259,7 +260,7 @@ function AppDetailPanel({ appId, onClose, tFn, lang }: {
                 {isFile && val ? (
                   <div className="flex flex-wrap gap-1.5">
                     {String(val).split(',').filter(Boolean).map((url, i) => {
-                      const full = url.startsWith('http') ? url : `${API_BASE.replace('/api', '')}${url}`;
+                      const full = url.startsWith('http') ? url : url;
                       return (
                         <a key={i} href={full} target="_blank" rel="noopener noreferrer"
                           className="inline-flex items-center gap-1 text-xs text-ringo-600 hover:text-ringo-700 bg-ringo-50/60 border border-ringo-200/60 px-2 py-0.5 rounded-lg font-medium">

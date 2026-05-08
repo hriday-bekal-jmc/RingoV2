@@ -1,0 +1,65 @@
+// Auth-gated file serving. Replaces public /uploads static mount.
+// Receipts/images should be migrated to Google Drive — fall back to local
+// disk only for legacy rows where drive_url is null.
+
+import { Router, Request, Response } from 'express';
+import path from 'path';
+import fs from 'fs';
+import { query } from '../config/db';
+import { requireAuth } from '../middlewares/authMiddleware';
+import { assertCanReadApp } from '../middlewares/authz';
+
+const router = Router();
+router.use(requireAuth);
+
+// GET /api/files/:id — stream file binary IF caller has access to its application
+router.get('/:id', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const r = await query(
+      `SELECT id, application_id, uploader_id, original_name, stored_path,
+              mime_type, drive_url
+       FROM uploaded_files WHERE id = $1`,
+      [req.params.id],
+    );
+    if (r.rows.length === 0) { res.status(404).json({ error: 'File not found' }); return; }
+    const f = r.rows[0] as {
+      id: string; application_id: string | null; uploader_id: string;
+      original_name: string; stored_path: string; mime_type: string;
+      drive_url: string | null;
+    };
+
+    // ── Authorization: if the file is attached to an application, the
+    //    caller must have read access to that application. Files with no
+    //    application_id (drafts mid-upload) are restricted to uploader.
+    const actor = { id: req.user!.id, role: req.user!.role };
+    if (f.application_id) {
+      await assertCanReadApp(actor, f.application_id);
+    } else if (f.uploader_id !== actor.id && actor.role !== 'ADMIN') {
+      res.status(403).json({ error: 'このファイルにアクセスする権限がありません' });
+      return;
+    }
+
+    // Drive URL → redirect (browser handles auth via Google's signed link).
+    // Service account integration TODO: generate short-lived signed URL here.
+    if (f.drive_url) {
+      res.redirect(f.drive_url);
+      return;
+    }
+
+    // Local fallback — stream from disk
+    const abs = path.join(__dirname, '../../uploads', f.stored_path);
+    if (!fs.existsSync(abs)) { res.status(404).json({ error: 'File missing on disk' }); return; }
+
+    res.setHeader('Content-Type', f.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(f.original_name)}"`);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    fs.createReadStream(abs).pipe(res);
+  } catch (err) {
+    const e = err as { status?: number; message?: string };
+    if (e.status) { res.status(e.status).json({ error: e.message }); return; }
+    console.error('[files] serve failed:', err);
+    res.status(500).json({ error: 'ファイル取得に失敗しました' });
+  }
+});
+
+export default router;

@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import argon2 from 'argon2';
 import { query, withTransaction } from '../config/db';
-import { requireAuth, requireRole } from '../middlewares/authMiddleware';
+import { requireAuth, requireRole, invalidateUserStateCache } from '../middlewares/authMiddleware';
 import type pg from 'pg';
 
 const router = Router();
@@ -74,17 +74,32 @@ router.patch('/users/:id', async (req: Request, res: Response): Promise<void> =>
     }
     // ────────────────────────────────────────────────
 
+    // Detect privilege-relevant change → bump token_version to revoke old JWTs
+    const beforeRes = await query(
+      `SELECT role, is_active FROM users WHERE id = $1`,
+      [id],
+    );
+    const before = beforeRes.rows[0] as { role: string; is_active: boolean } | undefined;
+    const roleChanged     = before && role !== undefined && before.role !== role;
+    const activationChanged = before && is_active !== undefined && before.is_active !== is_active;
+    const passwordChanged = !!password;
+    const bumpTokenVersion = roleChanged || activationChanged || passwordChanged;
+
     const params: unknown[] = [full_name, email?.toLowerCase().trim(), role, department_id ?? null, is_active];
     let q = `UPDATE users SET full_name=$1, email=$2, role=$3, department_id=$4, is_active=$5`;
-    
+
     if (password) {
       params.push(await argon2.hash(password));
       q += `, password_hash=$${params.length}`;
     }
+    if (bumpTokenVersion) {
+      q += `, token_version = token_version + 1`;
+    }
     q += ` WHERE id=$${params.length + 1}`;
     params.push(id);
-    
+
     await query(q, params);
+    if (bumpTokenVersion) await invalidateUserStateCache(String(id));
     res.json({ message: 'ユーザーを更新しました' });
   } catch (err: unknown) {
     const e = err as { code?: string };
@@ -112,8 +127,12 @@ router.delete('/users/:id', async (req: Request, res: Response): Promise<void> =
     if (req.query.hard === 'true') {
       await query(`DELETE FROM users WHERE id = $1`, [req.params.id]);
     } else {
-      await query(`UPDATE users SET is_active = FALSE WHERE id = $1`, [req.params.id]);
+      await query(
+        `UPDATE users SET is_active = FALSE, token_version = token_version + 1 WHERE id = $1`,
+        [req.params.id],
+      );
     }
+    await invalidateUserStateCache(String(req.params.id));
     res.json({ message: 'ユーザーを削除/無効化しました' });
   } catch (err) {
     console.error('[admin] user delete failed:', err);

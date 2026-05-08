@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../config/db';
 import { requireAuth } from '../middlewares/authMiddleware';
+import { assertCanActOnStep } from '../middlewares/authz';
 import { emitAll } from './sseRoutes';
 import type pg from 'pg';
 
@@ -206,30 +207,30 @@ router.post('/:id/approve', async (req: Request, res: Response): Promise<void> =
 router.post('/:id/return', async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
   const { comment } = (req.body ?? {}) as { comment?: string };
-  const { id: userId } = req.user!;
+  const { id: userId, role } = req.user!;
   try {
     await withTransaction(async (client: pg.PoolClient) => {
-      const r = await client.query(
-        `UPDATE applications SET status = 'RETURNED'
-         WHERE id = $1 AND status IN ('PENDING_APPROVAL', 'PENDING_SETTLEMENT') RETURNING id`,
-        [id],
+      // ── Authorization: only assigned approver / role-gated MANAGER+ on
+      //    unassigned step / ADMIN. Locks app row + verifies status.
+      const currentStep = await assertCanActOnStep(
+        client,
+        { id: userId, role },
+        String(id),
+        ['PENDING_APPROVAL', 'PENDING_SETTLEMENT'],
       );
-      if (r.rows.length === 0) throw Object.assign(new Error('差し戻しできない状態です'), { status: 409 });
+      const pendingStage = currentStep.stage;
 
-      // Find the current pending step (to know its stage)
-      const pendingRes = await client.query(
-        `SELECT id, stage FROM approval_steps WHERE application_id = $1 AND status = 'PENDING' LIMIT 1`,
+      await client.query(
+        `UPDATE applications SET status = 'RETURNED' WHERE id = $1`,
         [id],
       );
-      if (pendingRes.rows.length === 0) throw Object.assign(new Error('保留中のステップが見つかりません'), { status: 409 });
-      const pendingStage = (pendingRes.rows[0] as { stage: string }).stage;
 
       // Mark the pending step as RETURNED (with comment)
       await client.query(
         `UPDATE approval_steps
          SET status = 'RETURNED', comment = $2, acted_at = CURRENT_TIMESTAMP, acted_by = $3
-         WHERE application_id = $1 AND status = 'PENDING'`,
-        [id, comment ?? null, userId],
+         WHERE id = $1`,
+        [currentStep.id, comment ?? null, userId],
       );
 
       // Cancel any downstream WAITING steps in the same stage — they are dead branches now.
@@ -259,20 +260,26 @@ router.post('/:id/return', async (req: Request, res: Response): Promise<void> =>
 router.post('/:id/reject', async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
   const { comment } = (req.body ?? {}) as { comment?: string };
-  const { id: userId } = req.user!;
+  const { id: userId, role } = req.user!;
   try {
     await withTransaction(async (client: pg.PoolClient) => {
-      const r = await client.query(
-        `UPDATE applications SET status = 'REJECTED'
-         WHERE id = $1 AND status IN ('PENDING_APPROVAL', 'PENDING_SETTLEMENT') RETURNING id`,
+      // ── Authorization: only assigned approver / role-gated / ADMIN
+      const currentStep = await assertCanActOnStep(
+        client,
+        { id: userId, role },
+        String(id),
+        ['PENDING_APPROVAL', 'PENDING_SETTLEMENT'],
+      );
+
+      await client.query(
+        `UPDATE applications SET status = 'REJECTED' WHERE id = $1`,
         [id],
       );
-      if (r.rows.length === 0) throw Object.assign(new Error('却下できない状態です'), { status: 409 });
       await client.query(
         `UPDATE approval_steps
          SET status = 'REJECTED', comment = $2, acted_at = CURRENT_TIMESTAMP, acted_by = $3
-         WHERE application_id = $1 AND status = 'PENDING'`,
-        [id, comment ?? null, userId],
+         WHERE id = $1`,
+        [currentStep.id, comment ?? null, userId],
       );
       await client.query(
         `INSERT INTO audit_logs (action, entity_type, entity_id, metadata)

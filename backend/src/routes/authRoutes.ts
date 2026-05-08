@@ -1,15 +1,18 @@
 import { Router, Request, Response } from 'express';
 import argon2 from 'argon2';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 import { query } from '../config/db';
 import type { JwtPayload } from '../middlewares/authMiddleware';
+import { authLimiter } from '../middlewares/rateLimit';
+import { env } from '../config/env';
 
 const router = Router();
 
 const COOKIE_OPTS = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
+  secure: env.NODE_ENV === 'production',
   sameSite: 'strict' as const,
   maxAge: 7 * 24 * 60 * 60 * 1000,
 };
@@ -25,21 +28,30 @@ interface UserRow {
   is_active: boolean;
 }
 
-function issueToken(user: Pick<UserRow, 'id' | 'email' | 'role' | 'department_id'>): string {
+async function issueToken(
+  user: Pick<UserRow, 'id' | 'email' | 'role' | 'department_id'>,
+): Promise<string> {
+  // Embed current token_version so future bumps revoke this token live.
+  const tvRow = await query(
+    `SELECT token_version FROM users WHERE id = $1`,
+    [user.id],
+  );
+  const tv = (tvRow.rows[0]?.token_version as number | undefined) ?? 0;
   const payload: JwtPayload = {
     id:            user.id,
     email:         user.email,
     role:          user.role,
     department_id: user.department_id,
+    tv,
   };
   return jwt.sign(payload, process.env.JWT_SECRET as string, { expiresIn: '7d' });
 }
 
 function makeGoogleClient(): OAuth2Client {
   return new OAuth2Client(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3000/api/auth/google/callback',
+    env.GOOGLE_CLIENT_ID,
+    env.GOOGLE_CLIENT_SECRET,
+    env.GOOGLE_CALLBACK_URL ?? 'http://localhost:3000/api/auth/google/callback',
   );
 }
 
@@ -63,7 +75,7 @@ router.get('/me', async (req: Request, res: Response): Promise<void> => {
 });
 
 // POST /auth/login — email + password
-router.post('/login', async (req: Request, res: Response): Promise<void> => {
+router.post('/login', authLimiter, async (req: Request, res: Response): Promise<void> => {
   const { email, password } = req.body as { email?: string; password?: string };
   if (!email || !password) { res.status(400).json({ error: 'メールとパスワードを入力してください' }); return; }
 
@@ -85,7 +97,7 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
     const valid = await argon2.verify(user.password_hash, password);
     if (!valid) { res.status(401).json({ error: 'メールまたはパスワードが正しくありません' }); return; }
 
-    const token = issueToken(user);
+    const token = await issueToken(user);
     res.cookie('token', token, COOKIE_OPTS);
     res.json({ user: { id: user.id, full_name: user.full_name, email: user.email, role: user.role, department_id: user.department_id } });
   } catch (err) {
@@ -172,24 +184,48 @@ router.post('/logout', (_req: Request, res: Response): void => {
 });
 
 // GET /auth/google — redirect to Google OAuth consent screen
-router.get('/google', (req: Request, res: Response): void => {
-  if (!process.env.GOOGLE_CLIENT_ID) {
+router.get('/google', authLimiter, (req: Request, res: Response): void => {
+  if (!env.GOOGLE_CLIENT_ID) {
     res.status(503).json({ error: 'Google OAuth not configured — set GOOGLE_CLIENT_ID in .env' }); return;
   }
-  const url = makeGoogleClient().generateAuthUrl({
+  // CSRF protection: random state stored in HttpOnly cookie, echoed by Google,
+  // verified on callback. Without this, an attacker can trick a victim into
+  // logging into the attacker's account (login CSRF / session fixation).
+  const state = crypto.randomBytes(32).toString('hex');
+  res.cookie('oauth_state', state, {
+    httpOnly: true,
+    secure:   env.NODE_ENV === 'production',
+    sameSite: 'lax', // 'lax' so it survives the Google redirect back to us
+    maxAge:   10 * 60 * 1000, // 10 minutes
+  });
+
+  const opts: Parameters<OAuth2Client['generateAuthUrl']>[0] = {
     access_type: 'offline',
     scope: ['profile', 'email'],
     prompt: 'select_account',
-  });
-  res.redirect(url);
+    state,
+  };
+  // Restrict consent screen to a single Workspace domain when configured.
+  // Note: hd is a UI hint — we still validate hd in the ID token below.
+  if (env.GOOGLE_WORKSPACE_DOMAIN) opts.hd = env.GOOGLE_WORKSPACE_DOMAIN;
+
+  res.redirect(makeGoogleClient().generateAuthUrl(opts));
 });
 
 // GET /auth/google/callback — exchange code, find/create user, issue JWT
-router.get('/google/callback', async (req: Request, res: Response): Promise<void> => {
-  const FRONTEND = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
-  const { code, error } = req.query as { code?: string; error?: string };
+router.get('/google/callback', authLimiter, async (req: Request, res: Response): Promise<void> => {
+  const FRONTEND = env.FRONTEND_ORIGIN;
+  const { code, error, state } = req.query as { code?: string; error?: string; state?: string };
 
   if (error || !code) { res.redirect(`${FRONTEND}/login?error=oauth_cancelled`); return; }
+
+  // ── Verify state (CSRF defence) — must match the value we set in the cookie
+  const cookieState = req.cookies?.oauth_state as string | undefined;
+  res.clearCookie('oauth_state');
+  if (!cookieState || !state || cookieState !== state) {
+    res.redirect(`${FRONTEND}/login?error=oauth_state_mismatch`);
+    return;
+  }
 
   try {
     const client = makeGoogleClient();
@@ -198,12 +234,24 @@ router.get('/google/callback', async (req: Request, res: Response): Promise<void
 
     const ticket = await client.verifyIdToken({
       idToken: tokens.id_token as string,
-      audience: process.env.GOOGLE_CLIENT_ID,
+      audience: env.GOOGLE_CLIENT_ID,
     });
     const payload = ticket.getPayload();
     if (!payload) { res.redirect(`${FRONTEND}/login?error=oauth_failed`); return; }
 
-    const { sub: google_sub, email, name, picture } = payload;
+    const { sub: google_sub, email, name, picture, hd } = payload;
+
+    // ── Workspace domain enforcement: reject anyone whose ID token doesn't
+    //    show the correct hosted-domain claim (or whose email isn't in it).
+    if (env.GOOGLE_WORKSPACE_DOMAIN) {
+      const allowed = env.GOOGLE_WORKSPACE_DOMAIN.toLowerCase();
+      const tokenHd = (hd ?? '').toLowerCase();
+      const emailDomain = (email ?? '').split('@')[1]?.toLowerCase() ?? '';
+      if (tokenHd !== allowed || emailDomain !== allowed) {
+        res.redirect(`${FRONTEND}/login?error=domain_not_allowed`);
+        return;
+      }
+    }
 
     let userRes = await query(
       `SELECT id, full_name, email, role, department_id, is_active, google_oauth_sub
@@ -229,7 +277,7 @@ router.get('/google/callback', async (req: Request, res: Response): Promise<void
     const user = userRes.rows[0] as UserRow;
     if (!user.is_active) { res.redirect(`${FRONTEND}/login?error=account_disabled`); return; }
 
-    const token = issueToken(user);
+    const token = await issueToken(user);
     res.cookie('token', token, COOKIE_OPTS);
     res.redirect(`${FRONTEND}/dashboard`);
   } catch (err) {
