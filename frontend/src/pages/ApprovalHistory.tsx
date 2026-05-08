@@ -586,20 +586,23 @@ export default function ApprovalHistory() {
                 </tbody>
               </table>
 
-              {/* Infinite scroll sentinel */}
-              <div ref={sentinelRef} className="px-5 py-4 flex items-center justify-center gap-2 text-warmgray-400 text-xs min-h-[48px]">
-                {isFetchingNextPage ? (
-                  <>
-                    <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                    </svg>
-                    {lang === 'en' ? 'Loading...' : '読み込み中…'}
-                  </>
-                ) : !hasNextPage && items.length >= PAGE ? (
-                  <span className="text-warmgray-300">{lang === 'en' ? 'All records loaded' : '全件表示済み'}</span>
-                ) : null}
-              </div>
+              {/* Sentinel — invisible; observer fires early via rootMargin */}
+              <div ref={sentinelRef} className="h-px" />
+              {(isFetchingNextPage || (!hasNextPage && items.length >= PAGE)) && (
+                <div className="px-5 py-3 flex items-center justify-center gap-2 text-warmgray-400 text-xs border-t border-white/20">
+                  {isFetchingNextPage ? (
+                    <>
+                      <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                      </svg>
+                      {lang === 'en' ? 'Loading…' : '読み込み中…'}
+                    </>
+                  ) : (
+                    <span className="text-warmgray-300">{lang === 'en' ? 'All records loaded' : '全件表示済み'}</span>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

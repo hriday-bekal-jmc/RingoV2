@@ -320,20 +320,23 @@ export default function History() {
               })}
             </ul>
 
-            {/* Infinite scroll sentinel */}
-            <div ref={sentinelRef} className="px-5 py-4 flex items-center justify-center gap-2 text-warmgray-400 text-xs min-h-[52px]">
-              {isFetchingNextPage ? (
-                <>
-                  <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                  </svg>
-                  {t('loading')}
-                </>
-              ) : !hasNextPage && sorted.length >= PAGE ? (
-                <span className="text-warmgray-300">{lang === 'en' ? 'All records loaded' : '全件表示済み'}</span>
-              ) : null}
-            </div>
+            {/* Sentinel — h-px keeps it invisible; IntersectionObserver fires 200px early */}
+            <div ref={sentinelRef} className="h-px" />
+            {(isFetchingNextPage || (!hasNextPage && sorted.length >= PAGE)) && (
+              <div className="px-5 py-3 flex items-center justify-center gap-2 text-warmgray-400 text-xs border-t border-white/20">
+                {isFetchingNextPage ? (
+                  <>
+                    <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                    {t('loading')}
+                  </>
+                ) : (
+                  <span className="text-warmgray-300">{lang === 'en' ? 'All records loaded' : '全件表示済み'}</span>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

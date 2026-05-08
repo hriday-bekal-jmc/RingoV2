@@ -1,5 +1,6 @@
-﻿import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+﻿import { useState, useEffect, useCallback } from 'react';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useScrollEnd } from '../hooks/useScrollEnd';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import { ROLE_MAP, Role } from '../config/permissions';
@@ -973,18 +974,45 @@ const STATUS_BADGE: Record<string, string> = {
 
 // STATUS_LABEL now computed dynamically in ApplicationsTab using t() for language support
 
+const PAGE_APPS = 30;
+
 function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error' | 'info') => void }) {
   const queryClient = useQueryClient();
   const { t } = useLang();
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [deptFilter, setDeptFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<AppRecord | null>(null);
 
-  const { data: apps = [], isLoading } = useQuery<AppRecord[]>({
-    queryKey: ['admin', 'applications'],
-    queryFn: async () => (await apiClient.get('/admin/applications')).data,
+  // Debounce search — 300ms
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(id);
+  }, [search]);
+
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+  } = useInfiniteQuery<{ items: AppRecord[]; hasMore: boolean; offset: number }>({
+    queryKey: ['admin', 'applications', debouncedSearch, deptFilter, statusFilter],
+    queryFn: async ({ pageParam = 0 }) => (await apiClient.get(
+      `/admin/applications?search=${encodeURIComponent(debouncedSearch)}&dept=${encodeURIComponent(deptFilter)}&status=${encodeURIComponent(statusFilter)}&limit=${PAGE_APPS}&offset=${pageParam}`
+    )).data,
+    initialPageParam: 0,
+    getNextPageParam: (last, all) => last.hasMore ? all.length * PAGE_APPS : undefined,
+    staleTime: 30_000,
   });
+
+  const apps = data?.pages.flatMap(p => p.items) ?? [];
+
+  const sentinelRef = useScrollEnd(
+    useCallback(() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }, [hasNextPage, isFetchingNextPage, fetchNextPage]),
+    hasNextPage ?? false,
+  );
 
   const { data: departments = [] } = useQuery<Department[]>({
     queryKey: ['admin', 'departments'],
@@ -1011,12 +1039,7 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
     CANCELLED:        t('status_cancelled'),
   };
 
-  const filtered = apps.filter((a) => {
-    if (search && !a.applicant_name?.includes(search) && !a.template_name?.includes(search) && !a.application_number?.includes(search)) return false;
-    if (deptFilter && a.department_name !== deptFilter) return false;
-    if (statusFilter && a.status !== statusFilter) return false;
-    return true;
-  });
+  const hasActiveFilter = !!(search || deptFilter || statusFilter);
 
   return (
     <div className="space-y-5">
@@ -1057,8 +1080,10 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
           value={statusFilter}
           onChange={setStatusFilter}
         />
-        <span className="text-sm text-warmgray-400">{filtered.length} {t('admin_apps_count')}</span>
-        {(search || deptFilter || statusFilter) && (
+        <span className="text-sm text-warmgray-400">
+          {apps.length}{hasNextPage ? '+' : ''} {t('admin_apps_count')}
+        </span>
+        {hasActiveFilter && (
           <button
             className="text-xs text-ringo-500 hover:text-ringo-700 font-semibold"
             onClick={() => { setSearch(''); setDeptFilter(''); setStatusFilter(''); }}
@@ -1085,7 +1110,7 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
               </tr>
             </thead>
             <tbody>
-              {filtered.map((a) => (
+              {apps.map((a) => (
                 <tr key={a.id}>
                   <td><span className="font-mono text-[11px] text-warmgray-500">{a.application_number ?? '—'}</span></td>
                   <td className="font-semibold text-warmgray-800">{a.template_name}</td>
@@ -1114,7 +1139,28 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
               ))}
             </tbody>
           </table>
-          {filtered.length === 0 && (
+
+          {/* Sentinel for infinite scroll */}
+          <div ref={sentinelRef} className="h-px" />
+
+          {/* Feedback row */}
+          {(isFetchingNextPage || (!hasNextPage && apps.length >= PAGE_APPS)) && (
+            <div className="px-5 py-3 flex items-center justify-center gap-2 text-warmgray-400 text-xs border-t border-white/20">
+              {isFetchingNextPage ? (
+                <>
+                  <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                  </svg>
+                  読み込み中...
+                </>
+              ) : (
+                <span className="text-warmgray-300">全件表示済み</span>
+              )}
+            </div>
+          )}
+
+          {apps.length === 0 && !isLoading && (
             <div className="py-12 text-center text-warmgray-400 text-sm">{t('admin_no_apps_data')}</div>
           )}
         </div>

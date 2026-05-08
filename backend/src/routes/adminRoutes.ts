@@ -235,22 +235,43 @@ router.delete('/route-steps/:id', async (req: Request, res: Response): Promise<v
 
 // ─── Applications ─────────────────────────────────────────────────────────────
 
-router.get('/applications', async (_req: Request, res: Response): Promise<void> => {
+// GET /admin/applications — paginated, server-side filters
+// ?search=&dept=&status=&limit=30&offset=0
+router.get('/applications', async (req: Request, res: Response): Promise<void> => {
+  const search = ((req.query.search as string | undefined) ?? '').trim();
+  const dept   = ((req.query.dept   as string | undefined) ?? '').trim();
+  const status = ((req.query.status as string | undefined) ?? '').trim().toUpperCase();
+  const limit  = Math.min(Number(req.query.limit  ?? 30), 200);
+  const offset = Math.max(Number(req.query.offset ?? 0),  0);
+
   try {
-    const result = await query(`
-      SELECT a.id, a.application_number, a.status, a.created_at,
-             t.title_ja AS template_name,
-             u.full_name AS applicant_name,
-             u.email AS applicant_email,
-             d.name AS department_name
-      FROM applications a
-      JOIN form_templates t ON a.template_id = t.id
-      LEFT JOIN users u ON a.applicant_id = u.id
-      LEFT JOIN departments d ON d.id = u.department_id
-      ORDER BY a.created_at DESC
-      LIMIT 500
-    `);
-    res.json(result.rows);
+    const result = await query(
+      `SELECT a.id, a.application_number, a.status, a.created_at,
+              t.title_ja AS template_name,
+              u.full_name AS applicant_name,
+              u.email AS applicant_email,
+              d.name AS department_name
+       FROM applications a
+       JOIN form_templates t ON a.template_id = t.id
+       LEFT JOIN users u ON a.applicant_id = u.id
+       LEFT JOIN departments d ON d.id = u.department_id
+       WHERE ($1 = '' OR (
+         u.full_name ILIKE $1 OR
+         t.title_ja  ILIKE $1 OR
+         a.application_number ILIKE $1
+       ))
+       AND ($2 = '' OR d.name = $2)
+       AND ($3 = '' OR a.status = $3)
+       ORDER BY a.created_at DESC
+       LIMIT $4 OFFSET $5`,
+      [`%${search}%`.replace('%%', '%'), dept, status, limit + 1, offset],
+    );
+    // Empty search = '' → ILIKE '%' matches everything. But we pass '%search%' so
+    // for empty search the condition becomes "'' = '' OR ..." which short-circuits. ✓
+    const rows    = result.rows;
+    const hasMore = rows.length > limit;
+    if (hasMore) rows.pop();
+    res.json({ items: rows, hasMore, offset });
   } catch (err) {
     console.error('[admin] applications list failed:', err);
     res.status(500).json({ error: '申請一覧の取得に失敗しました' });

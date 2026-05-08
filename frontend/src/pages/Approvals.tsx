@@ -147,6 +147,7 @@ interface AppDetailData {
   id: string;
   application_number: string | null;
   status: string;
+  has_settlement?: boolean;
   form_data: Record<string, unknown>;
   settlement_data?: Record<string, unknown> | null;
   schema_definition: { fields: FormField[] } | null;
@@ -155,6 +156,9 @@ interface AppDetailData {
   applicant_name: string;
   applicant_avatar?: string | null;
   created_at: string;
+  transfer_date?: string | null;
+  transfer_proof_url?: string | null;
+  accounting_note?: string | null;
   steps: Array<{
     step_order: number;
     stage: string;
@@ -166,16 +170,16 @@ interface AppDetailData {
   }>;
 }
 
-const STEP_ICON: Record<string, string> = {
-  APPROVED: '✓', REJECTED: '✕', RETURNED: '↩', PENDING: '●', WAITING: '○', CANCELLED: '–',
-};
-const STEP_CLS: Record<string, string> = {
-  APPROVED:  'text-emerald-600 bg-emerald-50  border-emerald-200',
-  REJECTED:  'text-red-600     bg-red-50      border-red-200',
-  RETURNED:  'text-amber-600   bg-amber-50    border-amber-200',
-  PENDING:   'text-ringo-500   bg-ringo-50    border-ringo-200',
-  WAITING:   'text-warmgray-400 bg-surface-100 border-surface-200',
-  CANCELLED: 'text-warmgray-300 bg-surface-50  border-surface-100',
+const STATUS_BADGE_PANEL: Record<string, string> = {
+  PENDING_APPROVAL:   'badge-pending',
+  APPROVED:           'badge-approved',
+  REJECTED:           'badge-rejected',
+  RETURNED:           'badge-returned',
+  DRAFT:              'badge-draft',
+  CANCELLED:          'badge-draft',
+  COMPLETED:          'badge-approved',
+  PENDING_SETTLEMENT: 'badge-mustard',
+  SETTLEMENT_APPROVED:'badge-approved',
 };
 
 function AppDetailPanel({ appId, onClose, tFn, lang }: {
@@ -191,13 +195,99 @@ function AppDetailPanel({ appId, onClose, tFn, lang }: {
     staleTime: 60_000,
   });
 
+  // Timeline step dot colour
+  const stepDotCls = (status: string) =>
+    `absolute -left-[11px] top-0 w-5 h-5 rounded-full border-4 border-white/60 shadow-sm ${
+      status === 'APPROVED'            ? 'bg-emerald-500' :
+      status === 'REJECTED'            ? 'bg-ringo-500'   :
+      status === 'RETURNED'            ? 'bg-amber-500'   :
+      status === 'PENDING'             ? 'bg-mustard-500 ring-2 ring-mustard-300 animate-pulse' :
+      'bg-warmgray-300'
+    }`;
+
+  const renderTimelineStep = (step: AppDetailData['steps'][number], i: number) => (
+    <div key={`${step.stage}-${step.step_order}-${i}`} className="relative pl-6">
+      <div className={stepDotCls(step.status)} />
+      <div className="-mt-1">
+        <p className="font-bold text-sm text-warmgray-800 leading-snug">{step.label || `ステップ${step.step_order}`}</p>
+        <p className="text-xs text-warmgray-500 mt-0.5">{step.approver_name || tFn('detail_unassigned')}</p>
+        {step.acted_at && (
+          <p className="text-[10px] text-warmgray-400 mt-0.5">
+            {new Date(step.acted_at).toLocaleString(dateLocale)}
+          </p>
+        )}
+        {step.comment && (
+          <div className={`mt-2 text-xs px-2.5 py-2 rounded-lg ${
+            step.status === 'RETURNED'
+              ? 'bg-amber-50 border border-amber-200 text-amber-800'
+              : 'bg-white/60 border border-white/80 text-warmgray-700'
+          }`}>
+            <span className="font-bold mr-1">{tFn('detail_comment')}:</span>{step.comment}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // Styled field box (matches ApplicationDetail.tsx)
+  const renderFields = (formData: Record<string, unknown>, schema: { fields: FormField[] } | null | undefined) => {
+    const fields = schema?.fields ?? [];
+    if (fields.length === 0) {
+      return (
+        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+          {Object.entries(formData).map(([k, v]) => (
+            <div key={k} className={String(v ?? '').length > 40 ? 'col-span-full' : ''}>
+              <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{k}</dt>
+              <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3 py-2.5 rounded-xl break-words min-h-[38px]">
+                {String(v ?? '') || <span className="text-warmgray-300">—</span>}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      );
+    }
+    return (
+      <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+        {fields.map((f) => {
+          const val = formData[f.name];
+          const isLong = f.type === 'textarea' || (typeof val === 'string' && val.length > 50);
+          const isFile = f.type === 'file';
+          return (
+            <div key={f.name} className={isLong ? 'col-span-full' : ''}>
+              <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{f.label}</dt>
+              <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3 py-2.5 rounded-xl break-words min-h-[38px]">
+                {isFile && val ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {String(val).split(',').filter(Boolean).map((url, i) => {
+                      const full = url.startsWith('http') ? url : `${API_BASE.replace('/api', '')}${url}`;
+                      return (
+                        <a key={i} href={full} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs text-ringo-600 hover:text-ringo-700 bg-ringo-50/60 border border-ringo-200/60 px-2 py-0.5 rounded-lg font-medium">
+                          📎 {tFn('attach_label')} {i + 1}
+                        </a>
+                      );
+                    })}
+                  </div>
+                ) : val != null && val !== '' ? (
+                  <span className={isLong ? 'block whitespace-pre-wrap leading-relaxed' : ''}>{String(val)}</span>
+                ) : (
+                  <span className="text-warmgray-300 text-xs">—</span>
+                )}
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
+    );
+  };
+
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-warmgray-900/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative glass rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col animate-scale-in overflow-hidden">
+      <div className="relative glass rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col animate-scale-in overflow-hidden">
 
         {/* Header */}
-        <div className="px-6 pt-6 pb-4 border-b border-white/30 shrink-0 flex items-center justify-between gap-4">
+        <div className="px-6 pt-5 pb-4 border-b border-white/30 shrink-0 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <svg className="w-4 h-4 text-ringo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" />
@@ -228,76 +318,128 @@ function AppDetailPanel({ appId, onClose, tFn, lang }: {
           {isError && (
             <div className="p-6 text-sm text-ringo-500 text-center">{tFn('approvals_error_msg')}</div>
           )}
-          {data && (
-            <div className="px-6 py-5 space-y-6">
-              {/* Meta */}
-              <div className="flex items-center gap-3">
-                <UserAvatar name={data.applicant_name ?? '?'} avatarUrl={data.applicant_avatar} size={9} />
-                <div>
-                  <p className="font-bold text-warmgray-800 text-sm">{data.template_name}</p>
-                  <p className="text-xs text-warmgray-400">
-                    {data.applicant_name} · {new Date(data.created_at).toLocaleDateString(dateLocale, { year: 'numeric', month: 'long', day: 'numeric' })}
-                  </p>
-                  {data.application_number && (
-                    <p className="text-[11px] font-mono text-ringo-400 mt-0.5">{data.application_number}</p>
+          {data && (() => {
+            const ringiSteps  = data.steps.filter(s => (s.stage === 'RINGI' || !s.stage) && s.status !== 'CANCELLED');
+            const settleSteps = data.steps.filter(s => s.stage === 'SETTLEMENT' && s.status !== 'CANCELLED');
+            const hasSettlement = data.has_settlement || settleSteps.length > 0;
+            const hasSettlementData = data.settlement_data && Object.keys(data.settlement_data).length > 0;
+            const statusLabel: Record<string, string> = {
+              PENDING_APPROVAL: tFn('status_pending'), APPROVED: tFn('status_approved'),
+              REJECTED: tFn('status_rejected'), RETURNED: tFn('status_returned'),
+              DRAFT: tFn('status_draft'), COMPLETED: tFn('status_completed'),
+              PENDING_SETTLEMENT: tFn('status_pending_settle'), SETTLEMENT_APPROVED: tFn('status_settle_approved'),
+            };
+
+            return (
+              <div className="p-5 grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+                {/* ── Left: meta + content ── */}
+                <div className="lg:col-span-2 space-y-5">
+
+                  {/* Meta card */}
+                  <div className="card space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-white/40 pb-4">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={STATUS_BADGE_PANEL[data.status] ?? 'badge-draft'}>
+                            {statusLabel[data.status] ?? data.status}
+                          </span>
+                          {hasSettlement && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700 border border-teal-200/60">
+                              {tFn('two_stage_badge')}
+                            </span>
+                          )}
+                        </div>
+                        <h3 className="text-xl font-bold text-warmgray-800 mt-2 leading-tight">{data.template_name}</h3>
+                        <div className="flex items-center gap-2 mt-1.5 text-xs text-warmgray-400 flex-wrap">
+                          {data.application_number && <span className="font-mono">{data.application_number}</span>}
+                          {data.application_number && <span>·</span>}
+                          <span>{new Date(data.created_at).toLocaleDateString(dateLocale, { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2.5 shrink-0">
+                        <UserAvatar name={data.applicant_name ?? '?'} avatarUrl={data.applicant_avatar} size={9} />
+                        <div className="text-right">
+                          <p className="text-[10px] uppercase tracking-widest text-warmgray-400 mb-0.5">{tFn('detail_applicant_lbl')}</p>
+                          <p className="font-bold text-warmgray-800 text-sm">{data.applicant_name}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* RINGI form data */}
+                    <div>
+                      <p className="section-title mb-3">{tFn('detail_content')}</p>
+                      {renderFields(data.form_data, data.schema_definition)}
+                    </div>
+                  </div>
+
+                  {/* Settlement data card */}
+                  {hasSettlementData && data.settlement_schema && (
+                    <div className="card space-y-4 border border-teal-200/40">
+                      <div className="flex items-center gap-2 pb-3 border-b border-white/30">
+                        <span className="w-5 h-5 rounded-full bg-teal-500 flex items-center justify-center text-white text-[10px] font-bold shrink-0">💴</span>
+                        <p className="text-sm font-bold text-teal-800 uppercase tracking-widest">{tFn('detail_settle_data_title')}</p>
+                      </div>
+                      {renderFields(data.settlement_data!, data.settlement_schema)}
+
+                      {/* Accounting result */}
+                      {(data.transfer_date || data.transfer_proof_url || data.accounting_note) && (
+                        <div className="pt-3 border-t border-teal-100 space-y-2">
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-teal-600">{tFn('accounting_result_title')}</p>
+                          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                            {data.transfer_date && (
+                              <div>
+                                <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-0.5">{tFn('accounting_col_transfer')}</dt>
+                                <dd className="font-semibold text-warmgray-800">{new Date(data.transfer_date).toLocaleDateString('ja-JP')}</dd>
+                              </div>
+                            )}
+                            {data.accounting_note && (
+                              <div>
+                                <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-0.5">{tFn('accounting_col_proof')}</dt>
+                                <dd className="text-warmgray-700">{data.accounting_note}</dd>
+                              </div>
+                            )}
+                          </dl>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Right: timeline ── */}
+                <div className="space-y-4">
+                  <p className="section-title ml-1">{tFn('detail_timeline')}</p>
+
+                  {/* RINGI steps */}
+                  {ringiSteps.length > 0 && (
+                    <div className="card pt-5 pb-3">
+                      {hasSettlement && (
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-ringo-400 mb-4 ml-4">{tFn('phase_ringi')}</p>
+                      )}
+                      <div className="relative border-l-2 border-ringo-200 ml-4 space-y-6 pb-2">
+                        {ringiSteps
+                          .filter(s => s.status !== 'CANCELLED')
+                          .sort((a, b) => a.step_order - b.step_order)
+                          .map((s, i) => renderTimelineStep(s, i))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* SETTLEMENT steps */}
+                  {settleSteps.length > 0 && (
+                    <div className="card pt-5 pb-3">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-teal-500 mb-4 ml-4">{tFn('phase_settlement')}</p>
+                      <div className="relative border-l-2 border-teal-200 ml-4 space-y-6 pb-2">
+                        {settleSteps
+                          .sort((a, b) => a.step_order - b.step_order)
+                          .map((s, i) => renderTimelineStep(s, i))}
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
-
-              {/* Form data */}
-              <div>
-                <p className="section-title mb-3">{lang === 'en' ? 'Application Content' : '申請内容'}</p>
-                <FormDataViewer formData={data.form_data} schema={data.schema_definition} tFn={tFn} />
-              </div>
-
-              {/* Settlement data */}
-              {data.settlement_data && (
-                <div>
-                  <p className="section-title mb-3">{lang === 'en' ? 'Settlement Content' : '精算内容'}</p>
-                  <FormDataViewer formData={data.settlement_data} schema={data.settlement_schema ?? null} tFn={tFn} />
-                </div>
-              )}
-
-              {/* Approval timeline */}
-              {data.steps && data.steps.length > 0 && (
-                <div>
-                  <p className="section-title mb-3">{lang === 'en' ? 'Approval Flow' : '承認フロー'}</p>
-                  <div className="space-y-2">
-                    {data.steps.map((step, i) => {
-                      const cls = STEP_CLS[step.status] ?? STEP_CLS.WAITING;
-                      const icon = STEP_ICON[step.status] ?? '·';
-                      return (
-                        <div key={i} className={`flex items-start gap-3 p-3 rounded-xl border text-xs ${cls}`}>
-                          <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] shrink-0 mt-0.5 border ${cls}`}>
-                            {icon}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-semibold text-warmgray-700">{step.label || `ステップ ${step.step_order}`}</span>
-                              {step.stage === 'SETTLEMENT' && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-600 font-bold">精算</span>
-                              )}
-                              {step.approver_name && (
-                                <span className="text-warmgray-400">— {step.approver_name}</span>
-                              )}
-                            </div>
-                            {step.comment && (
-                              <p className="text-warmgray-500 mt-1 italic">"{step.comment}"</p>
-                            )}
-                            {step.acted_at && (
-                              <p className="text-warmgray-300 mt-0.5 text-[10px]">
-                                {new Date(step.acted_at).toLocaleString(dateLocale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+            );
+          })()}
         </div>
       </div>
     </div>
@@ -357,13 +499,13 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
                 </p>
               </div>
             </div>
+            {/* X close — top right */}
             <button
-              onClick={() => setShowDetail(true)}
-              className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-ringo-50/80 hover:bg-ringo-100/80 text-ringo-500 hover:text-ringo-700 text-xs font-bold transition-all border border-ringo-200/60"
+              onClick={onClose}
+              className="shrink-0 w-8 h-8 rounded-xl bg-surface-100/80 hover:bg-surface-200/80 flex items-center justify-center text-warmgray-400 hover:text-warmgray-800 transition-all"
             >
-              {lang === 'en' ? 'Details' : '詳細'}
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
@@ -469,8 +611,18 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
               </div>
             </div>
           ) : (
-            <div className="flex items-center gap-2 justify-end">
-              <button className="btn-ghost text-sm" onClick={onClose}>{t('btn_close')}</button>
+            <div className="flex items-center gap-2">
+              {/* 詳細 → moved here from header */}
+              <button
+                onClick={() => setShowDetail(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-ringo-50/80 hover:bg-ringo-100/80 text-ringo-500 hover:text-ringo-700 text-xs font-bold transition-all border border-ringo-200/60"
+              >
+                {lang === 'en' ? 'Details' : '詳細'}
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                </svg>
+              </button>
+              <div className="flex-1" />
               <button className="btn-outline text-sm" onClick={() => { setActiveAction('return'); setComment(''); }} disabled={isMutating}>
                 ↩ {t('btn_return')}
               </button>
@@ -716,20 +868,23 @@ export default function Approvals() {
               </tbody>
             </table>
 
-            {/* Infinite scroll sentinel */}
-            <div ref={sentinelRef} className="px-5 py-4 flex items-center justify-center gap-2 text-warmgray-400 text-xs min-h-[48px]">
-              {isFetchingNextPage ? (
-                <>
-                  <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                  </svg>
-                  {t('loading')}
-                </>
-              ) : !hasNextPage && applications.length >= PAGE ? (
-                <span className="text-warmgray-300">{lang === 'en' ? 'All loaded' : '全件表示済み'}</span>
-              ) : null}
-            </div>
+            {/* Sentinel — invisible h-px; observer fires 200px before bottom */}
+            <div ref={sentinelRef} className="h-px" />
+            {(isFetchingNextPage || (!hasNextPage && applications.length >= PAGE)) && (
+              <div className="px-5 py-3 flex items-center justify-center gap-2 text-warmgray-400 text-xs border-t border-white/20">
+                {isFetchingNextPage ? (
+                  <>
+                    <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                    {t('loading')}
+                  </>
+                ) : (
+                  <span className="text-warmgray-300">{lang === 'en' ? 'All loaded' : '全件表示済み'}</span>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
