@@ -758,8 +758,14 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-// GET /applications — applicant's own list
+// GET /applications — applicant's own list  (paginated)
+// ?limit=25&offset=0&status=DRAFT   (status omit or 'ALL' = no filter)
+const APP_PAGE_SIZE = 25;
 router.get('/', async (req: Request, res: Response): Promise<void> => {
+  const limit  = Math.min(Number(req.query.limit  ?? APP_PAGE_SIZE), 100);
+  const offset = Math.max(Number(req.query.offset ?? 0), 0);
+  const status = ((req.query.status as string | undefined) ?? 'ALL').toUpperCase();
+
   try {
     const result = await query(
       `SELECT
@@ -767,7 +773,6 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
          a.settlement_submitted_at,
          t.title_ja AS template_name, t.code AS template_code,
          t.settlement_schema IS NOT NULL AS has_settlement,
-         -- current step (either RINGI or SETTLEMENT pending)
          COALESCE(
            (SELECT s.step_order FROM approval_steps s
             WHERE s.application_id = a.id AND s.stage = 'SETTLEMENT' AND s.status = 'PENDING'
@@ -781,10 +786,15 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
        FROM applications a
        JOIN form_templates t ON a.template_id = t.id
        WHERE a.applicant_id = $1
-       ORDER BY a.created_at DESC`,
-      [req.user!.id],
+         AND ($2 = 'ALL' OR a.status = $2)
+       ORDER BY a.created_at DESC
+       LIMIT $3 OFFSET $4`,
+      [req.user!.id, status, limit + 1, offset],
     );
-    res.json(result.rows);
+    const rows    = result.rows;
+    const hasMore = rows.length > limit;
+    if (hasMore) rows.pop();
+    res.json({ items: rows, hasMore, offset });
   } catch (err) {
     console.error('[applications] list failed:', err);
     res.status(500).json({ error: '申請一覧の取得に失敗しました' });

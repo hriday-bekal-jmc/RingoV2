@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState, useEffect, useCallback } from 'react';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
+import { useScrollEnd } from '../hooks/useScrollEnd';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import ConfirmDialog from '../components/common/ConfirmDialog';
@@ -76,10 +77,29 @@ export default function History() {
     if (searchParams.get('settled') === '1') showToast(t('toast_settled'));
   }, [searchParams]);
 
-  const { data: applications = [], isLoading } = useQuery<Application[]>({
-    queryKey: ['myApplications'],
-    queryFn: async () => (await apiClient.get('/applications')).data,
+  const PAGE = 25;
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+  } = useInfiniteQuery<{ items: Application[]; hasMore: boolean; offset: number }>({
+    queryKey: ['myApplications', statusFilter],
+    queryFn: async ({ pageParam = 0 }) => (await apiClient.get(
+      `/applications?limit=${PAGE}&offset=${pageParam}&status=${statusFilter}`
+    )).data,
+    initialPageParam: 0,
+    getNextPageParam: (last, all) => last.hasMore ? all.length * PAGE : undefined,
+    staleTime: 30_000,
   });
+
+  const applications = data?.pages.flatMap(p => p.items) ?? [];
+
+  const sentinelRef = useScrollEnd(
+    useCallback(() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }, [hasNextPage, isFetchingNextPage, fetchNextPage]),
+    hasNextPage ?? false,
+  );
 
   const deleteDraft = useMutation({
     mutationFn: async (id: string) => (await apiClient.delete(`/applications/${id}`)).data,
@@ -99,14 +119,8 @@ export default function History() {
     onError: (err: any) => showToast(`${t('toast_submit_error')}: ${err.message}`, 'error'),
   });
 
-  const filtered = statusFilter === 'ALL'
-    ? applications
-    : applications.filter((a) => a.status === statusFilter);
-
-  const sorted = [...filtered].sort((a, b) =>
-    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  );
-
+  // Server handles status filter + sort — just alias locally
+  const sorted = applications;
   const draftCount = applications.filter((a) => a.status === 'DRAFT').length;
 
   return (
@@ -305,6 +319,21 @@ export default function History() {
                 );
               })}
             </ul>
+
+            {/* Infinite scroll sentinel */}
+            <div ref={sentinelRef} className="px-5 py-4 flex items-center justify-center gap-2 text-warmgray-400 text-xs min-h-[52px]">
+              {isFetchingNextPage ? (
+                <>
+                  <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                  </svg>
+                  {t('loading')}
+                </>
+              ) : !hasNextPage && sorted.length >= PAGE ? (
+                <span className="text-warmgray-300">{lang === 'en' ? 'All records loaded' : '全件表示済み'}</span>
+              ) : null}
+            </div>
           </div>
         )}
       </div>

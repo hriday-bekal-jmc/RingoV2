@@ -68,13 +68,15 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const perms = getPermissions(user?.role);
 
-  const { data: pendingApprovals } = useQuery<any[]>({
-    queryKey: ['pendingApprovals'],
-    queryFn: async () => (await apiClient.get('/approvals/pending')).data,
+  // limit=1 — only need the total count (COUNT(*) OVER() window fn), not the rows.
+  // Separate key suffix 'badge' avoids conflict with Approvals page's infinite query.
+  const { data: pendingRes } = useQuery<{ total: number }>({
+    queryKey: ['pendingApprovals', 'badge'],
+    queryFn: async () => (await apiClient.get('/approvals/pending?limit=1&offset=0')).data,
     enabled: perms.canApprove,
     staleTime: 30_000,
   });
-  const pendingCount = pendingApprovals?.length ?? 0;
+  const pendingCount = pendingRes?.total ?? 0;
 
   const initial = user?.full_name?.slice(0, 1) ?? '?';
 

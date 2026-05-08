@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useMemo, useCallback } from 'react';
+import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom'; // used inside DetailPanel
+import { useScrollEnd } from '../hooks/useScrollEnd';
 import Layout from '../components/common/Layout';
 import apiClient from '../services/apiClient';
 import { useLang } from '../context/LanguageContext';
@@ -299,14 +300,33 @@ export default function ApprovalHistory() {
   if (dateTo)               params.set('date_to', dateTo);
   if (applicant)            params.set('applicant', applicant);
 
-  const { data: items = [], isLoading, error } = useQuery<HistoryItem[]>({
+  const PAGE = 25;
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+    error,
+  } = useInfiniteQuery<{ items: HistoryItem[]; hasMore: boolean; offset: number }>({
     queryKey: ['approvalHistory', stage, action, templateId, dateFrom, dateTo, applicant],
-    queryFn: async () => (await apiClient.get(`/approvals/history?${params}`)).data,
+    queryFn: async ({ pageParam = 0 }) => (await apiClient.get(
+      `/approvals/history?${params}&limit=${PAGE}&offset=${pageParam}`
+    )).data,
+    initialPageParam: 0,
+    getNextPageParam: (last, all) => last.hasMore ? all.length * PAGE : undefined,
     staleTime: 30_000,
     retry: 1,
   });
 
-  // Unique templates for filter dropdown
+  const items = data?.pages.flatMap(p => p.items) ?? [];
+
+  const sentinelRef = useScrollEnd(
+    useCallback(() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }, [hasNextPage, isFetchingNextPage, fetchNextPage]),
+    hasNextPage ?? false,
+  );
+
+  // Unique templates: accumulate from ALL loaded pages (not just latest)
   const templateOptions = useMemo(() => {
     const seen = new Map<string, string>();
     for (const item of items) {
@@ -435,7 +455,9 @@ export default function ApprovalHistory() {
         <div className="card animate-fade-up">
           <div className="flex items-center justify-between mb-4">
             <p className="section-title mb-0">
-              {lang === 'en' ? `${items.length} records` : `${items.length}件`}
+              {lang === 'en'
+                ? `${items.length} record${items.length !== 1 ? 's' : ''}${hasNextPage ? '+' : ''}`
+                : `${items.length}件${hasNextPage ? '以上' : ''}`}
             </p>
           </div>
 
@@ -563,6 +585,21 @@ export default function ApprovalHistory() {
                   })}
                 </tbody>
               </table>
+
+              {/* Infinite scroll sentinel */}
+              <div ref={sentinelRef} className="px-5 py-4 flex items-center justify-center gap-2 text-warmgray-400 text-xs min-h-[48px]">
+                {isFetchingNextPage ? (
+                  <>
+                    <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                    {lang === 'en' ? 'Loading...' : '読み込み中…'}
+                  </>
+                ) : !hasNextPage && items.length >= PAGE ? (
+                  <span className="text-warmgray-300">{lang === 'en' ? 'All records loaded' : '全件表示済み'}</span>
+                ) : null}
+              </div>
             </div>
           )}
         </div>

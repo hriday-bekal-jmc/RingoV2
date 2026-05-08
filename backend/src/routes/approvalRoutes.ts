@@ -7,10 +7,15 @@ import type pg from 'pg';
 const router = Router();
 router.use(requireAuth);
 
-// GET /approvals/pending — steps assigned to current user; ADMIN sees all
-// Covers both RINGI (PENDING_APPROVAL) and SETTLEMENT (PENDING_SETTLEMENT) stages
+// GET /approvals/pending — steps assigned to current user  (paginated)
+// ?all=true (ADMIN only) → system-wide view
+// ?limit=25&offset=0
+const APPROVAL_PAGE_SIZE = 25;
 router.get('/pending', async (req: Request, res: Response): Promise<void> => {
   const { id: userId, role } = req.user!;
+  const systemView = role === 'ADMIN' && req.query.all === 'true';
+  const limit  = Math.min(Number(req.query.limit  ?? APPROVAL_PAGE_SIZE), 100);
+  const offset = Math.max(Number(req.query.offset ?? 0), 0);
   try {
     const result = await query(
       `SELECT
@@ -28,7 +33,8 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
          approver.avatar_url AS current_approver_avatar,
          (SELECT COUNT(*) FROM approval_steps
           WHERE application_id = a.id AND stage = s.stage
-            AND step_order / 100 = s.step_order / 100) AS total_steps
+            AND step_order / 100 = s.step_order / 100) AS total_steps,
+         COUNT(*) OVER() AS total_count
        FROM applications a
        JOIN form_templates t ON a.template_id = t.id
        LEFT JOIN users u ON a.applicant_id = u.id
@@ -36,11 +42,18 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
          ON s.application_id = a.id AND s.status = 'PENDING'
        LEFT JOIN users approver ON s.approver_id = approver.id
        WHERE a.status IN ('PENDING_APPROVAL', 'PENDING_SETTLEMENT')
-         AND ($1 = 'ADMIN' OR s.approver_id = $2 OR s.approver_id IS NULL)
-       ORDER BY a.created_at DESC`,
-      [role, userId],
+         AND ($1 OR s.approver_id = $2)
+       ORDER BY a.created_at DESC
+       LIMIT $3 OFFSET $4`,
+      [systemView, userId, limit + 1, offset],
     );
-    res.json(result.rows);
+    const rows    = result.rows;
+    const total   = Number(rows[0]?.total_count ?? 0);
+    const hasMore = rows.length > limit;
+    if (hasMore) rows.pop();
+    // strip internal total_count from each row
+    const items = rows.map(({ total_count: _, ...r }) => r);
+    res.json({ items, hasMore, total, offset });
   } catch (err) {
     console.error('[approvals] pending fetch failed:', err);
     res.status(500).json({ error: '承認待ち一覧の取得に失敗しました' });
@@ -137,15 +150,15 @@ router.post('/:id/approve', async (req: Request, res: Response): Promise<void> =
         const year = new Date().getFullYear();
         const appNumber = `RNG-${year}-${String(seqRow.rows[0].n).padStart(6, '0')}`;
 
-        // RINGI final → APPROVED; SETTLEMENT final → COMPLETED
-        const newStatus = currentStep.stage === 'SETTLEMENT' ? 'COMPLETED' : 'APPROVED';
+        // RINGI final → APPROVED
+        // SETTLEMENT final → SETTLEMENT_APPROVED (accounting must close with date+proof separately)
+        const newStatus = currentStep.stage === 'SETTLEMENT' ? 'SETTLEMENT_APPROVED' : 'APPROVED';
         const appRes = await client.query(
           `UPDATE applications
            SET status = $2,
-               application_number = COALESCE(application_number, $3),
-               completed_at = CURRENT_TIMESTAMP
+               application_number = COALESCE(application_number, $3)
            WHERE id = $1
-           RETURNING id, status, application_number, completed_at`,
+           RETURNING id, status, application_number`,
           [id, newStatus, appNumber],
         );
         updatedApp = appRes.rows[0];
@@ -161,18 +174,22 @@ router.post('/:id/approve', async (req: Request, res: Response): Promise<void> =
     });
 
     const status = (result as { status?: string }).status;
-    const isFinal = status === 'APPROVED' || status === 'COMPLETED';
+    // APPROVED = ringi final; SETTLEMENT_APPROVED = settlement workflow final (accounting closes separately)
+    const isFinal = status === 'APPROVED' || status === 'COMPLETED' || status === 'SETTLEMENT_APPROVED';
+    const isSettlementApproved = status === 'SETTLEMENT_APPROVED';
     const isCompleted = status === 'COMPLETED';
 
     // Push real-time update to all connected clients
     emitAll('APPROVAL_ACTION', { type: 'approve', applicationId: id, final: isFinal });
 
     res.json({
-      message: isCompleted
-        ? '精算完了 — 申請が完了しました'
-        : isFinal
-          ? '最終承認しました — 申請番号を発行しました'
-          : '承認しました — 次の承認者に送付しました',
+      message: isSettlementApproved
+        ? '精算承認完了 — 経理担当者が振込確認後に締めます'
+        : isCompleted
+          ? '精算完了 — 申請が完了しました'
+          : isFinal
+            ? '最終承認しました — 申請番号を発行しました'
+            : '承認しました — 次の承認者に送付しました',
       application: result,
       final: isFinal,
       completed: isCompleted,
@@ -312,6 +329,13 @@ router.get('/history', async (req: Request, res: Response): Promise<void> => {
     params.push(`%${applicant}%`);
   }
 
+  const limit  = Math.min(Number(req.query.limit  ?? APPROVAL_PAGE_SIZE), 100);
+  const offset = Math.max(Number(req.query.offset ?? 0), 0);
+  params.push(limit + 1);
+  const limitIdx = idx++;
+  params.push(offset);
+  const offsetIdx = idx++;
+
   try {
     const sql = `
       SELECT
@@ -335,9 +359,12 @@ router.get('/history', async (req: Request, res: Response): Promise<void> => {
       LEFT JOIN users u_app ON a.applicant_id = u_app.id
       WHERE ${conditions.join(' AND ')}
       ORDER BY s.acted_at DESC NULLS LAST
-      LIMIT 200`;
+      LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
     const result = await query(sql, params);
-    res.json(result.rows);
+    const rows    = result.rows;
+    const hasMore = rows.length > limit;
+    if (hasMore) rows.pop();
+    res.json({ items: rows, hasMore, offset });
   } catch (err) {
     console.error('[approvals] history failed:', err);
     res.status(500).json({ error: `承認履歴の取得に失敗しました: ${(err as Error).message}` });

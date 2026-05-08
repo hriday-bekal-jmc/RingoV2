@@ -1,5 +1,6 @@
-import { useState, useRef } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState, useRef, useCallback } from 'react';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useScrollEnd } from '../hooks/useScrollEnd';
 import { Link } from 'react-router-dom';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
@@ -28,7 +29,8 @@ interface Settlement {
   template_name: string;
   applicant_name: string;
   department_name: string;
-  can_approve: boolean;
+  can_approve: boolean;   // legacy — no longer used in UI
+  can_close: boolean;     // true when app_status = SETTLEMENT_APPROVED
   pending_step_id: string | null;
   pending_step_label: string | null;
   pending_approver_name: string | null;
@@ -200,16 +202,15 @@ function ProofUploader({
   );
 }
 
-// ── Inline approve button (gated on transfer_date + proof upload) ─────────────
-function ApproveButton({
+// ── Settlement close button (Phase 2 — gated on transfer_date + proof) ────────
+// Called only when app_status = SETTLEMENT_APPROVED (workflow fully done).
+function CloseButton({
   settlementId,
-  stepLabel,
   transferDate,
   proofUrl,
   t,
 }: {
   settlementId: string;
-  stepLabel: string | null;
   transferDate: string | null;
   proofUrl: string | null;
   t: (k: any) => string;
@@ -217,10 +218,10 @@ function ApproveButton({
   const queryClient = useQueryClient();
   const mutation = useMutation({
     mutationFn: async () =>
-      (await apiClient.post(`/accounting/settlements/${settlementId}/approve`, {})).data,
+      (await apiClient.post(`/accounting/settlements/${settlementId}/close`, {})).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['accountingSettlements'] });
-      queryClient.invalidateQueries({ queryKey: ['pendingApprovals'] });
+      queryClient.invalidateQueries({ queryKey: ['myApplications'] });
     },
   });
 
@@ -234,7 +235,7 @@ function ApproveButton({
         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
         </svg>
-        {t('accounting_approve_done')}
+        完了
       </span>
     );
   }
@@ -252,15 +253,29 @@ function ApproveButton({
           <svg className="w-3 h-3 text-warmgray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
           </svg>
-          {t('accounting_approve_btn')}
+          精算を締める
         </button>
-        {/* Tooltip */}
         <div className="pointer-events-none absolute bottom-full left-0 mb-2 w-max max-w-[200px] opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
           <div className="bg-warmgray-800 text-white text-[11px] font-medium rounded-lg px-3 py-2 shadow-lg leading-relaxed">
             先に {hints.join('・')} を入力してください
             <div className="absolute top-full left-3 border-4 border-transparent border-t-warmgray-800" />
           </div>
         </div>
+      </div>
+    );
+  }
+
+  if (mutation.isError) {
+    const msg = (mutation.error as Error).message;
+    return (
+      <div className="flex flex-col gap-1">
+        <button
+          onClick={() => mutation.mutate()}
+          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-teal-500 text-white hover:bg-teal-600 active:scale-[0.98] shadow-sm transition-all duration-150 flex items-center gap-1.5"
+        >
+          再試行
+        </button>
+        <p className="text-[10px] text-ringo-500 max-w-[120px]">{msg}</p>
       </div>
     );
   }
@@ -277,14 +292,14 @@ function ApproveButton({
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
           </svg>
-          {t('accounting_approving')}
+          処理中…
         </>
       ) : (
         <>
           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
           </svg>
-          {t('accounting_approve_btn')}{stepLabel ? ` (${stepLabel})` : ''}
+          精算を締める
         </>
       )}
     </button>
@@ -299,17 +314,29 @@ export default function Accounting() {
   const [filter, setFilter] = useState<'ALL' | 'PENDING' | 'DONE'>('ALL');
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const { data: settlements = [], isLoading } = useQuery<Settlement[]>({
-    queryKey: ['accountingSettlements'],
-    queryFn: async () => (await apiClient.get('/accounting/settlements')).data,
+  const PAGE = 25;
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+  } = useInfiniteQuery<{ items: Settlement[]; hasMore: boolean; offset: number }>({
+    queryKey: ['accountingSettlements', filter],
+    queryFn: async ({ pageParam = 0 }) => (await apiClient.get(
+      `/accounting/settlements?filter=${filter}&limit=${PAGE}&offset=${pageParam}`
+    )).data,
+    initialPageParam: 0,
+    getNextPageParam: (last, all) => last.hasMore ? all.length * PAGE : undefined,
     staleTime: 30_000,
   });
 
-  const filtered = settlements.filter((s) => {
-    if (filter === 'PENDING') return ['PENDING_SETTLEMENT'].includes(s.app_status);
-    if (filter === 'DONE') return ['COMPLETED', 'SETTLEMENT_APPROVED'].includes(s.app_status);
-    return true;
-  });
+  const filtered = data?.pages.flatMap(p => p.items) ?? [];
+
+  const sentinelRef = useScrollEnd(
+    useCallback(() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }, [hasNextPage, isFetchingNextPage, fetchNextPage]),
+    hasNextPage ?? false,
+  );
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -425,7 +452,7 @@ export default function Accounting() {
                     <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_transfer')}</th>
                     <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_proof')}</th>
                     <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_status')}</th>
-                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_approve_btn')}</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">精算処理</th>
                     <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('col_detail')}</th>
                   </tr>
                 </thead>
@@ -514,31 +541,31 @@ export default function Accounting() {
                           </span>
                         </td>
 
-                        {/* Approve */}
+                        {/* Settlement close / workflow status */}
                         <td className="px-4 py-3">
-                          {s.can_approve ? (
-                            <ApproveButton
+                          {s.app_status === 'SETTLEMENT_APPROVED' ? (
+                            /* Phase 2: workflow done, accounting finalises */
+                            <CloseButton
                               settlementId={s.settlement_id}
-                              stepLabel={s.pending_step_label}
                               transferDate={s.transfer_date}
                               proofUrl={s.transfer_proof_url}
                               t={t}
                             />
-                          ) : s.pending_step_id ? (
-                            /* Pending but not user's turn */
+                          ) : s.app_status === 'PENDING_SETTLEMENT' ? (
+                            /* Phase 1: still in approval flow → action in Approvals page */
                             <div className="flex flex-col gap-0.5">
                               <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200/60 px-2 py-0.5 rounded-full whitespace-nowrap">
-                                {t('accounting_awaiting')}
+                                承認フロー進行中
                               </span>
                               {s.pending_approver_name && (
-                                <span className="text-[10px] text-warmgray-400 truncate max-w-[100px]">
-                                  {s.pending_approver_name}
+                                <span className="text-[10px] text-warmgray-400 truncate max-w-[110px]">
+                                  次: {s.pending_approver_name}
                                 </span>
                               )}
                             </div>
                           ) : (
-                            /* No pending step = completed */
-                            <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-full">
+                            /* COMPLETED */
+                            <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-full whitespace-nowrap">
                               ✓ {t('status_completed')}
                             </span>
                           )}
@@ -558,6 +585,21 @@ export default function Accounting() {
                   })}
                 </tbody>
               </table>
+            </div>
+
+            {/* Infinite scroll sentinel */}
+            <div ref={sentinelRef} className="px-5 py-4 flex items-center justify-center gap-2 text-warmgray-400 text-xs min-h-[48px]">
+              {isFetchingNextPage ? (
+                <>
+                  <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                  </svg>
+                  {t('loading')}
+                </>
+              ) : !hasNextPage && filtered.length >= PAGE ? (
+                <span className="text-warmgray-300">{lang === 'en' ? 'All loaded' : '全件表示済み'}</span>
+              ) : null}
             </div>
           </div>
         )}

@@ -77,26 +77,30 @@ export default function Dashboard() {
   const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
   const perms = getPermissions(user?.role);
 
-  const { data: myApps = [] } = useQuery<any[]>({
-    queryKey: ['myApplications'],
-    queryFn: async () => (await apiClient.get('/applications')).data,
+  // Dashboard: fetch up to 100 own apps for stat counts + recent list.
+  // Separate key suffix ('dashboard') avoids cache conflict with History's infinite query.
+  const { data: myAppsRes } = useQuery<{ items: any[]; hasMore: boolean }>({
+    queryKey: ['myApplications', 'dashboard'],
+    queryFn: async () => (await apiClient.get('/applications?limit=100&offset=0&status=ALL')).data,
     enabled: !loading,
     staleTime: 30_000,
   });
+  const myApps = myAppsRes?.items ?? [];
 
-  const { data: pendingApprovals = [] } = useQuery<any[]>({
-    queryKey: ['pendingApprovals'],
-    queryFn: async () => (await apiClient.get('/approvals/pending')).data,
+  // Pending approvals: need total (accurate count via window fn) + first few for mini-list.
+  const { data: pendingRes } = useQuery<{ items: any[]; hasMore: boolean; total: number }>({
+    queryKey: ['pendingApprovals', 'dashboard'],
+    queryFn: async () => (await apiClient.get('/approvals/pending?limit=5&offset=0')).data,
     enabled: !loading && perms.canApprove,
     staleTime: 30_000,
   });
+  const pendingApprovals      = pendingRes?.items ?? [];
+  const pendingApprovalsTotal = pendingRes?.total  ?? 0;
 
   const pendingCount  = myApps.filter((a) => a.status === 'PENDING_APPROVAL').length;
   const draftCount    = myApps.filter((a) => a.status === 'DRAFT').length;
   const returnedCount = myApps.filter((a) => a.status === 'RETURNED').length;
-  const recentApps    = [...myApps]
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    .slice(0, 5);
+  const recentApps    = myApps.slice(0, 5);   // already sorted DESC by server
   const firstName = user?.full_name?.split(' ')[0] ?? 'ゲスト';
 
   const hour = new Date().getHours();
@@ -136,7 +140,7 @@ export default function Dashboard() {
               to="/history?filter=DRAFT"
             />
             {perms.canApprove
-              ? <StatCard label={t('dash_stat_approval')} value={pendingApprovals.length} icon="🔔" color="from-ringo-200/50 to-transparent" to="/approvals" />
+              ? <StatCard label={t('dash_stat_approval')} value={pendingApprovalsTotal} icon="🔔" color="from-ringo-200/50 to-transparent" to="/approvals" />
               : <StatCard label={t('dash_stat_total')} value={myApps.length} icon="📁" color="from-indigo-200/30 to-transparent" to="/history" />
             }
           </div>

@@ -44,8 +44,13 @@ const proofUpload = multer({
   },
 });
 
-// ── GET /accounting/settlements ───────────────────────────────────────────────
+// ── GET /accounting/settlements  (paginated, server-side filter)
+// ?filter=ALL|PENDING|DONE  &limit=25&offset=0
+const SETTLE_PAGE_SIZE = 25;
 router.get('/settlements', async (req: Request, res: Response): Promise<void> => {
+  const filter = ((req.query.filter as string | undefined) ?? 'ALL').toUpperCase();
+  const limit  = Math.min(Number(req.query.limit  ?? SETTLE_PAGE_SIZE), 100);
+  const offset = Math.max(Number(req.query.offset ?? 0), 0);
   const userId = req.user!.id;
   try {
     const result = await query(
@@ -68,7 +73,6 @@ router.get('/settlements', async (req: Request, res: Response): Promise<void> =>
          ft.title_ja     AS template_name,
          u.full_name     AS applicant_name,
          d.name          AS department_name,
-         -- current pending settlement step (for inline approval)
          pending_step.id                  AS pending_step_id,
          pending_step.approver_id         AS pending_approver_id,
          pending_step.label               AS pending_step_label,
@@ -85,17 +89,22 @@ router.get('/settlements', async (req: Request, res: Response): Promise<void> =>
          ORDER BY step_order ASC LIMIT 1
        ) pending_step ON TRUE
        LEFT JOIN users pending_approver ON pending_approver.id = pending_step.approver_id
-       ORDER BY s.created_at DESC`,
+       WHERE ($1 = 'ALL'
+          OR ($1 = 'PENDING' AND a.status = 'PENDING_SETTLEMENT')
+          OR ($1 = 'DONE'    AND a.status IN ('COMPLETED', 'SETTLEMENT_APPROVED')))
+       ORDER BY s.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [filter, limit + 1, offset],
     );
-    // Annotate whether current user can approve this step
-    const rows = result.rows.map((r: any) => ({
+    const rows    = result.rows;
+    const hasMore = rows.length > limit;
+    if (hasMore) rows.pop();
+    const items = rows.map((r: any) => ({
       ...r,
-      can_approve: r.pending_step_id != null && (
-        r.pending_approver_id === userId ||
-        req.user!.role === 'ADMIN'
-      ),
+      can_close:   r.app_status === 'SETTLEMENT_APPROVED',
+      can_approve: false,   // legacy — no longer used in UI
     }));
-    res.json(rows);
+    res.json({ items, hasMore, offset });
   } catch (err) {
     console.error('[accounting] settlements list failed:', err);
     res.status(500).json({ error: '精算一覧の取得に失敗しました' });
@@ -281,6 +290,75 @@ router.post(
     }
   },
 );
+
+// ── POST /accounting/settlements/:id/close ────────────────────────────────────
+// Phase 2 closure: settlement workflow already done (SETTLEMENT_APPROVED),
+// accounting user confirms transfer_date + proof then marks COMPLETED.
+router.post('/settlements/:id/close', async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
+
+  try {
+    const result = await withTransaction(async (client: pg.PoolClient) => {
+      // Lock + validate
+      const sRow = await client.query(
+        `SELECT s.id, s.transfer_date, s.transfer_proof_url, a.id AS application_id, a.status
+         FROM settlements s
+         JOIN applications a ON a.id = s.application_id
+         WHERE s.id = $1 FOR UPDATE`,
+        [id],
+      );
+      if (sRow.rows.length === 0) {
+        throw Object.assign(new Error('精算記録が見つかりません'), { status: 404 });
+      }
+      const row = sRow.rows[0] as {
+        id: string; transfer_date: string | null; transfer_proof_url: string | null;
+        application_id: string; status: string;
+      };
+
+      if (row.status !== 'SETTLEMENT_APPROVED') {
+        throw Object.assign(
+          new Error(`承認が完了していないため精算を締めることができません (現在: ${row.status})`),
+          { status: 409 },
+        );
+      }
+      if (!row.transfer_date) {
+        throw Object.assign(new Error('振込日を入力してから締めてください'), { status: 422 });
+      }
+      if (!row.transfer_proof_url) {
+        throw Object.assign(new Error('振込証明をアップロードしてから締めてください'), { status: 422 });
+      }
+
+      // Mark application COMPLETED
+      await client.query(
+        `UPDATE applications SET status = 'COMPLETED', completed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [row.application_id],
+      );
+      // Mark settlement PROCESSED
+      await client.query(
+        `UPDATE settlements
+         SET status = 'PROCESSED', processed_at = CURRENT_TIMESTAMP, processed_by = $2
+         WHERE id = $1`,
+        [id, req.user!.id],
+      );
+      await client.query(
+        `INSERT INTO audit_logs (action, entity_type, entity_id, metadata)
+         VALUES ('ACCOUNTING_CLOSE', 'application', $1, $2::jsonb)`,
+        [row.application_id, JSON.stringify({ actor: req.user!.id })],
+      );
+
+      return { application_id: row.application_id };
+    });
+
+    const appId = (result as { application_id: string }).application_id;
+    emitAll('APPROVAL_ACTION', { type: 'accounting_close', applicationId: appId });
+    res.json({ message: '精算を完了しました — 申請が完了状態になりました' });
+  } catch (err: unknown) {
+    const e = err as { status?: number; message?: string };
+    if (e.status) { res.status(e.status).json({ error: e.message }); return; }
+    console.error('[accounting] close failed:', err);
+    res.status(500).json({ error: '精算の完了処理に失敗しました' });
+  }
+});
 
 // ── GET /accounting/settlements/csv?ids=uuid1,uuid2,... ──────────────────────
 // Must be registered BEFORE the /:id route to avoid uuid-parsing the string "csv"

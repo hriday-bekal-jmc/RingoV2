@@ -1,9 +1,11 @@
 import { useState, useCallback } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useScrollEnd } from '../hooks/useScrollEnd';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import Toast, { useToast } from '../components/common/Toast';
 import { useLang } from '../context/LanguageContext';
+import { useAuth } from '../context/AuthContext';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:4000/api';
 
@@ -140,6 +142,168 @@ function FormDataViewer({ formData, schema, tFn }: {
   );
 }
 
+// ── Full application detail panel (opened from DetailModal) ──────────────────
+interface AppDetailData {
+  id: string;
+  application_number: string | null;
+  status: string;
+  form_data: Record<string, unknown>;
+  settlement_data?: Record<string, unknown> | null;
+  schema_definition: { fields: FormField[] } | null;
+  settlement_schema?: { fields: FormField[] } | null;
+  template_name: string;
+  applicant_name: string;
+  applicant_avatar?: string | null;
+  created_at: string;
+  steps: Array<{
+    step_order: number;
+    stage: string;
+    status: string;
+    label: string;
+    comment: string | null;
+    acted_at: string | null;
+    approver_name: string | null;
+  }>;
+}
+
+const STEP_ICON: Record<string, string> = {
+  APPROVED: '✓', REJECTED: '✕', RETURNED: '↩', PENDING: '●', WAITING: '○', CANCELLED: '–',
+};
+const STEP_CLS: Record<string, string> = {
+  APPROVED:  'text-emerald-600 bg-emerald-50  border-emerald-200',
+  REJECTED:  'text-red-600     bg-red-50      border-red-200',
+  RETURNED:  'text-amber-600   bg-amber-50    border-amber-200',
+  PENDING:   'text-ringo-500   bg-ringo-50    border-ringo-200',
+  WAITING:   'text-warmgray-400 bg-surface-100 border-surface-200',
+  CANCELLED: 'text-warmgray-300 bg-surface-50  border-surface-100',
+};
+
+function AppDetailPanel({ appId, onClose, tFn, lang }: {
+  appId: string;
+  onClose: () => void;
+  tFn: (k: any) => string;
+  lang: string;
+}) {
+  const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
+  const { data, isLoading, isError } = useQuery<AppDetailData>({
+    queryKey: ['appDetail', appId],
+    queryFn: async () => (await apiClient.get(`/applications/${appId}`)).data,
+    staleTime: 60_000,
+  });
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-warmgray-900/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative glass rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col animate-scale-in overflow-hidden">
+
+        {/* Header */}
+        <div className="px-6 pt-6 pb-4 border-b border-white/30 shrink-0 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4 text-ringo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" />
+            </svg>
+            <span className="text-sm font-bold text-warmgray-800">{lang === 'en' ? 'Application Detail' : '申請詳細'}</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-7 h-7 rounded-xl bg-surface-100/80 hover:bg-surface-200/80 flex items-center justify-center text-warmgray-400 hover:text-warmgray-800 transition-all"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto">
+          {isLoading && (
+            <div className="flex items-center justify-center gap-3 py-16 text-warmgray-400">
+              <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+              </svg>
+              {tFn('loading')}
+            </div>
+          )}
+          {isError && (
+            <div className="p-6 text-sm text-ringo-500 text-center">{tFn('approvals_error_msg')}</div>
+          )}
+          {data && (
+            <div className="px-6 py-5 space-y-6">
+              {/* Meta */}
+              <div className="flex items-center gap-3">
+                <UserAvatar name={data.applicant_name ?? '?'} avatarUrl={data.applicant_avatar} size={9} />
+                <div>
+                  <p className="font-bold text-warmgray-800 text-sm">{data.template_name}</p>
+                  <p className="text-xs text-warmgray-400">
+                    {data.applicant_name} · {new Date(data.created_at).toLocaleDateString(dateLocale, { year: 'numeric', month: 'long', day: 'numeric' })}
+                  </p>
+                  {data.application_number && (
+                    <p className="text-[11px] font-mono text-ringo-400 mt-0.5">{data.application_number}</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Form data */}
+              <div>
+                <p className="section-title mb-3">{lang === 'en' ? 'Application Content' : '申請内容'}</p>
+                <FormDataViewer formData={data.form_data} schema={data.schema_definition} tFn={tFn} />
+              </div>
+
+              {/* Settlement data */}
+              {data.settlement_data && (
+                <div>
+                  <p className="section-title mb-3">{lang === 'en' ? 'Settlement Content' : '精算内容'}</p>
+                  <FormDataViewer formData={data.settlement_data} schema={data.settlement_schema ?? null} tFn={tFn} />
+                </div>
+              )}
+
+              {/* Approval timeline */}
+              {data.steps && data.steps.length > 0 && (
+                <div>
+                  <p className="section-title mb-3">{lang === 'en' ? 'Approval Flow' : '承認フロー'}</p>
+                  <div className="space-y-2">
+                    {data.steps.map((step, i) => {
+                      const cls = STEP_CLS[step.status] ?? STEP_CLS.WAITING;
+                      const icon = STEP_ICON[step.status] ?? '·';
+                      return (
+                        <div key={i} className={`flex items-start gap-3 p-3 rounded-xl border text-xs ${cls}`}>
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] shrink-0 mt-0.5 border ${cls}`}>
+                            {icon}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-semibold text-warmgray-700">{step.label || `ステップ ${step.step_order}`}</span>
+                              {step.stage === 'SETTLEMENT' && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-600 font-bold">精算</span>
+                              )}
+                              {step.approver_name && (
+                                <span className="text-warmgray-400">— {step.approver_name}</span>
+                              )}
+                            </div>
+                            {step.comment && (
+                              <p className="text-warmgray-500 mt-1 italic">"{step.comment}"</p>
+                            )}
+                            {step.acted_at && (
+                              <p className="text-warmgray-300 mt-0.5 text-[10px]">
+                                {new Date(step.acted_at).toLocaleString(dateLocale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Application Detail Modal ──────────────────────────────────────────────────
 interface DetailModalProps {
   app: Application;
@@ -153,6 +317,7 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
   const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
   const [activeAction, setActiveAction] = useState<'approve' | 'return' | 'reject' | null>(null);
   const [comment, setComment] = useState('');
+  const [showDetail, setShowDetail] = useState(false);
 
   const actionConfig = {
     approve: { title: t('approvals_approve_btn'), btnClass: 'btn-primary',  require: false, icon: '✓', iconBg: 'bg-emerald-100 text-emerald-600' },
@@ -193,11 +358,12 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
               </div>
             </div>
             <button
-              onClick={onClose}
-              className="shrink-0 w-8 h-8 rounded-xl bg-surface-100/80 hover:bg-surface-200/80 flex items-center justify-center text-warmgray-500 hover:text-warmgray-800 transition-all"
+              onClick={() => setShowDetail(true)}
+              className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-ringo-50/80 hover:bg-ringo-100/80 text-ringo-500 hover:text-ringo-700 text-xs font-bold transition-all border border-ringo-200/60"
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              {lang === 'en' ? 'Details' : '詳細'}
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
               </svg>
             </button>
           </div>
@@ -240,6 +406,11 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
             </div>
           </div>
         </div>
+
+        {/* Full detail overlay */}
+        {showDetail && (
+          <AppDetailPanel appId={app.id} onClose={() => setShowDetail(false)} tFn={t} lang={lang} />
+        )}
 
         {/* Footer — action area */}
         <div className="px-7 py-5 border-t border-white/30 bg-surface-50/40 shrink-0">
@@ -324,20 +495,49 @@ export default function Approvals() {
   const queryClient = useQueryClient();
   const { toast, show: showToast, dismiss } = useToast();
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
+  const [systemView, setSystemView] = useState(false);
   const { t, lang } = useLang();
+  const { role } = useAuth();
+  const isAdmin = role === 'ADMIN';
   const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
 
-  const { data: applications = [], isLoading, isError } = useQuery<Application[]>({
-    queryKey: ['pendingApprovals'],
-    queryFn: async () => (await apiClient.get('/approvals/pending')).data,
+  const PAGE = 25;
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+    isError,
+  } = useInfiniteQuery<{ items: Application[]; hasMore: boolean; total: number; offset: number }>({
+    queryKey: ['pendingApprovals', systemView],
+    queryFn: async ({ pageParam = 0 }) => (await apiClient.get(
+      `/approvals/pending?limit=${PAGE}&offset=${pageParam}${systemView ? '&all=true' : ''}`
+    )).data,
+    initialPageParam: 0,
+    getNextPageParam: (last, all) => last.hasMore ? all.length * PAGE : undefined,
     staleTime: 30_000,
   });
+
+  const applications = data?.pages.flatMap(p => p.items) ?? [];
+  // total from first page (COUNT(*) OVER() on the full resultset)
+  const totalCount = data?.pages[0]?.total ?? applications.length;
+
+  const sentinelRef = useScrollEnd(
+    useCallback(() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }, [hasNextPage, isFetchingNextPage, fetchNextPage]),
+    hasNextPage ?? false,
+  );
 
   const invalidate = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['pendingApprovals'] });
     queryClient.invalidateQueries({ queryKey: ['myApplications'] });
     setSelectedApp(null);
   }, [queryClient]);
+
+  function toggleSystemView() {
+    setSystemView(v => !v);
+    setSelectedApp(null);
+  }
 
   const approveMutation = useMutation({
     mutationFn: async ({ id, comment }: { id: string; comment: string }) =>
@@ -383,16 +583,49 @@ export default function Approvals() {
       <div className="max-w-4xl mx-auto space-y-6">
 
         {/* Header */}
-        <div className="animate-fade-up flex items-end justify-between">
+        <div className="animate-fade-up flex items-start justify-between gap-4">
           <div>
             <p className="section-title mb-0">{t('approvals_inbox')}</p>
             <h2 className="text-2xl font-bold text-warmgray-800 mt-1">{t('title_approvals')}</h2>
             <p className="text-sm text-warmgray-400 mt-1">{t('approvals_subtitle')}</p>
           </div>
-          {applications.length > 0 && (
-            <span className="badge-pending px-3 py-1.5 text-sm">{applications.length} {t('approvals_pending_badge')}</span>
-          )}
+          <div className="flex items-center gap-2 shrink-0 mt-1">
+            {totalCount > 0 && (
+              <span className="badge-pending px-3 py-1.5 text-sm">{totalCount} {t('approvals_pending_badge')}</span>
+            )}
+            {/* Admin-only system-wide toggle */}
+            {isAdmin && (
+              <button
+                onClick={toggleSystemView}
+                title={systemView ? (lang === 'en' ? 'Switch to my approvals' : '自分の承認に戻す') : (lang === 'en' ? 'View all system approvals' : 'システム全体を表示')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all duration-150 ${
+                  systemView
+                    ? 'bg-warmgray-800 text-white border-warmgray-700 shadow-sm'
+                    : 'bg-white/60 text-warmgray-500 border-white/80 hover:bg-white/90 hover:text-warmgray-800'
+                }`}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+                </svg>
+                {systemView ? (lang === 'en' ? 'System' : 'システム') : (lang === 'en' ? 'Mine' : '自分')}
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* System-view banner */}
+        {isAdmin && systemView && (
+          <div className="animate-fade-up flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-warmgray-800/90 text-white text-xs font-semibold">
+            <svg className="w-4 h-4 shrink-0 text-mustard-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.964-7.178z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            {lang === 'en' ? 'Admin overview — showing all pending approvals system-wide' : '管理者ビュー — システム全体の承認待ちを表示中'}
+            <button onClick={toggleSystemView} className="ml-auto text-white/60 hover:text-white transition-colors">
+              {lang === 'en' ? '✕ Back to mine' : '✕ 自分に戻す'}
+            </button>
+          </div>
+        )}
 
         {/* Loading */}
         {isLoading && (
@@ -482,6 +715,21 @@ export default function Approvals() {
                 ))}
               </tbody>
             </table>
+
+            {/* Infinite scroll sentinel */}
+            <div ref={sentinelRef} className="px-5 py-4 flex items-center justify-center gap-2 text-warmgray-400 text-xs min-h-[48px]">
+              {isFetchingNextPage ? (
+                <>
+                  <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                  </svg>
+                  {t('loading')}
+                </>
+              ) : !hasNextPage && applications.length >= PAGE ? (
+                <span className="text-warmgray-300">{lang === 'en' ? 'All loaded' : '全件表示済み'}</span>
+              ) : null}
+            </div>
           </div>
         )}
       </div>
