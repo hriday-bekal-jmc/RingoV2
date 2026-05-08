@@ -91,7 +91,7 @@ export default function InlineConfirm({
   return (
     <div
       ref={rootRef}
-      className="inline-flex items-center gap-1.5 animate-fade-up"
+      className="inline-flex items-center gap-1.5 animate-fade-in"
       role="alert"
     >
       <span className="text-[10px] text-red-600 font-semibold whitespace-nowrap">
