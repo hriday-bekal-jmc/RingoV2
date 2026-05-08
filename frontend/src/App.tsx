@@ -2,6 +2,7 @@ import { ReactNode } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { getPermissions } from './config/permissions';
+import ErrorBoundary from './components/common/ErrorBoundary';
 
 // ─── ページのインポート ───
 import Login from './pages/Login';
@@ -47,6 +48,7 @@ function RequirePermission({
 // ─── メインルーティング ───
 export default function App() {
   return (
+    <ErrorBoundary>
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -120,5 +122,6 @@ export default function App() {
       {/* 404 Not Found */}
       <Route path="*" element={<div className="p-8 text-warmgray-800">404 — Not Found</div>} />
     </Routes>
+    </ErrorBoundary>
   );
 }

@@ -2,6 +2,10 @@
 backend/uploads/*
 !backend/uploads/.gitkeep
 
+# CSV export worker output — generated files, expire in 1h via Redis TTL
+backend/exports/*
+!backend/exports/.gitkeep
+
 # Dependencies
 node_modules/
 .pnp

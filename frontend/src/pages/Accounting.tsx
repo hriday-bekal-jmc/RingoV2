@@ -345,15 +345,50 @@ export default function Accounting() {
     else setSelected(new Set(filtered.map((s) => s.settlement_id)));
   };
 
-  const downloadCSV = () => {
-    const ids = selected.size > 0 ? [...selected].join(',') : '';
-    const url = `/api/accounting/settlements/csv${ids ? `?ids=${ids}` : ''}`;
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = '';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+  // CSV export — async via worker. Flow:
+  //   1. POST /export → { jobId }
+  //   2. Poll GET /:jobId every 1.5s until status=ready (or failed)
+  //   3. Trigger browser download via hidden anchor on /download URL
+  // Avoids blocking the UI, avoids OOM on big exports.
+  const [csvBusy, setCsvBusy] = useState(false);
+
+  const downloadCSV = async () => {
+    if (csvBusy) return;
+    setCsvBusy(true);
+
+    try {
+      const ids = selected.size > 0 ? [...selected] : undefined;
+      const enq = await apiClient.post('/accounting/settlements/csv/export', { ids });
+      const jobId = enq.data?.jobId as string;
+      if (!jobId) throw new Error('jobId missing in response');
+
+      // Poll status — cap at 60 attempts (90s)
+      let status = 'queued';
+      for (let i = 0; i < 60; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const s = await apiClient.get(`/accounting/settlements/csv/${jobId}`);
+        status = s.data.status;
+        if (status === 'ready' || status === 'failed') break;
+      }
+
+      if (status !== 'ready') {
+        alert(status === 'failed' ? 'CSVエクスポートに失敗しました' : 'CSVの生成がタイムアウトしました');
+        return;
+      }
+
+      // Trigger download
+      const a = document.createElement('a');
+      a.href = `/api/accounting/settlements/csv/${jobId}/download`;
+      a.download = '';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      console.error('[CSV] download failed', err);
+      alert('CSVエクスポートに失敗しました');
+    } finally {
+      setCsvBusy(false);
+    }
   };
 
   const STATUS_LABEL: Record<string, string> = {

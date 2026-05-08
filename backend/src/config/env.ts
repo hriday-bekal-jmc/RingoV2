@@ -42,8 +42,13 @@ const schema = z.object({
   GOOGLE_WORKSPACE_DOMAIN: z.string().optional(),
 
   // ── Google Drive (service account) ──
-  GDRIVE_SERVICE_ACCOUNT_KEY: z.string().optional(), // path to JSON
+  GDRIVE_SERVICE_ACCOUNT_KEY: z.string().optional(), // path to JSON key file
+  // Default / fallback folder — must be shared with service account email
   GDRIVE_FOLDER_ID:           z.string().optional(),
+  // Per-category folders (all optional — fall back to GDRIVE_FOLDER_ID)
+  GDRIVE_FOLDER_RECEIPTS:     z.string().optional(), // expense receipts / PDFs
+  GDRIVE_FOLDER_CONTRACTS:    z.string().optional(), // contracts / Word / Excel
+  GDRIVE_FOLDER_OTHER:        z.string().optional(), // anything else
 
   // ── Misc ──
   SUPER_ADMIN_EMAIL: z.string().email().optional(),

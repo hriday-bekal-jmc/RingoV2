@@ -1,10 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { withTransaction } from '../config/db';
 import { requireAuth } from '../middlewares/authMiddleware';
+import { mutationLimiter } from '../middlewares/rateLimit';
 import type pg from 'pg';
 
 const router = Router();
 router.use(requireAuth);
+router.use(mutationLimiter);
 
 // POST /settlements — create settlement and start settlement approval route
 router.post('/', async (req: Request, res: Response): Promise<void> => {

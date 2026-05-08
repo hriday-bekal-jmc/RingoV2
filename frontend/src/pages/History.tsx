@@ -6,6 +6,7 @@ import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import { useLang } from '../context/LanguageContext';
+import { templateLabel } from '../config/templateLabels';
 
 interface Application {
   id: string;
@@ -127,25 +128,35 @@ export default function History() {
     <Layout title={t('title_history')}>
       {toast && <Toast message={toast.message} type={toast.type} />}
 
-      {/* Confirm dialogs */}
-      <ConfirmDialog
-        isOpen={!!confirmDelete}
-        title={t('confirm_delete_title')}
-        message={`「${confirmDelete?.template_name}」${t('confirm_delete_body')}`}
-        confirmLabel={t('confirm_delete_btn')}
-        confirmClass="btn-danger"
-        onConfirm={() => { if (confirmDelete) { deleteDraft.mutate(confirmDelete.id); setConfirmDelete(null); } }}
-        onCancel={() => setConfirmDelete(null)}
-      />
-      <ConfirmDialog
-        isOpen={!!confirmSubmit}
-        title={t('confirm_submit_title')}
-        message={`「${confirmSubmit?.template_name}」${t('confirm_submit_body')}`}
-        confirmLabel={t('btn_submit')}
-        confirmClass="btn-primary"
-        onConfirm={() => { if (confirmSubmit) { submitDraft.mutate(confirmSubmit.id); setConfirmSubmit(null); } }}
-        onCancel={() => setConfirmSubmit(null)}
-      />
+      {/* Confirm dialogs — language-aware quotes (「」 in JP, "..." in EN) */}
+      {(() => {
+        const open  = lang === 'en' ? '"' : '「';
+        const close = lang === 'en' ? '"' : '」';
+        const dName = templateLabel(confirmDelete?.template_code, lang, confirmDelete?.template_name ?? '');
+        const sName = templateLabel(confirmSubmit?.template_code, lang, confirmSubmit?.template_name ?? '');
+        return (
+          <>
+            <ConfirmDialog
+              isOpen={!!confirmDelete}
+              title={t('confirm_delete_title')}
+              message={`${open}${dName}${close} ${t('confirm_delete_body')}`}
+              confirmLabel={t('confirm_delete_btn')}
+              confirmClass="btn-danger"
+              onConfirm={() => { if (confirmDelete) { deleteDraft.mutate(confirmDelete.id); setConfirmDelete(null); } }}
+              onCancel={() => setConfirmDelete(null)}
+            />
+            <ConfirmDialog
+              isOpen={!!confirmSubmit}
+              title={t('confirm_submit_title')}
+              message={`${open}${sName}${close} ${t('confirm_submit_body')}`}
+              confirmLabel={t('btn_submit')}
+              confirmClass="btn-primary"
+              onConfirm={() => { if (confirmSubmit) { submitDraft.mutate(confirmSubmit.id); setConfirmSubmit(null); } }}
+              onCancel={() => setConfirmSubmit(null)}
+            />
+          </>
+        );
+      })()}
 
       <div className="max-w-5xl mx-auto space-y-6">
 
@@ -157,7 +168,9 @@ export default function History() {
               {applications.length} {t('history_items_suffix')}
               {draftCount > 0 && (
                 <span className="ml-2 text-sm font-normal text-warmgray-400">
-                  （{t('history_draft_suffix')} {draftCount} {t('history_items_suffix')}）
+                  {lang === 'en'
+                    ? `(${draftCount} ${t('history_draft_suffix')})`
+                    : `（${t('history_draft_suffix')} ${draftCount} ${t('history_items_suffix')}）`}
                 </span>
               )}
             </p>
@@ -208,8 +221,14 @@ export default function History() {
             )}
           </div>
         ) : (
-          <div className="card !p-0 overflow-hidden animate-fade-up">
-            <ul className="divide-y divide-white/30">
+          <div className="card !p-0 overflow-hidden">
+            {/*
+              key={statusFilter} forces React to remount the list when the
+              filter pill changes. That triggers the fade-up animation on
+              every <li> below, giving a smooth filter transition instead
+              of a choppy in-place swap.
+            */}
+            <ul key={statusFilter} className="divide-y divide-white/30">
               {sorted.map((app, idx) => {
                 const cls = STATUS_CLS[app.status] ?? 'badge-draft';
                 const label = STATUS_LABEL[app.status] ?? app.status;
@@ -232,8 +251,8 @@ export default function History() {
                 return (
                   <li
                     key={app.id}
-                    className="flex items-center gap-4 px-5 py-4 hover:bg-white/40 transition-colors duration-100"
-                    style={{ animationDelay: `${idx * 0.03}s` }}
+                    className="flex items-center gap-4 px-5 py-4 hover:bg-white/40 transition-colors duration-100 animate-fade-up"
+                    style={{ animationDelay: `${Math.min(idx, 12) * 30}ms` }}
                   >
                     {/* Status dot */}
                     <div className={`w-2 h-2 rounded-full shrink-0 ${
@@ -249,7 +268,9 @@ export default function History() {
                     {/* Main info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-semibold text-warmgray-800 truncate">{app.template_name}</p>
+                        <p className="text-sm font-semibold text-warmgray-800 truncate">
+                          {templateLabel(app.template_code, lang, app.template_name)}
+                        </p>
                         <span className={cls}>{label}</span>
                         {phaseBadge && (
                           <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${phaseBadge.cls}`}>

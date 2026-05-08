@@ -1,10 +1,11 @@
 ﻿import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useScrollEnd } from '../hooks/useScrollEnd';
+import { useScrollLock } from '../hooks/useScrollLock';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import { ROLE_MAP, Role } from '../config/permissions';
-import ConfirmDialog from '../components/common/ConfirmDialog';
+import InlineConfirm from '../components/common/InlineConfirm';
 import Toast, { useToast } from '../components/common/Toast';
 import CustomSelect from '../components/forms/CustomSelect';
 import { useLang } from '../context/LanguageContext';
@@ -113,6 +114,9 @@ interface UserModalProps {
 function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalProps) {
   const isNew = !user;
   const { t } = useLang();
+
+  // Lock page scroll while this modal is open — same reason as ConfirmDialog
+  useScrollLock(true);
   const [form, setForm] = useState({
     full_name:     user?.full_name ?? '',
     email:         user?.email ?? '',
@@ -214,7 +218,8 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
   const [deptFilter, setDeptFilter] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('all');
-  const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
+  // Inline confirm — only one row can be in confirm state at a time
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   const { data: users = [], isLoading } = useQuery<User[]>({
     queryKey: ['admin', 'users'],
@@ -252,7 +257,7 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
       (await apiClient.delete(`/admin/users/${id}${hard ? '?hard=true' : ''}`)).data,
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
-      setDeleteTarget(null);
+      setConfirmingId(null);
       showToast(data.message);
     },
     onError: (err: any) => showToast(`削除失敗: ${err.message}`, 'error'),
@@ -287,28 +292,6 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
           onClose={() => setEditUser(null)}
           onSave={(data) => updateUser.mutate({ id: editUser.id, ...data })}
           isSaving={updateUser.isPending}
-        />
-      )}
-
-      {/* Delete confirm — 3 options: hard delete / disable / cancel */}
-      {deleteTarget && (
-        <ConfirmDialog
-          isOpen={true}
-          title={`「${deleteTarget.full_name}」を削除`}
-          message="完全削除するとユーザーのデータが失われます。無効化の場合はログインできなくなりますが、データは保持されます。"
-          confirmLabel="完全削除する"
-          confirmClass="btn-danger"
-          cancelLabel="キャンセル"
-          onConfirm={() => deleteUser.mutate({ id: deleteTarget.id, hard: true })}
-          onCancel={() => setDeleteTarget(null)}
-          extraActions={
-            <button
-              className="btn-outline w-full"
-              onClick={() => deleteUser.mutate({ id: deleteTarget.id, hard: false })}
-            >
-              {t('admin_disable_only')}
-            </button>
-          }
         />
       )}
 
@@ -376,8 +359,12 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
               </tr>
             </thead>
             <tbody>
-              {filtered.map((u) => (
-                <tr key={u.id}>
+              {filtered.map((u, i) => (
+                <tr
+                  key={u.id}
+                  className="animate-fade-up"
+                  style={{ animationDelay: `${Math.min(i, 14) * 35}ms` }}
+                >
                   <td>
                     <div className="flex items-center gap-3">
                       <UserAvatar name={u.full_name} avatarUrl={u.avatar_url} />
@@ -407,12 +394,26 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
                       >
                         編集
                       </button>
-                      <button
-                        className="text-xs text-warmgray-400 hover:text-red-500 transition-colors"
-                        onClick={() => setDeleteTarget(u)}
-                      >
-                        削除
-                      </button>
+                      <InlineConfirm
+                        isActive={confirmingId === u.id}
+                        onTrigger={() => setConfirmingId(u.id)}
+                        onConfirm={() => deleteUser.mutate({ id: u.id, hard: true })}
+                        onCancel={() => setConfirmingId(null)}
+                        message="完全削除しますか？"
+                        confirmLabel="完全削除"
+                        triggerClass="text-xs text-warmgray-400 hover:text-red-500 transition-colors"
+                        disabled={deleteUser.isPending}
+                        extraActions={
+                          <button
+                            type="button"
+                            onClick={() => deleteUser.mutate({ id: u.id, hard: false })}
+                            disabled={deleteUser.isPending}
+                            className="text-[11px] font-semibold text-warmgray-700 bg-white border border-warmgray-300 hover:bg-surface-100 disabled:opacity-50 rounded-md px-2 py-0.5 transition-colors"
+                          >
+                            {t('admin_disable_only')}
+                          </button>
+                        }
+                      />
                     </div>
                   </td>
                 </tr>
@@ -587,8 +588,9 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
   const [newStep, setNewStep] = useState({ approver_id: '', label: '', action_type: 'APPROVE' });
   const [showNewRoute, setShowNewRoute] = useState(false);
   const [newRoute, setNewRoute] = useState({ template_id: '', department_id: '', name: '', stage: 'RINGI' });
-  const [deleteRouteTarget, setDeleteRouteTarget] = useState<ApprovalRoute | null>(null);
-  const [deleteStepTarget, setDeleteStepTarget] = useState<{ id: string; label: string } | null>(null);
+  // Inline confirm — track id of the row currently in confirm state
+  const [confirmingRouteId, setConfirmingRouteId] = useState<string | null>(null);
+  const [confirmingStepId,  setConfirmingStepId]  = useState<string | null>(null);
   const [routeDeptFilter, setRouteDeptFilter] = useState('');
   const [routeTemplateFilter, setRouteTemplateFilter] = useState('');
   const [routeStageFilter, setRouteStageFilter] = useState('');
@@ -629,7 +631,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
 
   const deleteStep = useMutation({
     mutationFn: async (stepId: string) => (await apiClient.delete(`/admin/route-steps/${stepId}`)).data,
-    onSuccess: () => { refetch(); setDeleteStepTarget(null); showToast('ステップを削除しました'); },
+    onSuccess: () => { refetch(); setConfirmingStepId(null); showToast('ステップを削除しました'); },
     onError: (err: any) => showToast(`削除失敗: ${err.message}`, 'error'),
   });
 
@@ -646,7 +648,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
 
   const deleteRoute = useMutation({
     mutationFn: async (id: string) => (await apiClient.delete(`/admin/routes/${id}`)).data,
-    onSuccess: () => { refetch(); setDeleteRouteTarget(null); showToast('ルートを削除しました'); },
+    onSuccess: () => { refetch(); setConfirmingRouteId(null); showToast('ルートを削除しました'); },
     onError: (err: any) => showToast(`削除失敗: ${err.message}`, 'error'),
   });
 
@@ -661,27 +663,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
 
   return (
     <div className="space-y-4">
-      {/* Confirm dialogs */}
-      {deleteRouteTarget && (
-        <ConfirmDialog
-          isOpen={true}
-          title={`ルート「${deleteRouteTarget.name}」を削除`}
-          message="このルートとすべてのステップが完全に削除されます。この操作は元に戻せません。"
-          confirmLabel="削除する"
-          onConfirm={() => deleteRoute.mutate(deleteRouteTarget.id)}
-          onCancel={() => setDeleteRouteTarget(null)}
-        />
-      )}
-      {deleteStepTarget && (
-        <ConfirmDialog
-          isOpen={true}
-          title="ステップを削除"
-          message={`「${deleteStepTarget.label}」を承認ルートから削除します。`}
-          confirmLabel="削除する"
-          onConfirm={() => deleteStep.mutate(deleteStepTarget.id)}
-          onCancel={() => setDeleteStepTarget(null)}
-        />
-      )}
+      {/* No modal dialogs — delete confirmations are inline on the row itself */}
 
       {/* Route filters */}
       <div className="flex items-center gap-3 flex-wrap">
@@ -785,8 +767,12 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
       )}
 
       {/* Route cards */}
-      {filteredRoutes.map((route) => (
-        <div key={route.id} className={`card space-y-4 relative ${addingStepToRoute === route.id ? 'z-10' : ''}`}>
+      {filteredRoutes.map((route, i) => (
+        <div
+          key={route.id}
+          className={`card space-y-4 relative animate-fade-up ${addingStepToRoute === route.id ? 'z-10' : ''}`}
+          style={{ animationDelay: `${Math.min(i, 10) * 50}ms` }}
+        >
           <div className="flex items-start justify-between">
             <div className="space-y-1.5">
               <div className="flex items-center gap-2 flex-wrap">
@@ -802,12 +788,15 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
               </div>
               <p className="text-[11px] text-warmgray-400">{route.template_name} · {route.department_name}</p>
             </div>
-            <button
-              className="text-[11px] text-warmgray-400 hover:text-red-500 transition-colors font-medium"
-              onClick={() => setDeleteRouteTarget(route)}
-            >
-              削除
-            </button>
+            <InlineConfirm
+              isActive={confirmingRouteId === route.id}
+              onTrigger={() => setConfirmingRouteId(route.id)}
+              onConfirm={() => deleteRoute.mutate(route.id)}
+              onCancel={() => setConfirmingRouteId(null)}
+              message="ルートを削除？"
+              triggerClass="text-[11px] text-warmgray-400 hover:text-red-500 transition-colors font-medium"
+              disabled={deleteRoute.isPending}
+            />
           </div>
 
           {/* Visual chain with avatars */}
@@ -839,15 +828,28 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
                             {step.approver_name ? step.approver_name.slice(0, 1) : step.step_order}
                           </div>
                         )}
-                        {/* Delete button (hover) */}
+                        {/* Delete badge — first click arms, second confirms.
+                            Inline-on-avatar to keep chain layout compact. */}
                         {step.step_order > 1 && (
-                          <button
-                            className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] items-center justify-center hidden group-hover/step:flex shadow-sm"
-                            onClick={() => setDeleteStepTarget({ id: step.id, label: step.label })}
-                            title="削除"
-                          >
-                            ×
-                          </button>
+                          confirmingStepId === step.id ? (
+                            <button
+                              className="absolute -top-1.5 -right-1.5 px-1.5 h-4 rounded-full bg-red-600 text-white text-[9px] font-bold flex items-center justify-center shadow-md ring-2 ring-white animate-scale-in"
+                              onClick={() => deleteStep.mutate(step.id)}
+                              onBlur={() => setConfirmingStepId(null)}
+                              autoFocus
+                              title="もう一度クリックで削除"
+                            >
+                              削除？
+                            </button>
+                          ) : (
+                            <button
+                              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] items-center justify-center hidden group-hover/step:flex shadow-sm"
+                              onClick={() => setConfirmingStepId(step.id)}
+                              title="削除"
+                            >
+                              ×
+                            </button>
+                          )
                         )}
                       </div>
                       <div className="text-center max-w-[72px]">
@@ -983,7 +985,7 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [deptFilter, setDeptFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState<AppRecord | null>(null);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   // Debounce search — 300ms
   useEffect(() => {
@@ -1023,7 +1025,7 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
     mutationFn: async (id: string) => (await apiClient.delete(`/admin/applications/${id}`)).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'applications'] });
-      setDeleteTarget(null);
+      setConfirmingId(null);
       showToast('申請を削除しました');
     },
     onError: (err: any) => showToast(`削除失敗: ${err.message}`, 'error'),
@@ -1043,17 +1045,6 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
 
   return (
     <div className="space-y-5">
-      {deleteTarget && (
-        <ConfirmDialog
-          isOpen={true}
-          title={`申請「${deleteTarget.template_name}」を削除`}
-          message={`${deleteTarget.applicant_name} の申請を完全削除します。この操作は元に戻せません。`}
-          confirmLabel="完全削除する"
-          onConfirm={() => deleteApp.mutate(deleteTarget.id)}
-          onCancel={() => setDeleteTarget(null)}
-        />
-      )}
-
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
         <input
@@ -1110,8 +1101,12 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
               </tr>
             </thead>
             <tbody>
-              {apps.map((a) => (
-                <tr key={a.id}>
+              {apps.map((a, i) => (
+                <tr
+                  key={a.id}
+                  className="animate-fade-up"
+                  style={{ animationDelay: `${Math.min(i, 14) * 35}ms` }}
+                >
                   <td><span className="font-mono text-[11px] text-warmgray-500">{a.application_number ?? '—'}</span></td>
                   <td className="font-semibold text-warmgray-800">{a.template_name}</td>
                   <td>
@@ -1128,12 +1123,16 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
                   </td>
                   <td className="text-[11px] text-warmgray-400">{new Date(a.created_at).toLocaleDateString('ja-JP')}</td>
                   <td>
-                    <button
-                      className="text-xs text-warmgray-400 hover:text-red-500 transition-colors font-medium"
-                      onClick={() => setDeleteTarget(a)}
-                    >
-                      削除
-                    </button>
+                    <InlineConfirm
+                      isActive={confirmingId === a.id}
+                      onTrigger={() => setConfirmingId(a.id)}
+                      onConfirm={() => deleteApp.mutate(a.id)}
+                      onCancel={() => setConfirmingId(null)}
+                      message="完全削除しますか？"
+                      confirmLabel="完全削除"
+                      triggerClass="text-xs text-warmgray-400 hover:text-red-500 transition-colors font-medium"
+                      disabled={deleteApp.isPending}
+                    />
                   </td>
                 </tr>
               ))}
@@ -1172,7 +1171,8 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
 // ─── Role Permissions Tab ─────────────────────────────────────────────────────
 
 function PermissionsTab() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+
   const check = (v: boolean) =>
     v ? (
       <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 text-xs font-bold">✓</span>
@@ -1182,11 +1182,13 @@ function PermissionsTab() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start gap-3 bg-mustard-400/10 border border-mustard-400/30 rounded-2xl px-5 py-4">
+      {/* Hint banner */}
+      <div className="animate-fade-up flex items-start gap-3 bg-mustard-400/10 border border-mustard-400/30 rounded-2xl px-5 py-4">
         <span className="text-xl">💡</span>
         <p className="text-sm text-warmgray-700">{t('admin_perms_hint')}</p>
       </div>
 
+      {/* Permissions table */}
       <div className="card !p-0 overflow-hidden">
         <table className="table-base">
           <thead>
@@ -1197,34 +1199,73 @@ function PermissionsTab() {
               <th className="text-center">{t('admin_perms_col_approve')}</th>
               <th className="text-center">{t('admin_perms_col_settle')}</th>
               <th className="text-center">{t('admin_perms_col_admin')}</th>
+              <th>{t('admin_perms_col_pages')}</th>
             </tr>
           </thead>
           <tbody>
-            {(Object.entries(ROLE_MAP) as [Role, typeof ROLE_MAP[Role]][]).map(([role, p]) => (
-              <tr key={role}>
-                <td><RoleBadge role={role} /></td>
+            {(Object.entries(ROLE_MAP) as [Role, typeof ROLE_MAP[Role]][])
+              .filter(([, p]) => !p.legacy)
+              .map(([role, p], i) => (
+              <tr
+                key={role}
+                className="animate-fade-up"
+                style={{ animationDelay: `${i * 45}ms` }}
+              >
+                {/* Role badge */}
                 <td>
-                  <div className="font-semibold text-warmgray-800 text-sm">{p.label}</div>
-                  <div className="text-[11px] text-warmgray-400 mt-0.5">{p.description}</div>
+                  <RoleBadge role={role} />
                 </td>
+
+                {/* Display name + description (bilingual) */}
+                <td>
+                  <div className="font-semibold text-warmgray-800 text-sm">
+                    {lang === 'en' ? p.label_en : p.label}
+                  </div>
+                  <div className="text-[11px] text-warmgray-400 mt-0.5 max-w-xs">
+                    {lang === 'en' ? p.description_en : p.description}
+                  </div>
+                </td>
+
+                {/* Permission flags */}
                 <td className="text-center">{check(p.canSubmit)}</td>
                 <td className="text-center">{check(p.canApprove)}</td>
                 <td className="text-center">{check(p.canSettle)}</td>
                 <td className="text-center">{check(p.canAdmin)}</td>
+
+                {/* Accessible pages */}
+                <td>
+                  <div className="flex flex-wrap gap-1">
+                    {p.navItems.map((nav) => (
+                      <span
+                        key={nav.to}
+                        className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-surface-100/80 text-warmgray-600 border border-surface-200/80"
+                      >
+                        <span className="text-[10px] leading-none">{nav.icon}</span>
+                        {nav.label}
+                      </span>
+                    ))}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
+      {/* Info cards — updated to reflect current system */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {[
-          { icon: '🔑', title: t('admin_perm_google_title'), body: t('admin_perm_google_body') },
-          { icon: '🔄', title: t('admin_perm_role_title'),   body: t('admin_perm_role_body') },
-          { icon: '📋', title: t('admin_perm_route_title'),  body: t('admin_perm_route_body') },
-          { icon: '🛡️', title: t('admin_perm_admin_title'), body: t('admin_perm_admin_body') },
-        ].map((item) => (
-          <div key={item.title} className="card-sm flex items-start gap-3">
+          { icon: '🔑', title: t('admin_perm_google_title'),  body: t('admin_perm_google_body') },
+          { icon: '⚡', title: t('admin_perm_role_title'),    body: t('admin_perm_role_body') },
+          { icon: '📋', title: t('admin_perm_route_title'),   body: t('admin_perm_route_body') },
+          { icon: '🛡️', title: t('admin_perm_admin_title'),  body: t('admin_perm_admin_body') },
+          { icon: '🔒', title: t('admin_perm_token_title'),   body: t('admin_perm_token_body') },
+        ].map((item, i) => (
+          <div
+            key={item.title}
+            className="card-sm flex items-start gap-3 animate-fade-up"
+            style={{ animationDelay: `${150 + i * 60}ms` }}
+          >
             <span className="text-xl">{item.icon}</span>
             <div>
               <p className="text-sm font-semibold text-warmgray-800">{item.title}</p>
@@ -1276,7 +1317,7 @@ export default function Admin() {
           ))}
         </div>
 
-        <div className="animate-fade-up">
+        <div key={tab} className="animate-fade-up">
           {tab === 'routes'       && <RoutesTab showToast={showToast} />}
           {tab === 'users'        && <UsersTab showToast={showToast} />}
           {tab === 'applications' && <ApplicationsTab showToast={showToast} />}

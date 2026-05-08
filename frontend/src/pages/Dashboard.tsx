@@ -4,21 +4,14 @@ import Layout from '../components/common/Layout';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
 import { getPermissions } from '../config/permissions';
+import { TEMPLATE_LABELS, templateLabel, templateDesc } from '../config/templateLabels';
 import apiClient from '../services/apiClient';
 
-interface TemplateCard { code: string; label: string; desc: string; icon: string; gradient: string; twoStage?: boolean }
-
-const TEMPLATES: TemplateCard[] = [
-  { code: 'INQUIRY',            label: '伺書',               desc: '一般稟議・伺い書',          icon: '📋', gradient: 'from-ringo-400/20 to-ringo-600/10' },
-  { code: 'BUSINESS_TRIP',      label: '出張伺い',           desc: '出張前申請',                icon: '✈️', gradient: 'from-sky-400/20 to-blue-500/10' },
-  { code: 'OFFICE_OVERTIME',    label: '早出・延長申請',     desc: '早出・事務所閉鎖・延長',    icon: '🕐', gradient: 'from-amber-400/20 to-orange-500/10' },
-  { code: 'EQUIPMENT_PURCHASE', label: '備品・消耗品購入',   desc: '備品・消耗品の購入申請',    icon: '🛒', gradient: 'from-emerald-400/20 to-green-500/10' },
-  { code: 'PC_TAKEOUT',         label: 'PC持ち出し',         desc: '社外へのPC持ち出し申請',    icon: '💻', gradient: 'from-indigo-400/20 to-violet-500/10' },
-  { code: 'LEAVE',              label: '有休・代休・特別休暇', desc: '休暇の申請',              icon: '📅', gradient: 'from-violet-400/20 to-purple-500/10' },
-  { code: 'TARDINESS',          label: '遅刻・早退',         desc: '控除対象の勤怠申請',        icon: '⏰', gradient: 'from-orange-400/20 to-red-500/10' },
-  { code: 'INCIDENT_REPORT',    label: '始末書',             desc: '事故・インシデント報告',    icon: '⚠️', gradient: 'from-red-400/20 to-ringo-600/10' },
-  { code: 'EXPENSE_CLAIM',      label: '立替精算申請',       desc: '稟議→精算入力→精算承認',  icon: '💴', gradient: 'from-teal-400/20 to-emerald-500/10', twoStage: true },
-];
+// Order matters — this is also the display order on the Dashboard grid
+const TEMPLATE_CODES = [
+  'INQUIRY', 'BUSINESS_TRIP', 'OFFICE_OVERTIME', 'EQUIPMENT_PURCHASE',
+  'PC_TAKEOUT', 'LEAVE', 'TARDINESS', 'INCIDENT_REPORT', 'EXPENSE_CLAIM',
+] as const;
 
 function StatusBadge({ status, t }: { status: string; t: (k: any) => string }): JSX.Element {
   const map: Record<string, { cls: string; key: string }> = {
@@ -152,32 +145,35 @@ export default function Dashboard() {
             <div className="lg:col-span-3 space-y-3">
               <h3 className="section-title">{t('dash_forms_title')}</h3>
               <div className="grid grid-cols-2 gap-3 stagger">
-                {TEMPLATES.map((tmpl) => (
-                  <Link
-                    key={tmpl.code}
-                    to={`/applications/new/${tmpl.code}`}
-                    className="card-hover group !p-4 flex items-start gap-3 animate-fade-up"
-                  >
-                    <div className={`flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br ${tmpl.gradient} flex items-center justify-center text-xl border border-white/60`}>
-                      {tmpl.icon}
-                    </div>
-                    <div className="min-w-0 pt-0.5">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <p className="text-sm font-semibold text-warmgray-800 leading-tight group-hover:text-ringo-600 transition-colors">
-                          {tmpl.label}
-                        </p>
-                        {tmpl.twoStage && (
-                          <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700 border border-teal-200/60 leading-none">
-                            {t('two_stage_badge')}
-                          </span>
-                        )}
+                {TEMPLATE_CODES.map((code) => {
+                  const tmpl = TEMPLATE_LABELS[code];
+                  return (
+                    <Link
+                      key={code}
+                      to={`/applications/new/${code}`}
+                      className="card-hover group !p-4 flex items-start gap-3 animate-fade-up"
+                    >
+                      <div className={`flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br ${tmpl.gradient} flex items-center justify-center text-xl border border-white/60`}>
+                        {tmpl.icon}
                       </div>
-                      {tmpl.desc && (
-                        <p className="text-[11px] text-warmgray-400 mt-0.5 leading-tight">{tmpl.desc}</p>
-                      )}
-                    </div>
-                  </Link>
-                ))}
+                      <div className="min-w-0 pt-0.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-sm font-semibold text-warmgray-800 leading-tight group-hover:text-ringo-600 transition-colors">
+                            {templateLabel(code, lang, tmpl.ja)}
+                          </p>
+                          {tmpl.twoStage && (
+                            <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700 border border-teal-200/60 leading-none">
+                              {t('two_stage_badge')}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-warmgray-400 mt-0.5 leading-tight">
+                          {templateDesc(code, lang)}
+                        </p>
+                      </div>
+                    </Link>
+                  );
+                })}
               </div>
             </div>
 
@@ -209,7 +205,9 @@ export default function Dashboard() {
                             className="flex items-center gap-3 px-4 py-3 hover:bg-white/30 transition-colors"
                           >
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-warmgray-800 truncate">{app.template_name}</p>
+                              <p className="text-sm font-medium text-warmgray-800 truncate">
+                                {templateLabel(app.template_code, lang, app.template_name)}
+                              </p>
                               <p className="text-[11px] text-warmgray-400 mt-0.5">
                                 {new Date(app.created_at).toLocaleDateString(dateLocale)}
                               </p>
@@ -250,7 +248,9 @@ export default function Dashboard() {
                             to="/approvals"
                             className="block px-4 py-3 hover:bg-white/30 transition-colors"
                           >
-                            <p className="text-sm font-semibold text-warmgray-800 truncate">{app.template_name}</p>
+                            <p className="text-sm font-semibold text-warmgray-800 truncate">
+                              {templateLabel(app.template_code, lang, app.template_name)}
+                            </p>
                             <p className="text-[11px] text-warmgray-400 mt-0.5">{app.applicant_name}</p>
                           </Link>
                         </li>

@@ -75,6 +75,16 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
     es.addEventListener('APPLICATION_SUBMITTED',  onAppSubmitted);
     es.addEventListener('SETTLEMENT_ACTION',      onSettlementAction);
 
+    // ── Admin changed THIS user's profile (role / dept / active / password) ─
+    // Backend emits via emitToUsers([userId], 'user-state-changed', ...).
+    // We re-dispatch as a window CustomEvent so AuthContext can listen
+    // without depending on this SSE plumbing directly. AuthContext re-fetches
+    // /me on receipt → fingerprint check → invalidates all caches if changed.
+    const onUserStateChanged = () => {
+      window.dispatchEvent(new CustomEvent('ringo:user-state-changed'));
+    };
+    es.addEventListener('user-state-changed', onUserStateChanged);
+
     es.onerror = () => {
       // EventSource auto-reconnects — no manual retry needed.
       // Log in dev only.

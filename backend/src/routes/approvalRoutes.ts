@@ -2,11 +2,13 @@ import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../config/db';
 import { requireAuth } from '../middlewares/authMiddleware';
 import { assertCanActOnStep } from '../middlewares/authz';
+import { mutationLimiter } from '../middlewares/rateLimit';
 import { emitAll } from './sseRoutes';
 import type pg from 'pg';
 
 const router = Router();
 router.use(requireAuth);
+router.use(mutationLimiter);
 
 // GET /approvals/pending — steps assigned to current user  (paginated)
 // ?all=true (ADMIN only) → system-wide view

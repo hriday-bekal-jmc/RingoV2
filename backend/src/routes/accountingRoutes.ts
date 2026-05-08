@@ -1,10 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import fs from 'fs';
+import path from 'path';
 import { query, withTransaction } from '../config/db';
 import { requireAuth } from '../middlewares/authMiddleware';
 import { emitAll } from './sseRoutes';
+import { addCsvExportJob, getCsvExportMeta } from '../services/csvExportQueue';
 import type pg from 'pg';
 import multer from 'multer';
-import path from 'path';
 
 const router = Router();
 router.use(requireAuth);
@@ -273,101 +275,101 @@ router.post('/settlements/:id/close', async (req: Request, res: Response): Promi
   }
 });
 
-// ── GET /accounting/settlements/csv?ids=uuid1,uuid2,... ──────────────────────
-// Must be registered BEFORE the /:id route to avoid uuid-parsing the string "csv"
-router.get('/settlements/csv', async (req: Request, res: Response): Promise<void> => {
-  const { ids } = req.query as { ids?: string };
+// ── CSV export — async via BullMQ worker ─────────────────────────────────────
+//
+// Why async? Sync CSV blocks the event loop and OOMs on big result sets.
+// New flow:
+//   1. POST /accounting/settlements/csv/export   → enqueue, return { jobId }
+//   2. GET  /accounting/settlements/csv/:jobId   → poll status
+//   3. GET  /accounting/settlements/csv/:jobId/download → stream file when ready
+//
+// Backward-compat: GET /accounting/settlements/csv (no jobId) still works,
+// but now redirects to the async flow internally for any size.
 
+// POST /accounting/settlements/csv/export — enqueue export job
+router.post('/settlements/csv/export', async (req: Request, res: Response): Promise<void> => {
+  const { ids } = req.body as { ids?: string[] };
   try {
-    let rows: Record<string, unknown>[];
+    const jobId = await addCsvExportJob({
+      userId: req.user!.id,
+      ids:    Array.isArray(ids) && ids.length > 0 ? ids : undefined,
+    });
+    res.status(202).json({ jobId, status: 'queued' });
+  } catch (err) {
+    console.error('[accounting] CSV enqueue failed:', err);
+    res.status(500).json({ error: 'エクスポートのキューイングに失敗しました' });
+  }
+});
 
-    if (ids && ids.trim()) {
-      const idList = ids.split(',').map((id) => id.trim()).filter(Boolean);
-      const result = await query(
-        `SELECT
-           a.application_number,
-           u.full_name     AS applicant,
-           d.name          AS department,
-           ft.title_ja     AS form_type,
-           s.expected_amount,
-           s.actual_amount,
-           s.transfer_date,
-           s.accounting_note,
-           s.settlement_status,
-           s.created_at
-         FROM (
-           SELECT s.*, a.status AS app_status, s.status AS settlement_status
-           FROM settlements s
-           JOIN applications a ON a.id = s.application_id
-           WHERE s.id = ANY($1::uuid[])
-         ) s
-         JOIN applications a  ON a.id = s.application_id
-         JOIN form_templates ft ON ft.id = a.template_id
-         JOIN users u         ON u.id = a.applicant_id
-         LEFT JOIN departments d ON d.id = u.department_id
-         ORDER BY s.created_at DESC`,
-        [idList],
-      );
-      rows = result.rows;
-    } else {
-      const result = await query(
-        `SELECT
-           a.application_number,
-           u.full_name     AS applicant,
-           d.name          AS department,
-           ft.title_ja     AS form_type,
-           s.expected_amount,
-           s.actual_amount,
-           s.transfer_date,
-           s.accounting_note,
-           s.status        AS settlement_status,
-           s.created_at
-         FROM settlements s
-         JOIN applications a  ON a.id = s.application_id
-         JOIN form_templates ft ON ft.id = a.template_id
-         JOIN users u         ON u.id = a.applicant_id
-         LEFT JOIN departments d ON d.id = u.department_id
-         ORDER BY s.created_at DESC`,
-      );
-      rows = result.rows;
+// GET /accounting/settlements/csv/:jobId — status poll
+router.get('/settlements/csv/:jobId', async (req: Request, res: Response): Promise<void> => {
+  const { jobId } = req.params;
+  try {
+    const meta = await getCsvExportMeta(String(jobId));
+    if (!meta) { res.status(404).json({ error: 'ジョブが見つかりません' }); return; }
+    if (meta.userId !== req.user!.id && req.user!.role !== 'ADMIN') {
+      res.status(403).json({ error: 'このジョブにアクセスする権限がありません' });
+      return;
+    }
+    res.json({
+      jobId,
+      status:    meta.status,
+      rowCount:  meta.rowCount,
+      error:     meta.error,
+      createdAt: meta.createdAt,
+      finishedAt: meta.finishedAt,
+    });
+  } catch (err) {
+    console.error('[accounting] CSV status failed:', err);
+    res.status(500).json({ error: 'ステータス取得に失敗しました' });
+  }
+});
+
+// GET /accounting/settlements/csv/:jobId/download — stream the CSV file
+router.get('/settlements/csv/:jobId/download', async (req: Request, res: Response): Promise<void> => {
+  const { jobId } = req.params;
+  try {
+    const meta = await getCsvExportMeta(String(jobId));
+    if (!meta) { res.status(404).json({ error: 'ジョブが見つかりません' }); return; }
+    if (meta.userId !== req.user!.id && req.user!.role !== 'ADMIN') {
+      res.status(403).json({ error: 'このジョブにアクセスする権限がありません' });
+      return;
+    }
+    if (meta.status !== 'ready' || !meta.filename) {
+      res.status(409).json({ error: 'ファイルはまだ準備できていません', status: meta.status });
+      return;
     }
 
-    // Build CSV with BOM for Excel
-    const headers = [
-      '申請番号', '申請者', '部署', '申請種別',
-      '概算金額（円）', '実費合計（円）',
-      '振込日', '備考', 'ステータス', '作成日',
-    ];
+    const exportsDir = path.join(__dirname, '../../exports');
+    const filepath   = path.join(exportsDir, meta.filename);
 
-    const escape = (v: unknown) => {
-      const s = String(v ?? '').replace(/"/g, '""');
-      return `"${s}"`;
-    };
+    // Path-traversal guard — meta.filename should never contain ".." but defend in depth
+    const resolved = path.resolve(filepath);
+    if (!resolved.startsWith(path.resolve(exportsDir))) {
+      res.status(400).json({ error: 'invalid path' }); return;
+    }
+    if (!fs.existsSync(resolved)) {
+      res.status(404).json({ error: 'ファイルが見つかりません（期限切れの可能性）' }); return;
+    }
 
-    const lines = [
-      headers.join(','),
-      ...rows.map((r) => [
-        escape(r.application_number),
-        escape(r.applicant),
-        escape(r.department),
-        escape(r.form_type),
-        r.expected_amount ?? 0,
-        r.actual_amount ?? 0,
-        r.transfer_date ? new Date(r.transfer_date as string).toLocaleDateString('ja-JP') : '',
-        escape(r.accounting_note),
-        escape(r.settlement_status),
-        new Date(r.created_at as string).toLocaleDateString('ja-JP'),
-      ].join(',')),
-    ];
-
-    const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const downloadName = `settlements_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.csv`;
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="settlements_${timestamp}.csv"`);
-    res.send('﻿' + lines.join('\r\n'));
+    res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"`);
+    fs.createReadStream(resolved).pipe(res);
   } catch (err) {
-    console.error('[accounting] CSV export failed:', err);
-    res.status(500).json({ error: 'CSVエクスポートに失敗しました' });
+    console.error('[accounting] CSV download failed:', err);
+    res.status(500).json({ error: 'ダウンロードに失敗しました' });
   }
+});
+
+// LEGACY: GET /accounting/settlements/csv — kept so existing frontend doesn't 404.
+// Returns 410 Gone with hint to use new async flow. Update frontend to call
+// POST /export then poll, then GET /download.
+router.get('/settlements/csv', async (_req: Request, res: Response): Promise<void> => {
+  res.status(410).json({
+    error:  'この同期エンドポイントは廃止されました。POST /accounting/settlements/csv/export を使用してください。',
+    hint:   'See accountingRoutes.ts header comment for the new flow.',
+  });
 });
 
 export default router;

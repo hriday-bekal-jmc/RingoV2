@@ -2,11 +2,14 @@ import { Router, Request, Response } from 'express';
 import argon2 from 'argon2';
 import { query, withTransaction } from '../config/db';
 import { requireAuth, requireRole, invalidateUserStateCache } from '../middlewares/authMiddleware';
+import { mutationLimiter } from '../middlewares/rateLimit';
+import { emitToUsers } from './sseRoutes';
 import type pg from 'pg';
 
 const router = Router();
 router.use(requireAuth);
 router.use(requireRole('ADMIN'));
+router.use(mutationLimiter);
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 
@@ -99,7 +102,12 @@ router.patch('/users/:id', async (req: Request, res: Response): Promise<void> =>
     params.push(id);
 
     await query(q, params);
-    if (bumpTokenVersion) await invalidateUserStateCache(String(id));
+    if (bumpTokenVersion) {
+      await invalidateUserStateCache(String(id));
+      // Push event to the affected user's SSE channel — replaces 60s /me poll.
+      // Frontend AuthContext listens and re-fetches /me on receipt.
+      emitToUsers([String(id)], 'user-state-changed', { reason: 'profile-updated' });
+    }
     res.json({ message: 'ユーザーを更新しました' });
   } catch (err: unknown) {
     const e = err as { code?: string };
@@ -133,6 +141,8 @@ router.delete('/users/:id', async (req: Request, res: Response): Promise<void> =
       );
     }
     await invalidateUserStateCache(String(req.params.id));
+    // Push event so user's frontend immediately re-checks auth → 401 → redirect to login
+    emitToUsers([String(req.params.id)], 'user-state-changed', { reason: 'deactivated' });
     res.json({ message: 'ユーザーを削除/無効化しました' });
   } catch (err) {
     console.error('[admin] user delete failed:', err);

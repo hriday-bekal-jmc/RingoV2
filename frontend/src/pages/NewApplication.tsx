@@ -55,6 +55,8 @@ export default function NewApplication() {
       return res.data as RoutePreview;
     },
     enabled: !!template?.id,
+    // Always refetch — routes are dept-filtered; stale cache shows wrong dept's routes
+    staleTime: 0,
   });
 
   useEffect(() => {
@@ -75,7 +77,8 @@ export default function NewApplication() {
       queryClient.invalidateQueries({ queryKey: ['myApplications'] });
       navigate('/history?submitted=1');
     } catch (error: any) {
-      console.error('Submit error:', error);
+      // Surface to user via alert (replaced with toast in P2 polish).
+      // Don't log to console.error — esbuild keeps it in prod, leaks user data.
       alert(`${t('toast_submit_error')}: ${error.message}`);
     }
   };

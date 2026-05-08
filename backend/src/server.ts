@@ -27,6 +27,14 @@ import accountingRoutes from './routes/accountingRoutes';
 const app: Application = express();
 const PORT = env.PORT;
 
+// ── Trust proxy ───────────────────────────────────────────────────────────────
+// Behind AWS ALB / nginx, X-Forwarded-* headers carry the real client IP. Without
+// this, req.ip resolves to the proxy's internal IP — breaking rate limiting
+// (everyone shares one bucket) and audit log accuracy.
+//
+// Value of 1 = trust the first hop. Increase if multiple proxies in chain.
+app.set('trust proxy', 1);
+
 // ── Security & parsing ────────────────────────────────────────────────────────
 app.use(helmet({
   // Allow inline styles/scripts from same origin (Tailwind, Vite HMR)

@@ -2,11 +2,15 @@ import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../config/db';
 import { requireAuth } from '../middlewares/authMiddleware';
 import { assertCanReadApp, assertValidRouteForTemplate } from '../middlewares/authz';
+import { mutationLimiter } from '../middlewares/rateLimit';
+import { resolveApprovalSteps } from '../services/approvalStepService';
 import { emitAll } from './sseRoutes';
 import type pg from 'pg';
 
 const router = Router();
 router.use(requireAuth);
+// Per-IP cap of 300 req/min — protects DB from runaway clients
+router.use(mutationLimiter);
 
 // GET /applications/route-preview?template_id=X&stage=RINGI|SETTLEMENT
 router.get('/route-preview', async (req: Request, res: Response): Promise<void> => {
@@ -152,35 +156,8 @@ router.post('/:id/resubmit', async (req: Request, res: Response): Promise<void> 
         await assertValidRouteForTemplate(client, route_id, template_id, department_id, 'RINGI');
       }
 
-      // Load new RINGI steps (with role resolution)
-      const stepsRes = await client.query(
-        `SELECT step_order, approver_id, approver_role, label, action_type
-         FROM approval_route_steps WHERE route_id = $1 ORDER BY step_order ASC`,
-        [route_id],
-      );
-      if (stepsRes.rows.length === 0) {
-        throw Object.assign(new Error('ルートにステップがありません'), { status: 422 });
-      }
-
-      // Resolve role-based steps
-      type RawStep = { step_order: number; approver_id: string | null; approver_role: string | null; label: string; action_type: string };
-      const resolvedSteps: Array<{ step_order: number; approver_id: string; label: string; action_type: string }> = [];
-      for (const raw of stepsRes.rows as RawStep[]) {
-        if (raw.approver_id) {
-          resolvedSteps.push({ step_order: raw.step_order, approver_id: raw.approver_id, label: raw.label, action_type: raw.action_type });
-        } else if (raw.approver_role) {
-          const roleRes = await client.query(
-            `SELECT id FROM users WHERE role = $1 AND is_active = TRUE ORDER BY created_at ASC LIMIT 1`,
-            [raw.approver_role],
-          );
-          if (roleRes.rows.length === 0) {
-            throw Object.assign(new Error(`ステップ "${raw.label}" の承認者が見つかりません`), { status: 422 });
-          }
-          resolvedSteps.push({ step_order: raw.step_order, approver_id: roleRes.rows[0].id as string, label: raw.label, action_type: raw.action_type });
-        } else {
-          throw Object.assign(new Error(`ステップ "${raw.label}" に承認者が設定されていません`), { status: 422 });
-        }
-      }
+      // Resolve route → concrete steps (single batched role lookup)
+      const resolvedSteps = await resolveApprovalSteps(client, route_id);
 
       // Determine step_order offset (100 per round, so history is preserved in order)
       const maxRes = await client.query(
@@ -285,33 +262,8 @@ router.post('/:id/submit', async (req: Request, res: Response): Promise<void> =>
         await assertValidRouteForTemplate(client, route_id, template_id, department_id, 'RINGI');
       }
 
-      // Load steps (with approver_role for role-based resolution)
-      const stepsRes = await client.query(
-        `SELECT step_order, approver_id, approver_role, label, action_type
-         FROM approval_route_steps WHERE route_id = $1 ORDER BY step_order ASC`,
-        [route_id],
-      );
-      if (stepsRes.rows.length === 0) throw Object.assign(new Error('ルートにステップがありません'), { status: 422 });
-
-      // Resolve role-based steps
-      type RawSubmitStep = { step_order: number; approver_id: string | null; approver_role: string | null; label: string; action_type: string };
-      const resolvedSubmitSteps: Array<{ step_order: number; approver_id: string; label: string; action_type: string }> = [];
-      for (const raw of stepsRes.rows as RawSubmitStep[]) {
-        if (raw.approver_id) {
-          resolvedSubmitSteps.push({ step_order: raw.step_order, approver_id: raw.approver_id, label: raw.label, action_type: raw.action_type });
-        } else if (raw.approver_role) {
-          const roleRes = await client.query(
-            `SELECT id FROM users WHERE role = $1 AND is_active = TRUE ORDER BY created_at ASC LIMIT 1`,
-            [raw.approver_role],
-          );
-          if (roleRes.rows.length === 0) {
-            throw Object.assign(new Error(`ステップ "${raw.label}" の承認者が見つかりません`), { status: 422 });
-          }
-          resolvedSubmitSteps.push({ step_order: raw.step_order, approver_id: roleRes.rows[0].id as string, label: raw.label, action_type: raw.action_type });
-        } else {
-          throw Object.assign(new Error(`ステップ "${raw.label}" に承認者が設定されていません`), { status: 422 });
-        }
-      }
+      // Resolve route → concrete steps (single batched role lookup)
+      const resolvedSubmitSteps = await resolveApprovalSteps(client, route_id);
 
       // Update application to PENDING_APPROVAL
       await client.query(
@@ -334,7 +286,7 @@ router.post('/:id/submit', async (req: Request, res: Response): Promise<void> =>
         `INSERT INTO audit_logs (action, entity_type, entity_id) VALUES ('DRAFT_SUBMIT', 'application', $1)`,
         [req.params.id],
       );
-      return { id: req.params.id, status: 'PENDING_APPROVAL', total_steps: stepsRes.rows.length };
+      return { id: req.params.id, status: 'PENDING_APPROVAL', total_steps: resolvedSubmitSteps.length };
     });
     emitAll('APPLICATION_SUBMITTED', { type: 'submit', applicationId: req.params.id });
     res.json({ message: '申請を提出しました', application: result });
@@ -403,41 +355,8 @@ router.post('/:id/start-settlement', async (req: Request, res: Response): Promis
         await assertValidRouteForTemplate(client, route_id, template_id, department_id, 'SETTLEMENT');
       }
 
-      // Load settlement steps
-      const stepsRes = await client.query(
-        `SELECT step_order, approver_id, approver_role, label, action_type
-         FROM approval_route_steps WHERE route_id = $1 ORDER BY step_order ASC`,
-        [route_id],
-      );
-      if (stepsRes.rows.length === 0) {
-        throw Object.assign(new Error('精算ルートにステップがありません'), { status: 422 });
-      }
-
-      // Resolve role-based steps (approver_id = null, approver_role set) → concrete user
-      type RawStep = { step_order: number; approver_id: string | null; approver_role: string | null; label: string; action_type: string };
-      const resolvedSteps: Array<{ step_order: number; approver_id: string; label: string; action_type: string }> = [];
-      for (const raw of stepsRes.rows as RawStep[]) {
-        if (raw.approver_id) {
-          resolvedSteps.push({ step_order: raw.step_order, approver_id: raw.approver_id, label: raw.label, action_type: raw.action_type });
-        } else if (raw.approver_role) {
-          const roleRes = await client.query(
-            `SELECT id FROM users WHERE role = $1 AND is_active = TRUE ORDER BY created_at ASC LIMIT 1`,
-            [raw.approver_role],
-          );
-          if (roleRes.rows.length === 0) {
-            throw Object.assign(
-              new Error(`精算ルートのステップ "${raw.label}" に対応するユーザー（役割: ${raw.approver_role}）が見つかりません`),
-              { status: 422 },
-            );
-          }
-          resolvedSteps.push({ step_order: raw.step_order, approver_id: roleRes.rows[0].id as string, label: raw.label, action_type: raw.action_type });
-        } else {
-          throw Object.assign(
-            new Error(`精算ルートのステップ "${raw.label}" に承認者が設定されていません`),
-            { status: 422 },
-          );
-        }
-      }
+      // Resolve settlement route → concrete steps (single batched role lookup)
+      const resolvedSteps = await resolveApprovalSteps(client, route_id, '精算ルート');
 
       // Update application
       await client.query(
@@ -557,34 +476,8 @@ router.post('/:id/resubmit-settlement', async (req: Request, res: Response): Pro
         await assertValidRouteForTemplate(client, route_id, template_id, department_id, 'SETTLEMENT');
       }
 
-      // Load & resolve SETTLEMENT steps
-      const stepsRes = await client.query(
-        `SELECT step_order, approver_id, approver_role, label, action_type
-         FROM approval_route_steps WHERE route_id = $1 ORDER BY step_order ASC`,
-        [route_id],
-      );
-      if (stepsRes.rows.length === 0) {
-        throw Object.assign(new Error('精算ルートにステップがありません'), { status: 422 });
-      }
-
-      type RawStep = { step_order: number; approver_id: string | null; approver_role: string | null; label: string; action_type: string };
-      const resolvedSteps: Array<{ step_order: number; approver_id: string; label: string; action_type: string }> = [];
-      for (const raw of stepsRes.rows as RawStep[]) {
-        if (raw.approver_id) {
-          resolvedSteps.push({ step_order: raw.step_order, approver_id: raw.approver_id, label: raw.label, action_type: raw.action_type });
-        } else if (raw.approver_role) {
-          const roleRes = await client.query(
-            `SELECT id FROM users WHERE role = $1 AND is_active = TRUE ORDER BY created_at ASC LIMIT 1`,
-            [raw.approver_role],
-          );
-          if (roleRes.rows.length === 0) {
-            throw Object.assign(new Error(`ステップ "${raw.label}" の承認者が見つかりません`), { status: 422 });
-          }
-          resolvedSteps.push({ step_order: raw.step_order, approver_id: roleRes.rows[0].id as string, label: raw.label, action_type: raw.action_type });
-        } else {
-          throw Object.assign(new Error(`ステップ "${raw.label}" に承認者が設定されていません`), { status: 422 });
-        }
-      }
+      // Resolve SETTLEMENT route → concrete steps (single batched role lookup)
+      const resolvedSteps = await resolveApprovalSteps(client, route_id, '精算ルート');
 
       // Determine round offset for settlement (same logic as RINGI resubmit — preserves history)
       const maxSettleRes = await client.query(
@@ -701,40 +594,8 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         }
       }
 
-      const stepsRes = await client.query(
-        `SELECT id, step_order, approver_id, approver_role, label, action_type
-         FROM approval_route_steps WHERE route_id = $1 ORDER BY step_order ASC`,
-        [route_id],
-      );
-      if (stepsRes.rows.length === 0) {
-        throw Object.assign(new Error('Approval route has no steps — check admin config'), { status: 422 });
-      }
-
-      // Resolve role-based steps (approver_id = null, approver_role set) → concrete user
-      type RingiRawStep = { id: string; step_order: number; approver_id: string | null; approver_role: string | null; label: string; action_type: string };
-      const ringiResolvedSteps: Array<{ step_order: number; approver_id: string; label: string; action_type: string }> = [];
-      for (const raw of stepsRes.rows as RingiRawStep[]) {
-        if (raw.approver_id) {
-          ringiResolvedSteps.push({ step_order: raw.step_order, approver_id: raw.approver_id, label: raw.label, action_type: raw.action_type });
-        } else if (raw.approver_role) {
-          const roleRes = await client.query(
-            `SELECT id FROM users WHERE role = $1 AND is_active = TRUE ORDER BY created_at ASC LIMIT 1`,
-            [raw.approver_role],
-          );
-          if (roleRes.rows.length === 0) {
-            throw Object.assign(
-              new Error(`承認ルートのステップ "${raw.label}" に対応するユーザー（役割: ${raw.approver_role}）が見つかりません`),
-              { status: 422 },
-            );
-          }
-          ringiResolvedSteps.push({ step_order: raw.step_order, approver_id: roleRes.rows[0].id as string, label: raw.label, action_type: raw.action_type });
-        } else {
-          throw Object.assign(
-            new Error(`承認ルートのステップ "${raw.label}" に承認者が設定されていません`),
-            { status: 422 },
-          );
-        }
-      }
+      // Resolve route → concrete steps (single batched role lookup)
+      const ringiResolvedSteps = await resolveApprovalSteps(client, route_id, '承認ルート');
 
       const appRes = await client.query(
         `INSERT INTO applications (applicant_id, template_id, route_id, form_data, status, submitted_at)

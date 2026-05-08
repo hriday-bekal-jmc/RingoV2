@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/apiClient';
 
 export interface User {
@@ -23,16 +24,74 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// Safety-net poll. Most updates come via SSE 'user-state-changed' push (instant)
+// or visibilitychange refetch (when user comes back to tab). This 30-min poll
+// is only there to catch edge cases where SSE silently dropped events.
+//
+// Why 30 min not 60s: real-time data (apps, approvals, settlements) is already
+// covered by other SSE events. /me only catches admin-side role/dept/active
+// changes which happen a few times a month. 30 min worst-case latency is fine.
+const ME_POLL_MS = 30 * 60_000;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
+  // Fingerprint = role + department_id. Change → all React Query caches stale.
+  const fingerprintRef = useRef<string>('');
+
+  const fetchMe = useCallback(async (isFirstLoad = false) => {
+    try {
+      const res = await apiClient.get('/auth/me');
+      const fresh: User | null = res.data.user ?? null;
+      const fp = `${fresh?.role ?? ''}|${fresh?.department_id ?? ''}`;
+
+      if (!isFirstLoad && fingerprintRef.current && fingerprintRef.current !== fp) {
+        // Role or department changed while user was logged in.
+        // Flush all React Query caches so dept/role-filtered data refetches.
+        queryClient.invalidateQueries();
+      }
+
+      fingerprintRef.current = fp;
+      setUser(fresh);
+    } catch {
+      setUser(null);
+    }
+  }, [queryClient]);
+
   useEffect(() => {
-    apiClient.get('/auth/me')
-      .then((res) => setUser(res.data.user))
-      .catch(() => setUser(null))
-      .finally(() => setLoading(false));
-  }, []);
+    // Initial load
+    fetchMe(true).finally(() => setLoading(false));
+
+    // ── Primary: SSE push ─────────────────────────────────────────────────
+    // SSEProvider receives the 'user-state-changed' event from backend and
+    // re-dispatches it as a window CustomEvent. We listen here and refetch
+    // /me immediately. Means admin changes propagate in ~1s.
+    const onSseUserChanged = (): void => { fetchMe(false); };
+    window.addEventListener('ringo:user-state-changed', onSseUserChanged);
+
+    // ── Secondary: visibility change ──────────────────────────────────────
+    // User returning to tab after being away → refetch in case SSE was
+    // disconnected and missed an event.
+    const onVisibility = (): void => {
+      if (!document.hidden) fetchMe(false);
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    // ── Backstop: long safety poll ────────────────────────────────────────
+    // Catches the rare case where SSE silently dropped events AND the user
+    // never switched tabs for 30+ minutes. Only runs on visible tabs.
+    const id = setInterval(() => {
+      if (!document.hidden) fetchMe(false);
+    }, ME_POLL_MS);
+
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('ringo:user-state-changed', onSseUserChanged);
+    };
+  }, [fetchMe]);
 
   const logout = async () => {
     await apiClient.post('/auth/logout').catch(() => {});

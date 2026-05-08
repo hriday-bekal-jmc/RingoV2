@@ -5,7 +5,13 @@ import fs from 'fs';
 import { query } from '../config/db';
 import { requireAuth } from '../middlewares/authMiddleware';
 import { uploadLimiter } from '../middlewares/rateLimit';
-import { isDriveEnabled, uploadToDrive } from '../services/driveService';
+import { isDriveEnabled, uploadToDrive, type DriveFolder } from '../services/driveService';
+
+// Valid folder categories accepted from callers
+const VALID_FOLDERS: DriveFolder[] = ['receipts', 'contracts', 'other'];
+function parseFolder(raw: unknown): DriveFolder | undefined {
+  return VALID_FOLDERS.includes(raw as DriveFolder) ? (raw as DriveFolder) : undefined;
+}
 
 const router = Router();
 router.use(requireAuth);
@@ -45,6 +51,18 @@ function safeName(original: string): string {
 }
 
 // POST /api/uploads — upload one or more files
+//
+// Body (multipart):
+//   files          — up to 10 files
+//   application_id — UUID (optional, links file to an application)
+//   field_name     — form field key (optional, e.g. "receipt_image")
+//
+// Query / body:
+//   folder         — 'receipts' | 'contracts' | 'other'
+//                    Determines which Drive folder receives the file.
+//                    Falls back to GDRIVE_FOLDER_ID when omitted or unknown.
+//                    Ignored when Drive is not configured (local FS used).
+//
 // Returns: { files: [{ id, url, original_name, field_name, size, mime }] }
 router.post('/', upload.array('files', 10), async (req: Request, res: Response): Promise<void> => {
   const files = req.files as Express.Multer.File[] | undefined;
@@ -57,6 +75,9 @@ router.post('/', upload.array('files', 10), async (req: Request, res: Response):
     field_name?: string;
   };
 
+  // Resolve Drive folder category from query param or body field
+  const folderCategory = parseFolder(req.query.folder ?? req.body.folder);
+
   const useDrive = isDriveEnabled();
 
   try {
@@ -67,8 +88,10 @@ router.post('/', upload.array('files', 10), async (req: Request, res: Response):
         let drive_url:     string | null = null;
 
         if (useDrive) {
-          // Drive path — bytes never touch our disk
-          const result = await uploadToDrive(f.originalname, f.mimetype, f.buffer);
+          // Drive path — bytes never touch our disk.
+          // folderCategory routes to the right subfolder (receipts/contracts/other).
+          // When undefined, default GDRIVE_FOLDER_ID is used.
+          const result = await uploadToDrive(f.originalname, f.mimetype, f.buffer, folderCategory);
           drive_file_id = result.fileId;
           drive_url     = result.webViewLink;
           stored_path   = `drive:${result.fileId}`; // sentinel — never read from FS
