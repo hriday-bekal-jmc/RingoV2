@@ -2,11 +2,11 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import Layout from '../components/common/Layout';
 import { useAuth } from '../context/AuthContext';
+import { useLang } from '../context/LanguageContext';
 import { getPermissions } from '../config/permissions';
 import apiClient from '../services/apiClient';
-import { useSSE } from '../hooks/useSSE';
 
-interface TemplateCard { code: string; label: string; desc: string; icon: string; gradient: string }
+interface TemplateCard { code: string; label: string; desc: string; icon: string; gradient: string; twoStage?: boolean }
 
 const TEMPLATES: TemplateCard[] = [
   { code: 'INQUIRY',            label: '伺書',               desc: '一般稟議・伺い書',          icon: '📋', gradient: 'from-ringo-400/20 to-ringo-600/10' },
@@ -17,21 +17,23 @@ const TEMPLATES: TemplateCard[] = [
   { code: 'LEAVE',              label: '有休・代休・特別休暇', desc: '休暇の申請',              icon: '📅', gradient: 'from-violet-400/20 to-purple-500/10' },
   { code: 'TARDINESS',          label: '遅刻・早退',         desc: '控除対象の勤怠申請',        icon: '⏰', gradient: 'from-orange-400/20 to-red-500/10' },
   { code: 'INCIDENT_REPORT',    label: '始末書',             desc: '事故・インシデント報告',    icon: '⚠️', gradient: 'from-red-400/20 to-ringo-600/10' },
-  { code: 'EXPENSE_CLAIM',      label: '立替精算申請',       desc: '経費立替・精算申請',        icon: '💴', gradient: 'from-teal-400/20 to-emerald-500/10' },
+  { code: 'EXPENSE_CLAIM',      label: '立替精算申請',       desc: '稟議→精算入力→精算承認',  icon: '💴', gradient: 'from-teal-400/20 to-emerald-500/10', twoStage: true },
 ];
 
-function statusBadge(status: string): JSX.Element {
-  const map: Record<string, { cls: string; label: string }> = {
-    PENDING_APPROVAL: { cls: 'badge-pending',  label: '承認待ち' },
-    APPROVED:         { cls: 'badge-approved', label: '承認済み' },
-    REJECTED:         { cls: 'badge-rejected', label: '却下' },
-    RETURNED:         { cls: 'badge-returned', label: '差し戻し' },
-    DRAFT:            { cls: 'badge-draft',    label: '下書き' },
-    COMPLETED:        { cls: 'badge-approved', label: '完了' },
-    CANCELLED:        { cls: 'badge-draft',    label: 'キャンセル' },
+function StatusBadge({ status, t }: { status: string; t: (k: any) => string }): JSX.Element {
+  const map: Record<string, { cls: string; key: string }> = {
+    PENDING_APPROVAL: { cls: 'badge-pending',  key: 'status_pending' },
+    APPROVED:         { cls: 'badge-approved', key: 'status_approved' },
+    REJECTED:         { cls: 'badge-rejected', key: 'status_rejected' },
+    RETURNED:         { cls: 'badge-returned', key: 'status_returned' },
+    DRAFT:            { cls: 'badge-draft',    key: 'status_draft' },
+    COMPLETED:        { cls: 'badge-approved', key: 'status_completed' },
+    CANCELLED:        { cls: 'badge-draft',    key: 'status_cancelled' },
+    PENDING_SETTLEMENT: { cls: 'badge-mustard', key: 'status_pending_settle' },
   };
-  const s = map[status] ?? { cls: 'badge-draft', label: status };
-  return <span className={s.cls}>{s.label}</span>;
+  const s = map[status];
+  if (s) return <span className={s.cls}>{t(s.key as any)}</span>;
+  return <span className="badge-draft">{status}</span>;
 }
 
 function MiniStepDots({ current, total }: { current: number | null; total: number }) {
@@ -71,10 +73,9 @@ function StatCard({ label, value, icon, color, to }: {
 
 export default function Dashboard() {
   const { user, loading } = useAuth();
+  const { t, lang } = useLang();
+  const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
   const perms = getPermissions(user?.role);
-
-  // Real-time updates via SSE
-  useSSE();
 
   const { data: myApps = [] } = useQuery<any[]>({
     queryKey: ['myApplications'],
@@ -99,10 +100,10 @@ export default function Dashboard() {
   const firstName = user?.full_name?.split(' ')[0] ?? 'ゲスト';
 
   const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'おはようございます' : hour < 18 ? 'こんにちは' : 'お疲れ様です';
+  const greeting = hour < 12 ? t('greeting_morning') : hour < 18 ? t('greeting_day') : t('greeting_evening');
 
   return (
-    <Layout title="ダッシュボード">
+    <Layout title={t('title_dashboard')}>
       {loading ? (
         <div className="flex items-center justify-center h-32 text-warmgray-400 text-sm">読み込み中...</div>
       ) : (
@@ -113,30 +114,30 @@ export default function Dashboard() {
             <p className="text-xs font-semibold uppercase tracking-widest text-warmgray-400 mb-1">{greeting}</p>
             <h2 className="text-2xl font-bold text-warmgray-800">{firstName}さん 👋</h2>
             <p className="text-sm text-warmgray-400 mt-1">
-              {new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
+              {new Date().toLocaleDateString(dateLocale, { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
             </p>
           </div>
 
           {/* Stats — all clickable */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 stagger">
             <StatCard
-              label="承認待ち" value={pendingCount} icon="📤"
+              label={t('dash_stat_pending')} value={pendingCount} icon="📤"
               color="from-amber-200/50 to-transparent"
               to="/history?filter=PENDING_APPROVAL"
             />
             <StatCard
-              label="差し戻し" value={returnedCount} icon="↩"
+              label={t('dash_stat_returned')} value={returnedCount} icon="↩"
               color="from-orange-200/50 to-transparent"
               to="/history?filter=RETURNED"
             />
             <StatCard
-              label="下書き" value={draftCount} icon="📝"
+              label={t('dash_stat_draft')} value={draftCount} icon="📝"
               color="from-surface-200/80 to-transparent"
               to="/history?filter=DRAFT"
             />
             {perms.canApprove
-              ? <StatCard label="要承認" value={pendingApprovals.length} icon="🔔" color="from-ringo-200/50 to-transparent" to="/approvals" />
-              : <StatCard label="全申請数" value={myApps.length} icon="📁" color="from-indigo-200/30 to-transparent" to="/history" />
+              ? <StatCard label={t('dash_stat_approval')} value={pendingApprovals.length} icon="🔔" color="from-ringo-200/50 to-transparent" to="/approvals" />
+              : <StatCard label={t('dash_stat_total')} value={myApps.length} icon="📁" color="from-indigo-200/30 to-transparent" to="/history" />
             }
           </div>
 
@@ -145,23 +146,30 @@ export default function Dashboard() {
 
             {/* Template grid */}
             <div className="lg:col-span-3 space-y-3">
-              <h3 className="section-title">申請フォーム</h3>
+              <h3 className="section-title">{t('dash_forms_title')}</h3>
               <div className="grid grid-cols-2 gap-3 stagger">
-                {TEMPLATES.map((t) => (
+                {TEMPLATES.map((tmpl) => (
                   <Link
-                    key={t.code}
-                    to={`/applications/new/${t.code}`}
+                    key={tmpl.code}
+                    to={`/applications/new/${tmpl.code}`}
                     className="card-hover group !p-4 flex items-start gap-3 animate-fade-up"
                   >
-                    <div className={`flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br ${t.gradient} flex items-center justify-center text-xl border border-white/60`}>
-                      {t.icon}
+                    <div className={`flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br ${tmpl.gradient} flex items-center justify-center text-xl border border-white/60`}>
+                      {tmpl.icon}
                     </div>
                     <div className="min-w-0 pt-0.5">
-                      <p className="text-sm font-semibold text-warmgray-800 leading-tight group-hover:text-ringo-600 transition-colors">
-                        {t.label}
-                      </p>
-                      {t.desc && (
-                        <p className="text-[11px] text-warmgray-400 mt-0.5 leading-tight">{t.desc}</p>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-sm font-semibold text-warmgray-800 leading-tight group-hover:text-ringo-600 transition-colors">
+                          {tmpl.label}
+                        </p>
+                        {tmpl.twoStage && (
+                          <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700 border border-teal-200/60 leading-none">
+                            {t('two_stage_badge')}
+                          </span>
+                        )}
+                      </div>
+                      {tmpl.desc && (
+                        <p className="text-[11px] text-warmgray-400 mt-0.5 leading-tight">{tmpl.desc}</p>
                       )}
                     </div>
                   </Link>
@@ -175,7 +183,7 @@ export default function Dashboard() {
               {/* Recent applications — each item links directly to application */}
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="section-title mb-0">最近の申請</h3>
+                  <h3 className="section-title mb-0">{t('dash_recent_title')}</h3>
                   {draftCount > 0 && (
                     <Link to="/history?filter=DRAFT" className="text-[11px] font-semibold text-ringo-500 hover:text-ringo-600 transition-colors">
                       下書き {draftCount}件 →
@@ -199,7 +207,7 @@ export default function Dashboard() {
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium text-warmgray-800 truncate">{app.template_name}</p>
                               <p className="text-[11px] text-warmgray-400 mt-0.5">
-                                {new Date(app.created_at).toLocaleDateString('ja-JP')}
+                                {new Date(app.created_at).toLocaleDateString(dateLocale)}
                               </p>
                               {app.status === 'PENDING_APPROVAL' && (
                                 <MiniStepDots
@@ -208,7 +216,7 @@ export default function Dashboard() {
                                 />
                               )}
                             </div>
-                            {statusBadge(app.status)}
+                            <StatusBadge status={app.status} t={t} />
                           </Link>
                         </li>
                       ))}
@@ -216,7 +224,7 @@ export default function Dashboard() {
                   )}
                   <div className="px-4 py-3 border-t border-white/30">
                     <Link to="/history" className="text-xs font-semibold text-ringo-500 hover:text-ringo-600 transition-colors">
-                      全申請履歴を見る →
+                      {t('dash_view_history')}
                     </Link>
                   </div>
                 </div>
@@ -225,7 +233,7 @@ export default function Dashboard() {
               {/* Pending approvals mini-list */}
               {perms.canApprove && pendingApprovals.length > 0 && (
                 <div>
-                  <h3 className="section-title">要承認</h3>
+                  <h3 className="section-title">{t('dash_require_title')}</h3>
                   <div className="card !p-0 overflow-hidden">
                     <ul className="divide-y divide-white/30">
                       {pendingApprovals.slice(0, 3).map((app, i) => (
@@ -246,7 +254,7 @@ export default function Dashboard() {
                     </ul>
                     <div className="px-4 py-3 border-t border-white/30">
                       <Link to="/approvals" className="text-xs font-semibold text-ringo-500 hover:text-ringo-600 transition-colors">
-                        承認画面へ →
+                        {t('dash_view_approvals')}
                       </Link>
                     </div>
                   </div>

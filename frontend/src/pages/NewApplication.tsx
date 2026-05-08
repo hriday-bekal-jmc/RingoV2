@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query'; // ←★ useQueryClient を追加
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import DynamicForm from '../components/forms/DynamicForm';
+import { useLang } from '../context/LanguageContext';
+import CustomSelect from '../components/forms/CustomSelect';
+import RouteTimeline from '../components/common/RouteTimeline';
 
 interface RouteStep {
   step_order: number;
@@ -25,66 +28,15 @@ interface RoutePreview {
   department_has_route: boolean;
 }
 
-// ── Approval chain visual ─────────────────────────────────────────────────────
-
-function ChevronRight() {
-  return (
-    <svg className="w-3.5 h-3.5 text-surface-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-    </svg>
-  );
-}
-
-function RoutePreviewCard({ route }: { route: ApprovalRoute }) {
-  if (route.steps.length === 0) {
-    return (
-      <p className="text-xs text-ringo-500">ステップが設定されていません。管理者に連絡してください。</p>
-    );
-  }
-
-  return (
-    <div className="flex items-center gap-2 flex-wrap">
-      {/* Applicant node */}
-      <div className="flex flex-col items-center gap-1">
-        <div className="w-9 h-9 rounded-full bg-surface-100 border-2 border-surface-200 flex items-center justify-center text-xs font-bold text-warmgray-600">
-          申
-        </div>
-        <span className="text-[10px] text-warmgray-400">申請者</span>
-      </div>
-
-      {route.steps.map((step) => (
-        <div key={step.step_order} className="flex items-center gap-2">
-          <ChevronRight />
-          <div className="flex flex-col items-center gap-1">
-            <div className="w-9 h-9 rounded-full bg-ringo-500 flex items-center justify-center text-white text-xs font-bold shadow-xs">
-              {step.step_order}
-            </div>
-            <span className="text-[10px] text-warmgray-700 text-center max-w-[72px] leading-tight font-medium">
-              {step.approver_name ?? step.approver_role ?? step.label}
-            </span>
-            <span className="text-[9px] text-warmgray-400">{step.label}</span>
-          </div>
-        </div>
-      ))}
-
-      {/* Completion node */}
-      <div className="flex items-center gap-2">
-        <ChevronRight />
-        <div className="flex flex-col items-center gap-1">
-          <div className="w-9 h-9 rounded-full bg-emerald-500 flex items-center justify-center text-white text-sm shadow-xs">✓</div>
-          <span className="text-[10px] text-warmgray-400">完了</span>
-        </div>
-      </div>
-    </div>
-  );
-}
+// RoutePreviewCard and ChevronRight replaced by RouteTimeline component
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function NewApplication() {
   const { templateCode } = useParams<{ templateCode: string }>();
   const navigate = useNavigate();
-  const queryClient = useQueryClient(); // ←★ キャッシュ操作ツールを準備
+  const queryClient = useQueryClient();
+  const { t } = useLang();
   const [selectedRouteId, setSelectedRouteId] = useState<string>('');
 
   const { data: template, isLoading: templateLoading, isError: templateError } = useQuery({
@@ -120,28 +72,26 @@ export default function NewApplication() {
         ...payload,
         route_id: selectedRouteId || undefined,
       });
-      // ★送信成功時にキャッシュをリセットして履歴を最新にする！
       queryClient.invalidateQueries({ queryKey: ['myApplications'] });
       navigate('/history?submitted=1');
     } catch (error: any) {
-      console.error('送信エラー:', error);
-      alert(`申請に失敗しました: ${error.message}`);
+      console.error('Submit error:', error);
+      alert(`${t('toast_submit_error')}: ${error.message}`);
     }
   };
 
   const handleDraft = async (payload: any) => {
     try {
       await apiClient.post('/applications/draft', payload);
-      // ★下書き成功時にもキャッシュをリセット！
       queryClient.invalidateQueries({ queryKey: ['myApplications'] });
       navigate('/history?drafted=1');
     } catch (error: any) {
-      alert(`下書き保存に失敗しました: ${error.message}`);
+      alert(`${t('toast_draft_updated')}: ${error.message}`);
     }
   };
 
   return (
-    <Layout title="新規申請">
+    <Layout title={t('title_new_app')}>
       <div className="max-w-3xl mx-auto space-y-5">
         {/* Loading / Error */}
         {templateLoading && (
@@ -150,12 +100,12 @@ export default function NewApplication() {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
             </svg>
-            フォームを読み込み中...
+            {t('form_loading')}
           </div>
         )}
         {templateError && (
           <div className="card text-ringo-600 text-sm text-center py-8">
-            フォームの読み込みに失敗しました。ページをリロードしてください。
+            {t('form_load_error')}
           </div>
         )}
 
@@ -164,7 +114,7 @@ export default function NewApplication() {
           <div className="card space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="section-title mb-0">承認ルート</p>
+                <p className="section-title mb-0">{t('route_approval')}</p>
                 {routePreview?.routes.find(r => r.id === selectedRouteId)?.name && (
                   <p className="text-xs text-warmgray-500 mt-0.5">
                     {routePreview?.routes.find(r => r.id === selectedRouteId)?.name}
@@ -177,7 +127,7 @@ export default function NewApplication() {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                   </svg>
-                  読み込み中
+                  {t('route_loading')}
                 </span>
               )}
             </div>
@@ -185,32 +135,77 @@ export default function NewApplication() {
             {routePreview && !routePreview.department_has_route && (
               <div className="flex items-start gap-2.5 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
                 <span className="text-base">⚠️</span>
-                <p>あなたの部署にはこのテンプレートの承認ルートが設定されていません。管理者にお問い合わせください。</p>
+                <p>{t('route_no_route_warn')}</p>
               </div>
             )}
 
             {routePreview && routePreview.routes.length > 1 && (
-              <div>
-                <label className="label">ルート選択</label>
-                <select
-                  className="input"
+              <div className="space-y-1.5">
+                <label className="label">{t('route_select')}</label>
+                <CustomSelect
+                  options={routePreview.routes.map((r) => ({
+                    value: r.id,
+                    label: `${r.name}${r.is_default ? t('route_default_suffix') : ''}`,
+                  }))}
                   value={selectedRouteId}
-                  onChange={(e) => setSelectedRouteId(e.target.value)}
-                >
-                  {routePreview.routes.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name}{r.is_default ? '（デフォルト）' : ''}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setSelectedRouteId}
+                />
               </div>
             )}
 
             {selectedRoute && (
-              <div className="bg-surface-50 rounded-xl p-4">
-                <RoutePreviewCard route={selectedRoute} />
+              <div className="bg-white/40 backdrop-blur-sm rounded-xl border border-white/60 p-4">
+                <RouteTimeline
+                  steps={selectedRoute.steps}
+                  originLabel={t('route_applicant_node')}
+                  doneLabel={t('route_done_node')}
+                  emptyMessage={t('route_no_steps')}
+                  accent="ringo"
+                />
               </div>
             )}
+          </div>
+        )}
+
+        {/* Two-stage flow banner for 立替精算申請 */}
+        {template?.settlement_schema && (
+          <div className="card !py-3 !px-4 border border-teal-200/60 bg-teal-50/40 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-teal-600">{t('two_stage_flow_label')}</span>
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700 border border-teal-200/60">💴 {t('two_stage_badge')}</span>
+            </div>
+            {/* Visual 3-phase chain */}
+            <div className="flex items-center gap-2 flex-wrap text-[11px] text-warmgray-600">
+              {/* Phase 1: RINGI */}
+              <div className="flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-full bg-ringo-500 flex items-center justify-center text-white text-[9px] font-bold shrink-0">1</span>
+                <span className="font-medium">{t('phase_ringi')}</span>
+              </div>
+              <svg className="w-3 h-3 text-warmgray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+              {/* Phase 2: 精算入力 (user action) */}
+              <div className="flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-full bg-amber-400 flex items-center justify-center text-white text-[9px] font-bold shrink-0">2</span>
+                <span className="font-medium">{t('phase_waiting_settle')}</span>
+              </div>
+              <svg className="w-3 h-3 text-warmgray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+              {/* Phase 3: Settlement approval */}
+              <div className="flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-full bg-teal-500 flex items-center justify-center text-white text-[9px] font-bold shrink-0">3</span>
+                <span className="font-medium">{t('phase_settlement')}</span>
+              </div>
+              <svg className="w-3 h-3 text-warmgray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+              <div className="flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-white text-[10px] shrink-0">✓</span>
+                <span className="font-medium">{t('route_done_node')}</span>
+              </div>
+            </div>
+            <p className="text-[11px] text-teal-700">{t('two_stage_hint')}</p>
           </div>
         )}
 

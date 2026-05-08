@@ -1,10 +1,12 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import { ROLE_MAP, Role } from '../config/permissions';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import Toast, { useToast } from '../components/common/Toast';
+import CustomSelect from '../components/forms/CustomSelect';
+import { useLang } from '../context/LanguageContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -109,6 +111,7 @@ interface UserModalProps {
 
 function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalProps) {
   const isNew = !user;
+  const { t } = useLang();
   const [form, setForm] = useState({
     full_name:     user?.full_name ?? '',
     email:         user?.email ?? '',
@@ -133,7 +136,7 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
           {!isNew && <UserAvatar name={form.full_name || '?'} avatarUrl={user?.avatar_url} size={10} />}
           <div>
             <h3 className="text-lg font-bold text-warmgray-800">
-              {isNew ? 'ユーザー新規作成' : 'プロフィール編集'}
+              {isNew ? t('admin_create_user') : t('admin_edit_user')}
             </h3>
             {!isNew && <p className="text-xs text-warmgray-400">{user?.email}</p>}
           </div>
@@ -141,29 +144,35 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
 
         <div className="grid grid-cols-2 gap-4">
           <div className="col-span-2">
-            <label className="label">氏名 *</label>
+            <label className="label">{t('admin_field_name')} *</label>
             <input className="input" value={form.full_name} onChange={(e) => set('full_name', e.target.value)} />
           </div>
           <div className="col-span-2">
-            <label className="label">メールアドレス *</label>
+            <label className="label">{t('admin_field_email')} *</label>
             <input className="input" type="email" value={form.email} onChange={(e) => set('email', e.target.value)} />
           </div>
           <div className="col-span-2">
-            <label className="label">{isNew ? 'パスワード' : '新しいパスワード (変更する場合のみ)'}</label>
+            <label className="label">{isNew ? t('admin_field_password') : t('admin_field_password_chg')}</label>
             <input className="input" type="password" value={form.password} onChange={(e) => set('password', e.target.value)} placeholder="••••••••" />
           </div>
           <div>
-            <label className="label">ロール</label>
-            <select className="input" value={form.role} onChange={(e) => set('role', e.target.value)}>
-              {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
+            <label className="label">{t('admin_field_role')}</label>
+            <CustomSelect
+              options={ROLES.map((r) => ({ value: r, label: r }))}
+              value={form.role}
+              onChange={(v) => set('role', v)}
+            />
           </div>
           <div>
-            <label className="label">部署</label>
-            <select className="input" value={form.department_id} onChange={(e) => set('department_id', e.target.value)}>
-              <option value="">— 未設定 —</option>
-              {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
+            <label className="label">{t('admin_field_dept')}</label>
+            <CustomSelect
+              options={[
+                { value: '', label: t('admin_unset') },
+                ...departments.map((d) => ({ value: d.id, label: d.name })),
+              ]}
+              value={form.department_id}
+              onChange={(v) => set('department_id', v)}
+            />
           </div>
           {!isNew && (
             <div className="col-span-2 flex items-center gap-3 bg-surface-100/50 rounded-xl px-4 py-3">
@@ -174,19 +183,19 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
                 onChange={(e) => set('is_active', e.target.checked)}
                 className="w-4 h-4 accent-ringo-500"
               />
-              <label htmlFor="is_active" className="text-sm font-medium text-warmgray-700">アカウント有効</label>
+              <label htmlFor="is_active" className="text-sm font-medium text-warmgray-700">{t('admin_field_active')}</label>
             </div>
           )}
         </div>
 
         <div className="flex justify-end gap-3 pt-2">
-          <button className="btn-outline" onClick={onClose}>キャンセル</button>
+          <button className="btn-outline" onClick={onClose}>{t('btn_cancel')}</button>
           <button
             className="btn-primary"
             onClick={handleSave}
             disabled={isSaving || !form.full_name || !form.email}
           >
-            {isSaving ? '保存中...' : '保存する'}
+            {isSaving ? t('admin_saving') : t('btn_save')}
           </button>
         </div>
       </div>
@@ -198,6 +207,7 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
 
 function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error' | 'info') => void }) {
   const queryClient = useQueryClient();
+  const { t } = useLang();
   const [editUser, setEditUser] = useState<User | null | 'new'>(null);
   const [search, setSearch] = useState('');
   const [deptFilter, setDeptFilter] = useState('');
@@ -295,7 +305,7 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
               className="btn-outline w-full"
               onClick={() => deleteUser.mutate({ id: deleteTarget.id, hard: false })}
             >
-              無効化のみ（データ保持）
+              {t('admin_disable_only')}
             </button>
           }
         />
@@ -310,22 +320,24 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          <select
-            className="input w-40 text-sm"
+          <CustomSelect
+            className="w-40"
+            options={[
+              { value: '', label: t('admin_filter_all_dept') },
+              ...departments.map((d) => ({ value: d.id, label: d.name })),
+            ]}
             value={deptFilter}
-            onChange={(e) => setDeptFilter(e.target.value)}
-          >
-            <option value="">全部署</option>
-            {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
-          <select
-            className="input w-36 text-sm"
+            onChange={setDeptFilter}
+          />
+          <CustomSelect
+            className="w-36"
+            options={[
+              { value: '', label: t('admin_filter_all_role') },
+              ...ROLES.filter((r) => r !== 'ACCOUNTING').map((r) => ({ value: r, label: r })),
+            ]}
             value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value)}
-          >
-            <option value="">全ロール</option>
-            {ROLES.filter(r => r !== 'ACCOUNTING').map((r) => <option key={r} value={r}>{r}</option>)}
-          </select>
+            onChange={setRoleFilter}
+          />
           <div className="flex rounded-xl overflow-hidden border border-white/70">
             {(['all', 'active', 'inactive'] as const).map((v) => (
               <button
@@ -333,17 +345,17 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
                 onClick={() => setActiveFilter(v)}
                 className={`px-3 py-1.5 text-xs font-semibold transition-colors ${activeFilter === v ? 'bg-warmgray-800 text-white' : 'bg-white/60 text-warmgray-500 hover:bg-white/90'}`}
               >
-                {v === 'all' ? '全員' : v === 'active' ? '有効' : '無効'}
+                {v === 'all' ? t('admin_filter_all_people') : v === 'active' ? t('admin_filter_active') : t('admin_filter_inactive')}
               </button>
             ))}
           </div>
-          <span className="text-sm text-warmgray-400">{filtered.length} 名</span>
+          <span className="text-sm text-warmgray-400">{filtered.length} {t('admin_users_count')}</span>
           <div className="flex-1" />
           <button className="btn-primary" onClick={() => setEditUser('new')}>
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
             </svg>
-            ユーザー追加
+            {t('admin_add_user')}
           </button>
         </div>
       </div>
@@ -355,10 +367,10 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
           <table className="table-base">
             <thead>
               <tr>
-                <th>ユーザー</th>
-                <th>ロール</th>
-                <th>部署</th>
-                <th>状態</th>
+                <th>{t('admin_col_user')}</th>
+                <th>{t('admin_field_role')}</th>
+                <th>{t('admin_field_dept')}</th>
+                <th>{t('admin_col_status')}</th>
                 <th></th>
               </tr>
             </thead>
@@ -383,7 +395,7 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
                         : 'bg-surface-100 text-warmgray-500 border border-surface-200'
                     }`}>
                       <span className={`w-1.5 h-1.5 rounded-full ${u.is_active ? 'bg-emerald-500' : 'bg-warmgray-400'}`} />
-                      {u.is_active ? '有効' : '無効'}
+                      {u.is_active ? t('admin_status_active') : t('admin_status_inactive')}
                     </span>
                   </td>
                   <td>
@@ -415,6 +427,148 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
   );
 }
 
+// ─── Approver Picker ─────────────────────────────────────────────────────────
+
+interface ApproverPickerProps {
+  users: User[];
+  departments: Department[];
+  value: string;
+  onChange: (id: string) => void;
+}
+
+function ApproverPicker({ users, departments, value, onChange }: ApproverPickerProps) {
+  const { t, lang } = useLang();
+  const [search, setSearch] = useState('');
+  const [deptFilter, setDeptFilter] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+
+  const selectedUser = users.find((u) => u.id === value);
+
+  const filtered = users.filter((u) => {
+    if (!u.is_active) return false;
+    if (search && !u.full_name.toLowerCase().includes(search.toLowerCase()) &&
+        !(u.department_name ?? '').toLowerCase().includes(search.toLowerCase())) return false;
+    if (deptFilter && u.department_id !== deptFilter) return false;
+    if (roleFilter && u.role !== roleFilter) return false;
+    return true;
+  });
+
+  return (
+    <div className="space-y-2.5">
+      {/* Search + filters row */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-[140px]">
+          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-warmgray-400 pointer-events-none"
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 104.5 4.5a7.5 7.5 0 0012.15 12.15z" />
+          </svg>
+          <input
+            className="input pl-8 text-xs py-1.5"
+            placeholder={lang === 'en' ? 'Search by name…' : '名前で検索…'}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <CustomSelect
+          className="w-36"
+          options={[
+            { value: '', label: t('admin_filter_all_dept') },
+            ...departments.map((d) => ({ value: d.id, label: d.name })),
+          ]}
+          value={deptFilter}
+          onChange={setDeptFilter}
+        />
+        <CustomSelect
+          className="w-32"
+          options={[
+            { value: '', label: t('admin_filter_all_role') },
+            ...ROLES.filter((r) => r !== 'ACCOUNTING').map((r) => ({ value: r, label: r })),
+          ]}
+          value={roleFilter}
+          onChange={setRoleFilter}
+        />
+        <span className="text-[11px] text-warmgray-400 shrink-0">{filtered.length} {t('admin_users_count')}</span>
+      </div>
+
+      {/* Tile grid */}
+      <div className="max-h-56 overflow-y-auto dropdown-scroll rounded-xl">
+        {filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 gap-2 text-warmgray-400">
+            <svg className="w-8 h-8 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+            </svg>
+            <p className="text-xs">{t('admin_no_users')}</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2 p-0.5">
+            {filtered.map((u) => {
+              const isSelected = u.id === value;
+              return (
+                <button
+                  key={u.id}
+                  type="button"
+                  onClick={() => onChange(isSelected ? '' : u.id)}
+                  className={`relative flex flex-col items-center gap-1.5 p-3 rounded-xl text-center
+                    transition-all duration-150 border
+                    ${isSelected
+                      ? 'border-ringo-400/70 bg-ringo-50/80 shadow-[0_0_0_2px_rgba(199,91,71,0.15)] scale-[1.02]'
+                      : 'border-warmgray-200/50 bg-white/50 hover:bg-white/80 hover:border-warmgray-300/60 hover:scale-[1.01]'
+                    }`}
+                >
+                  {/* Selected checkmark */}
+                  {isSelected && (
+                    <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-ringo-500 flex items-center justify-center shadow-sm">
+                      <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                    </span>
+                  )}
+
+                  <UserAvatar name={u.full_name} avatarUrl={u.avatar_url} size={9} />
+
+                  <div className="w-full min-w-0 space-y-0.5">
+                    <p className={`text-xs font-semibold truncate leading-tight ${isSelected ? 'text-ringo-700' : 'text-warmgray-800'}`}>
+                      {u.full_name}
+                    </p>
+                    {u.department_name && (
+                      <p className="text-[10px] text-warmgray-400 truncate">{u.department_name}</p>
+                    )}
+                    <div className="flex justify-center">
+                      <RoleBadge role={u.role} />
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Selected summary pill */}
+      {selectedUser && (
+        <div className="flex items-center gap-2.5 px-3 py-2 bg-ringo-50/60 rounded-xl border border-ringo-200/50">
+          <UserAvatar name={selectedUser.full_name} avatarUrl={selectedUser.avatar_url} size={6} />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-ringo-700 truncate">{selectedUser.full_name}</p>
+            <p className="text-[10px] text-warmgray-500 truncate">{selectedUser.department_name ?? '—'}</p>
+          </div>
+          <RoleBadge role={selectedUser.role} />
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            className="text-warmgray-400 hover:text-warmgray-600 transition-colors ml-1"
+            title={lang === 'en' ? 'Clear' : 'クリア'}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Routes Tab ───────────────────────────────────────────────────────────────
 
 function ChainArrow() {
@@ -427,6 +581,7 @@ function ChainArrow() {
 
 function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error' | 'info') => void }) {
   const queryClient = useQueryClient();
+  const { lang, t } = useLang();
   const [addingStepToRoute, setAddingStepToRoute] = useState<string | null>(null);
   const [newStep, setNewStep] = useState({ approver_id: '', label: '', action_type: 'APPROVE' });
   const [showNewRoute, setShowNewRoute] = useState(false);
@@ -529,64 +684,90 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
 
       {/* Route filters */}
       <div className="flex items-center gap-3 flex-wrap">
-        <select className="input w-40 text-sm" value={routeDeptFilter} onChange={(e) => setRouteDeptFilter(e.target.value)}>
-          <option value="">全部署</option>
-          {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-        </select>
-        <select className="input w-44 text-sm" value={routeTemplateFilter} onChange={(e) => setRouteTemplateFilter(e.target.value)}>
-          <option value="">全フォーム</option>
-          {templates.map((t) => <option key={t.id} value={t.id}>{t.title_ja}</option>)}
-        </select>
+        <CustomSelect
+          className="w-40"
+          options={[
+            { value: '', label: t('admin_filter_all_dept') },
+            ...departments.map((d) => ({ value: d.id, label: d.name })),
+          ]}
+          value={routeDeptFilter}
+          onChange={setRouteDeptFilter}
+        />
+        <CustomSelect
+          className="w-44"
+          options={[
+            { value: '', label: t('admin_filter_all_form') },
+            ...templates.map((tmpl) => ({ value: tmpl.id, label: tmpl.title_ja })),
+          ]}
+          value={routeTemplateFilter}
+          onChange={setRouteTemplateFilter}
+        />
         <div className="flex rounded-xl overflow-hidden border border-white/70">
-          {(['', 'RINGI', 'SETTLEMENT'] as const).map((s) => (
-            <button key={s} onClick={() => setRouteStageFilter(s)}
-              className={`px-3 py-1.5 text-xs font-semibold transition-colors ${routeStageFilter === s ? 'bg-warmgray-800 text-white' : 'bg-white/60 text-warmgray-500 hover:bg-white/90'}`}>
-              {s === '' ? '全ステージ' : s}
+          {([
+            { v: '', label: t('admin_stage_all') },
+            { v: 'RINGI', label: t('admin_stage_ringi') },
+            { v: 'SETTLEMENT', label: t('admin_stage_settle') },
+          ]).map(({ v, label }) => (
+            <button key={v} onClick={() => setRouteStageFilter(v)}
+              className={`px-3 py-1.5 text-xs font-semibold transition-colors ${routeStageFilter === v ? 'bg-warmgray-800 text-white' : 'bg-white/60 text-warmgray-500 hover:bg-white/90'}`}>
+              {label}
             </button>
           ))}
         </div>
-        <span className="text-sm text-warmgray-400">{filteredRoutes.length} ルート</span>
+        <span className="text-sm text-warmgray-400">{filteredRoutes.length} {t('admin_routes_count')}</span>
         <div className="flex-1" />
         <button className="btn-primary" onClick={() => setShowNewRoute(true)}>
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
           </svg>
-          ルート追加
+          {t('admin_add_route')}
         </button>
       </div>
 
       {/* New route form */}
       {showNewRoute && (
-        <div className="card border-2 border-ringo-300/50 space-y-4 animate-scale-in">
+        <div className="card border-2 border-ringo-300/50 space-y-4 animate-scale-in relative z-10">
           <div className="flex items-center gap-2">
             <div className="w-1 h-5 rounded-full bg-gradient-to-b from-ringo-400 to-mustard-500" />
-            <h4 className="font-bold text-warmgray-800">新規承認ルート</h4>
+            <h4 className="font-bold text-warmgray-800">{t('admin_new_route_title')}</h4>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">テンプレート</label>
-              <select className="input" value={newRoute.template_id} onChange={(e) => setNewRoute({ ...newRoute, template_id: e.target.value })}>
-                <option value="">選択...</option>
-                {templates.map((t) => <option key={t.id} value={t.id}>{t.title_ja}</option>)}
-              </select>
+              <label className="label">{t('admin_field_template')}</label>
+              <CustomSelect
+                options={[
+                  { value: '', label: '選択...' },
+                  ...templates.map((tmpl) => ({ value: tmpl.id, label: tmpl.title_ja })),
+                ]}
+                value={newRoute.template_id}
+                onChange={(v) => setNewRoute({ ...newRoute, template_id: v })}
+              />
             </div>
             <div>
-              <label className="label">部署</label>
-              <select className="input" value={newRoute.department_id} onChange={(e) => setNewRoute({ ...newRoute, department_id: e.target.value })}>
-                <option value="">選択...</option>
-                {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-              </select>
+              <label className="label">{t('admin_field_dept')}</label>
+              <CustomSelect
+                options={[
+                  { value: '', label: '選択...' },
+                  ...departments.map((d) => ({ value: d.id, label: d.name })),
+                ]}
+                value={newRoute.department_id}
+                onChange={(v) => setNewRoute({ ...newRoute, department_id: v })}
+              />
             </div>
             <div>
-              <label className="label">ステージ</label>
-              <select className="input" value={newRoute.stage} onChange={(e) => setNewRoute({ ...newRoute, stage: e.target.value })}>
-                <option value="RINGI">RINGI（稟議）</option>
-                <option value="SETTLEMENT">SETTLEMENT（精算）</option>
-              </select>
+              <label className="label">{t('admin_field_stage')}</label>
+              <CustomSelect
+                options={[
+                  { value: 'RINGI', label: `RINGI — ${t('admin_stage_ringi')}` },
+                  { value: 'SETTLEMENT', label: `SETTLEMENT — ${t('admin_stage_settle')}` },
+                ]}
+                value={newRoute.stage}
+                onChange={(v) => setNewRoute({ ...newRoute, stage: v })}
+              />
             </div>
             <div>
-              <label className="label">ルート名</label>
-              <input className="input" placeholder="例: 総務部 出張稟議" value={newRoute.name} onChange={(e) => setNewRoute({ ...newRoute, name: e.target.value })} />
+              <label className="label">{t('admin_field_route_name')}</label>
+              <input className="input" placeholder={t('admin_route_name_ph')} value={newRoute.name} onChange={(e) => setNewRoute({ ...newRoute, name: e.target.value })} />
             </div>
           </div>
           <div className="flex gap-2 justify-end">
@@ -596,7 +777,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
               onClick={() => createRoute.mutate(newRoute)}
               disabled={!newRoute.template_id || !newRoute.department_id || !newRoute.name || createRoute.isPending}
             >
-              {createRoute.isPending ? '作成中...' : '作成する'}
+              {createRoute.isPending ? t('admin_creating') : t('btn_save')}
             </button>
           </div>
         </div>
@@ -604,12 +785,14 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
 
       {/* Route cards */}
       {filteredRoutes.map((route) => (
-        <div key={route.id} className="card space-y-4">
+        <div key={route.id} className={`card space-y-4 relative ${addingStepToRoute === route.id ? 'z-10' : ''}`}>
           <div className="flex items-start justify-between">
             <div className="space-y-1.5">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold ${route.stage === 'RINGI' ? 'bg-ringo-500 text-white' : 'bg-mustard-500 text-white'}`}>
-                  {route.stage}
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  route.stage === 'RINGI' ? 'bg-ringo-500 text-white' : 'bg-mustard-500 text-white'
+                }`}>
+                  {route.stage === 'RINGI' ? `RINGI — ${t('admin_stage_ringi')}` : `SETTLEMENT — ${t('admin_stage_settle')}`}
                 </span>
                 <h4 className="font-bold text-warmgray-800">{route.name}</h4>
                 {!route.is_active && (
@@ -632,11 +815,11 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
               {/* Applicant node */}
               <div className="flex flex-col items-center gap-1.5">
                 <div className="w-10 h-10 rounded-full bg-surface-200 border-2 border-surface-300 flex items-center justify-center text-sm font-bold text-warmgray-600">申</div>
-                <span className="text-[10px] text-warmgray-400">申請者</span>
+                <span className="text-[10px] text-warmgray-400">{lang === 'en' ? 'Applicant' : '申請者'}</span>
               </div>
 
               {route.steps.length === 0 ? (
-                <p className="text-xs text-warmgray-400 italic ml-2">ステップが未設定です</p>
+                <p className="text-xs text-warmgray-400 italic ml-2">{t('admin_no_steps')}</p>
               ) : (
                 route.steps.map((step) => (
                   <div key={step.id} className="flex items-center gap-3">
@@ -682,7 +865,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
                 <ChainArrow />
                 <div className="flex flex-col items-center gap-1.5">
                   <div className="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center text-white text-sm shadow-sm">✓</div>
-                  <span className="text-[10px] text-warmgray-400">完了</span>
+                  <span className="text-[10px] text-warmgray-400">{t('admin_done_node')}</span>
                 </div>
               </div>
             </div>
@@ -690,38 +873,55 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
 
           {/* Add step */}
           {addingStepToRoute === route.id ? (
-            <div className="bg-surface-50/60 rounded-2xl p-4 space-y-3 border-2 border-dashed border-ringo-200">
-              <p className="text-xs font-bold text-warmgray-700 uppercase tracking-wide">ステップ追加</p>
-              <div className="grid grid-cols-3 gap-3">
+            <div className="bg-surface-50/60 rounded-2xl p-4 space-y-4 border-2 border-dashed border-ringo-200">
+              <div className="flex items-center gap-2">
+                <div className="w-1 h-4 rounded-full bg-gradient-to-b from-ringo-400 to-mustard-500" />
+                <p className="text-xs font-bold text-warmgray-700 uppercase tracking-wide">{t('admin_step_form_title')}</p>
+              </div>
+
+              {/* Approver picker — full width */}
+              <div>
+                <label className="label">{t('admin_step_approver')}</label>
+                <ApproverPicker
+                  users={users}
+                  departments={departments}
+                  value={newStep.approver_id}
+                  onChange={(v) => setNewStep({ ...newStep, approver_id: v })}
+                />
+              </div>
+
+              {/* Step name + action — 2 columns */}
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label">承認者</label>
-                  <select className="input text-xs py-2" value={newStep.approver_id} onChange={(e) => setNewStep({ ...newStep, approver_id: e.target.value })}>
-                    <option value="">選択...</option>
-                    {users.filter((u) => u.is_active).map((u) => (
-                      <option key={u.id} value={u.id}>{u.full_name} ({u.role})</option>
-                    ))}
-                  </select>
+                  <label className="label">{t('admin_step_label')}</label>
+                  <input
+                    className="input"
+                    placeholder={t('admin_step_label_ph')}
+                    value={newStep.label}
+                    onChange={(e) => setNewStep({ ...newStep, label: e.target.value })}
+                  />
                 </div>
                 <div>
-                  <label className="label">ステップ名</label>
-                  <input className="input text-xs py-2" placeholder="例: 総務承認" value={newStep.label} onChange={(e) => setNewStep({ ...newStep, label: e.target.value })} />
-                </div>
-                <div>
-                  <label className="label">アクション</label>
-                  <select className="input text-xs py-2" value={newStep.action_type} onChange={(e) => setNewStep({ ...newStep, action_type: e.target.value })}>
-                    <option value="APPROVE">APPROVE</option>
-                    <option value="CONFIRM">CONFIRM</option>
-                  </select>
+                  <label className="label">{t('admin_step_action')}</label>
+                  <CustomSelect
+                    options={[
+                      { value: 'APPROVE', label: 'APPROVE' },
+                      { value: 'CONFIRM', label: 'CONFIRM' },
+                    ]}
+                    value={newStep.action_type}
+                    onChange={(v) => setNewStep({ ...newStep, action_type: v })}
+                  />
                 </div>
               </div>
-              <div className="flex gap-2 justify-end">
-                <button className="btn-ghost text-xs" onClick={() => setAddingStepToRoute(null)}>キャンセル</button>
+
+              <div className="flex gap-2 justify-end pt-1">
+                <button className="btn-ghost text-xs" onClick={() => setAddingStepToRoute(null)}>{t('btn_cancel')}</button>
                 <button
                   className="btn-primary text-xs"
                   disabled={!newStep.approver_id || addStep.isPending}
                   onClick={() => addStep.mutate({ routeId: route.id, ...newStep })}
                 >
-                  {addStep.isPending ? '追加中...' : 'ステップ追加'}
+                  {addStep.isPending ? t('admin_adding') : t('admin_step_form_title')}
                 </button>
               </div>
             </div>
@@ -733,7 +933,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
               </svg>
-              ステップを追加する
+              {t('admin_add_step_btn')}
             </button>
           )}
         </div>
@@ -742,7 +942,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
       {filteredRoutes.length === 0 && (
         <div className="card flex flex-col items-center justify-center py-20 gap-4 text-warmgray-400">
           <span className="text-5xl">🗂️</span>
-          <p className="text-sm">承認ルートがまだありません</p>
+          <p className="text-sm">{t('admin_no_routes')}</p>
         </div>
       )}
     </div>
@@ -771,17 +971,11 @@ const STATUS_BADGE: Record<string, string> = {
   CANCELLED:        'badge-draft',
 };
 
-const STATUS_LABEL: Record<string, string> = {
-  PENDING_APPROVAL: '承認待ち',
-  APPROVED:         '承認済み',
-  REJECTED:         '却下',
-  RETURNED:         '差し戻し',
-  DRAFT:            '下書き',
-  CANCELLED:        'キャンセル',
-};
+// STATUS_LABEL now computed dynamically in ApplicationsTab using t() for language support
 
 function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error' | 'info') => void }) {
   const queryClient = useQueryClient();
+  const { t } = useLang();
   const [search, setSearch] = useState('');
   const [deptFilter, setDeptFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -807,6 +1001,16 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
     onError: (err: any) => showToast(`削除失敗: ${err.message}`, 'error'),
   });
 
+  // Language-aware status labels (reuses status_* keys already in i18n)
+  const statusLabels: Record<string, string> = {
+    PENDING_APPROVAL: t('status_pending'),
+    APPROVED:         t('status_approved'),
+    REJECTED:         t('status_rejected'),
+    RETURNED:         t('status_returned'),
+    DRAFT:            t('status_draft'),
+    CANCELLED:        t('status_cancelled'),
+  };
+
   const filtered = apps.filter((a) => {
     if (search && !a.applicant_name?.includes(search) && !a.template_name?.includes(search) && !a.application_number?.includes(search)) return false;
     if (deptFilter && a.department_name !== deptFilter) return false;
@@ -831,25 +1035,35 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
       <div className="flex items-center gap-3 flex-wrap">
         <input
           className="input max-w-xs"
-          placeholder="氏名 / テンプレート / 申請番号..."
+          placeholder={t('admin_apps_search_ph')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <select className="input w-40 text-sm" value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}>
-          <option value="">全部署</option>
-          {departments.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
-        </select>
-        <select className="input w-36 text-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-          <option value="">全ステータス</option>
-          {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <span className="text-sm text-warmgray-400">{filtered.length} 件</span>
+        <CustomSelect
+          className="w-40"
+          options={[
+            { value: '', label: t('admin_filter_all_dept') },
+            ...departments.map((d) => ({ value: d.name, label: d.name })),
+          ]}
+          value={deptFilter}
+          onChange={setDeptFilter}
+        />
+        <CustomSelect
+          className="w-36"
+          options={[
+            { value: '', label: t('admin_filter_all_status') },
+            ...Object.entries(statusLabels).map(([k, v]) => ({ value: k, label: v })),
+          ]}
+          value={statusFilter}
+          onChange={setStatusFilter}
+        />
+        <span className="text-sm text-warmgray-400">{filtered.length} {t('admin_apps_count')}</span>
         {(search || deptFilter || statusFilter) && (
           <button
             className="text-xs text-ringo-500 hover:text-ringo-700 font-semibold"
             onClick={() => { setSearch(''); setDeptFilter(''); setStatusFilter(''); }}
           >
-            クリア ✕
+            {t('admin_clear_filter')}
           </button>
         )}
       </div>
@@ -861,12 +1075,12 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
           <table className="table-base">
             <thead>
               <tr>
-                <th>申請番号</th>
-                <th>テンプレート</th>
-                <th>申請者</th>
-                <th>部署</th>
-                <th>ステータス</th>
-                <th>申請日</th>
+                <th>{t('admin_col_app_number')}</th>
+                <th>{t('admin_field_template')}</th>
+                <th>{t('admin_step_approver')}</th>
+                <th>{t('admin_field_dept')}</th>
+                <th>{t('admin_col_status')}</th>
+                <th>{t('admin_col_submitted')}</th>
                 <th></th>
               </tr>
             </thead>
@@ -884,7 +1098,7 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
                   <td className="text-warmgray-500 text-xs">{a.department_name ?? '—'}</td>
                   <td>
                     <span className={STATUS_BADGE[a.status] ?? 'badge-draft'}>
-                      {STATUS_LABEL[a.status] ?? a.status}
+                      {statusLabels[a.status] ?? a.status}
                     </span>
                   </td>
                   <td className="text-[11px] text-warmgray-400">{new Date(a.created_at).toLocaleDateString('ja-JP')}</td>
@@ -901,7 +1115,7 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
             </tbody>
           </table>
           {filtered.length === 0 && (
-            <div className="py-12 text-center text-warmgray-400 text-sm">申請データがありません</div>
+            <div className="py-12 text-center text-warmgray-400 text-sm">{t('admin_no_apps_data')}</div>
           )}
         </div>
       )}
@@ -912,6 +1126,7 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
 // ─── Role Permissions Tab ─────────────────────────────────────────────────────
 
 function PermissionsTab() {
+  const { t } = useLang();
   const check = (v: boolean) =>
     v ? (
       <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 text-xs font-bold">✓</span>
@@ -923,21 +1138,19 @@ function PermissionsTab() {
     <div className="space-y-6">
       <div className="flex items-start gap-3 bg-mustard-400/10 border border-mustard-400/30 rounded-2xl px-5 py-4">
         <span className="text-xl">💡</span>
-        <p className="text-sm text-warmgray-700">
-          ロールは<strong>ユーザー管理</strong>タブで個別に変更できます。変更後、対象ユーザーは再ログインが必要です。
-        </p>
+        <p className="text-sm text-warmgray-700">{t('admin_perms_hint')}</p>
       </div>
 
       <div className="card !p-0 overflow-hidden">
         <table className="table-base">
           <thead>
             <tr>
-              <th>ロール</th>
-              <th>表示名 / 説明</th>
-              <th className="text-center">申請</th>
-              <th className="text-center">承認</th>
-              <th className="text-center">経理</th>
-              <th className="text-center">管理</th>
+              <th>{t('admin_perms_col_role')}</th>
+              <th>{t('admin_perms_col_display')}</th>
+              <th className="text-center">{t('admin_perms_col_submit')}</th>
+              <th className="text-center">{t('admin_perms_col_approve')}</th>
+              <th className="text-center">{t('admin_perms_col_settle')}</th>
+              <th className="text-center">{t('admin_perms_col_admin')}</th>
             </tr>
           </thead>
           <tbody>
@@ -960,10 +1173,10 @@ function PermissionsTab() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {[
-          { icon: '🔑', title: 'Google ログイン', body: '初回サインインユーザーは EMPLOYEE に自動設定されます' },
-          { icon: '🔄', title: 'ロール変更', body: '次回ログイン時に反映（JWT 再発行が必要）' },
-          { icon: '📋', title: '承認ルート', body: '各ステップには特定ユーザーを割り当て（管理者が設定）' },
-          { icon: '🛡️', title: 'ADMIN 特権', body: '全ステップを代理承認できます' },
+          { icon: '🔑', title: t('admin_perm_google_title'), body: t('admin_perm_google_body') },
+          { icon: '🔄', title: t('admin_perm_role_title'),   body: t('admin_perm_role_body') },
+          { icon: '📋', title: t('admin_perm_route_title'),  body: t('admin_perm_route_body') },
+          { icon: '🛡️', title: t('admin_perm_admin_title'), body: t('admin_perm_admin_body') },
         ].map((item) => (
           <div key={item.title} className="card-sm flex items-start gap-3">
             <span className="text-xl">{item.icon}</span>
@@ -982,19 +1195,20 @@ function PermissionsTab() {
 
 type Tab = 'routes' | 'users' | 'applications' | 'permissions';
 
-const TAB_CONFIG: { key: Tab; label: string; icon: string }[] = [
-  { key: 'routes',       label: '承認ルート', icon: '🔀' },
-  { key: 'users',        label: 'ユーザー管理', icon: '👥' },
-  { key: 'applications', label: '申請管理',   icon: '📋' },
-  { key: 'permissions',  label: 'ロール権限', icon: '🛡️' },
-];
-
 export default function Admin() {
   const [tab, setTab] = useState<Tab>('routes');
+  const { t } = useLang();
   const { toast, show: showToast, dismiss } = useToast();
 
+  const TAB_CONFIG: { key: Tab; label: string; icon: string }[] = [
+    { key: 'routes',       label: t('admin_routes_tab'),  icon: '🔀' },
+    { key: 'users',        label: t('admin_users_tab'),   icon: '👥' },
+    { key: 'applications', label: t('admin_apps_tab'),    icon: '📋' },
+    { key: 'permissions',  label: t('admin_perms_tab'),   icon: '🛡️' },
+  ];
+
   return (
-    <Layout title="管理画面">
+    <Layout title={t('title_admin')}>
       {toast && <Toast {...toast} onDismiss={dismiss} />}
 
       <div className="max-w-5xl mx-auto space-y-6">

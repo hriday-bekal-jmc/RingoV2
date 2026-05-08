@@ -51,9 +51,10 @@ const ROLE_MAP: Record<Role, RolePermissions> = {
     canAdmin: false,
     approverRoles: ['MANAGER'],
     navItems: [
-      { to: '/dashboard', label: 'ダッシュボード', icon: '▦' },
-      { to: '/approvals', label: '承認待ち',       icon: '🔔' },
-      { to: '/history',   label: '申請履歴',       icon: '⟲' },
+      { to: '/dashboard',        label: 'ダッシュボード', icon: '▦' },
+      { to: '/approvals',        label: '承認待ち',       icon: '🔔' },
+      { to: '/approval-history', label: '承認履歴',       icon: '📋' },
+      { to: '/history',          label: '申請履歴',       icon: '⟲' },
     ],
   },
   GM: {
@@ -65,9 +66,10 @@ const ROLE_MAP: Record<Role, RolePermissions> = {
     canAdmin: false,
     approverRoles: ['GM'],
     navItems: [
-      { to: '/dashboard', label: 'ダッシュボード', icon: '▦' },
-      { to: '/approvals', label: '承認待ち',       icon: '🔔' },
-      { to: '/history',   label: '申請履歴',       icon: '⟲' },
+      { to: '/dashboard',        label: 'ダッシュボード', icon: '▦' },
+      { to: '/approvals',        label: '承認待ち',       icon: '🔔' },
+      { to: '/approval-history', label: '承認履歴',       icon: '📋' },
+      { to: '/history',          label: '申請履歴',       icon: '⟲' },
     ],
   },
   SOUMU: {
@@ -79,10 +81,11 @@ const ROLE_MAP: Record<Role, RolePermissions> = {
     canAdmin: false,
     approverRoles: ['SOUMU'],
     navItems: [
-      { to: '/dashboard',  label: 'ダッシュボード', icon: '▦' },
-      { to: '/approvals',  label: '承認待ち',       icon: '🔔' },
-      { to: '/accounting', label: '精算管理',       icon: '▤' },
-      { to: '/history',    label: '申請履歴',       icon: '⟲' },
+      { to: '/dashboard',        label: 'ダッシュボード', icon: '▦' },
+      { to: '/approvals',        label: '承認待ち',       icon: '🔔' },
+      { to: '/approval-history', label: '承認履歴',       icon: '📋' },
+      { to: '/accounting',       label: '精算管理',       icon: '▤' },
+      { to: '/history',          label: '申請履歴',       icon: '⟲' },
     ],
   },
   SENMU: {
@@ -94,8 +97,9 @@ const ROLE_MAP: Record<Role, RolePermissions> = {
     canAdmin: false,
     approverRoles: ['SENMU', 'PRESIDENT'],
     navItems: [
-      { to: '/dashboard', label: 'ダッシュボード', icon: '▦' },
-      { to: '/approvals', label: '承認待ち',       icon: '🔔' },
+      { to: '/dashboard',        label: 'ダッシュボード', icon: '▦' },
+      { to: '/approvals',        label: '承認待ち',       icon: '🔔' },
+      { to: '/approval-history', label: '承認履歴',       icon: '📋' },
     ],
   },
   PRESIDENT: {
@@ -107,8 +111,9 @@ const ROLE_MAP: Record<Role, RolePermissions> = {
     canAdmin: false,
     approverRoles: ['PRESIDENT'],
     navItems: [
-      { to: '/dashboard', label: 'ダッシュボード', icon: '▦' },
-      { to: '/approvals', label: '承認待ち',       icon: '🔔' },
+      { to: '/dashboard',        label: 'ダッシュボード', icon: '▦' },
+      { to: '/approvals',        label: '承認待ち',       icon: '🔔' },
+      { to: '/approval-history', label: '承認履歴',       icon: '📋' },
     ],
   },
   ACCOUNTING: {
@@ -120,9 +125,10 @@ const ROLE_MAP: Record<Role, RolePermissions> = {
     canAdmin: false,
     approverRoles: ['ACCOUNTING'],
     navItems: [
-      { to: '/dashboard',  label: 'ダッシュボード', icon: '▦' },
-      { to: '/approvals',  label: '承認待ち',       icon: '🔔' },
-      { to: '/accounting', label: '経理',           icon: '▤' },
+      { to: '/dashboard',        label: 'ダッシュボード', icon: '▦' },
+      { to: '/approvals',        label: '承認待ち',       icon: '🔔' },
+      { to: '/approval-history', label: '承認履歴',       icon: '📋' },
+      { to: '/accounting',       label: '経理',           icon: '▤' },
     ],
   },
   ADMIN: {
@@ -134,11 +140,12 @@ const ROLE_MAP: Record<Role, RolePermissions> = {
     canAdmin: true,
     approverRoles: ['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ACCOUNTING', 'ADMIN'],
     navItems: [
-      { to: '/dashboard',  label: 'ダッシュボード', icon: '▦' },
-      { to: '/approvals',  label: '承認待ち',       icon: '🔔' },
-      { to: '/accounting', label: '経理',           icon: '▤' },
-      { to: '/history',    label: '申請履歴',       icon: '⟲' },
-      { to: '/admin',      label: '管理画面',       icon: '⚙' },
+      { to: '/dashboard',        label: 'ダッシュボード', icon: '▦' },
+      { to: '/approvals',        label: '承認待ち',       icon: '🔔' },
+      { to: '/approval-history', label: '承認履歴',       icon: '📋' },
+      { to: '/accounting',       label: '経理',           icon: '▤' },
+      { to: '/history',          label: '申請履歴',       icon: '⟲' },
+      { to: '/admin',            label: '管理画面',       icon: '⚙' },
     ],
   },
 };

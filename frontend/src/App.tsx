@@ -11,7 +11,10 @@ import Approvals from './pages/Approvals';
 import History from './pages/History';
 import ApplicationDetail from './pages/ApplicationDetail';
 import Settlement from './pages/Settlement';
+import Profile from './pages/Profile';
 import Admin from './pages/Admin';
+import Accounting from './pages/Accounting';
+import ApprovalHistory from './pages/ApprovalHistory';
 
 // ─── ログイン認証ガード ───
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -84,6 +87,27 @@ export default function App() {
         </RequireAuth>
       } />
       
+      {/* プロフィール */}
+      <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />
+
+      {/* 精算管理（経理・総務・管理者） */}
+      <Route path="/accounting" element={
+        <RequireAuth>
+          <RequirePermission check={(p) => p.canSettle}>
+            <Accounting />
+          </RequirePermission>
+        </RequireAuth>
+      } />
+
+      {/* 承認履歴 */}
+      <Route path="/approval-history" element={
+        <RequireAuth>
+          <RequirePermission check={(p) => p.canApprove}>
+            <ApprovalHistory />
+          </RequirePermission>
+        </RequireAuth>
+      } />
+
       {/* 管理画面 */}
       <Route path="/admin" element={
         <RequireAuth>

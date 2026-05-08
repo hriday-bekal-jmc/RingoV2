@@ -4,6 +4,7 @@ import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import ConfirmDialog from '../components/common/ConfirmDialog';
+import { useLang } from '../context/LanguageContext';
 
 interface Application {
   id: string;
@@ -16,20 +17,6 @@ interface Application {
   form_data: Record<string, any>;
 }
 
-const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
-  DRAFT:              { label: '下書き',    cls: 'badge-draft' },
-  PENDING_APPROVAL:   { label: '承認待ち',  cls: 'badge-pending' },
-  APPROVED:           { label: '承認済み',  cls: 'badge-approved' },
-  REJECTED:           { label: '却下',      cls: 'badge-rejected' },
-  RETURNED:           { label: '差し戻し',  cls: 'badge-returned' },
-  PENDING_SETTLEMENT: { label: '精算中',    cls: 'badge-mustard' },
-  SETTLEMENT_APPROVED:{ label: '精算承認済', cls: 'badge-approved' },
-  COMPLETED:          { label: '完了',      cls: 'badge-approved' },
-  CANCELLED:          { label: 'キャンセル', cls: 'badge-draft' },
-};
-
-const ALL_STATUSES = ['全て', 'DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PENDING_SETTLEMENT', 'REJECTED', 'RETURNED', 'COMPLETED'];
-
 function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
   return (
     <div className={`fixed top-6 right-6 z-50 animate-scale-in flex items-center gap-3 px-5 py-3.5 rounded-2xl shadow-lg text-sm font-semibold
@@ -40,11 +27,40 @@ function Toast({ message, type }: { message: string; type: 'success' | 'error' }
   );
 }
 
+const STATUS_CLS: Record<string, string> = {
+  DRAFT:              'badge-draft',
+  PENDING_APPROVAL:   'badge-pending',
+  APPROVED:           'badge-approved',
+  REJECTED:           'badge-rejected',
+  RETURNED:           'badge-returned',
+  PENDING_SETTLEMENT: 'badge-mustard',
+  SETTLEMENT_APPROVED:'badge-approved',
+  COMPLETED:          'badge-approved',
+  CANCELLED:          'badge-draft',
+};
+
+const ALL_STATUS_KEYS = ['ALL', 'DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PENDING_SETTLEMENT', 'REJECTED', 'RETURNED', 'COMPLETED'];
+
 export default function History() {
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const [statusFilter, setStatusFilter] = useState('全て');
+  const { t, lang } = useLang();
+  const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
+
+  const STATUS_LABEL: Record<string, string> = {
+    DRAFT:              t('status_draft'),
+    PENDING_APPROVAL:   t('status_pending'),
+    APPROVED:           t('status_approved'),
+    REJECTED:           t('status_rejected'),
+    RETURNED:           t('status_returned'),
+    PENDING_SETTLEMENT: t('status_pending_settle'),
+    SETTLEMENT_APPROVED:t('status_settle_approved'),
+    COMPLETED:          t('status_completed'),
+    CANCELLED:          t('status_cancelled'),
+  };
+
+  const [statusFilter, setStatusFilter] = useState('ALL');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Application | null>(null);
   const [confirmSubmit, setConfirmSubmit] = useState<Application | null>(null);
@@ -55,9 +71,9 @@ export default function History() {
   };
 
   useEffect(() => {
-    if (searchParams.get('submitted') === '1') showToast('申請が完了しました 🎉');
-    if (searchParams.get('drafted') === '1') showToast('下書きを保存しました 📝');
-    if (searchParams.get('settled') === '1') showToast('精算申請を提出しました 💴 承認フローが開始されました');
+    if (searchParams.get('submitted') === '1') showToast(t('toast_submitted'));
+    if (searchParams.get('drafted') === '1') showToast(t('toast_drafted'));
+    if (searchParams.get('settled') === '1') showToast(t('toast_settled'));
   }, [searchParams]);
 
   const { data: applications = [], isLoading } = useQuery<Application[]>({
@@ -69,21 +85,21 @@ export default function History() {
     mutationFn: async (id: string) => (await apiClient.delete(`/applications/${id}`)).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['myApplications'] });
-      showToast('下書きを削除しました');
+      showToast(t('toast_draft_deleted'));
     },
-    onError: () => showToast('削除に失敗しました', 'error'),
+    onError: () => showToast(t('toast_delete_error'), 'error'),
   });
 
   const submitDraft = useMutation({
     mutationFn: async (id: string) => (await apiClient.post(`/applications/${id}/submit`, {})).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['myApplications'] });
-      showToast('申請が完了しました 🎉');
+      showToast(t('toast_submitted'));
     },
-    onError: (err: any) => showToast(`申請に失敗しました: ${err.message}`, 'error'),
+    onError: (err: any) => showToast(`${t('toast_submit_error')}: ${err.message}`, 'error'),
   });
 
-  const filtered = statusFilter === '全て'
+  const filtered = statusFilter === 'ALL'
     ? applications
     : applications.filter((a) => a.status === statusFilter);
 
@@ -94,24 +110,24 @@ export default function History() {
   const draftCount = applications.filter((a) => a.status === 'DRAFT').length;
 
   return (
-    <Layout title="申請履歴">
+    <Layout title={t('title_history')}>
       {toast && <Toast message={toast.message} type={toast.type} />}
 
       {/* Confirm dialogs */}
       <ConfirmDialog
         isOpen={!!confirmDelete}
-        title="下書きを削除"
-        message={`「${confirmDelete?.template_name}」の下書きを削除します。この操作は元に戻せません。`}
-        confirmLabel="削除する"
+        title={t('confirm_delete_title')}
+        message={`「${confirmDelete?.template_name}」${t('confirm_delete_body')}`}
+        confirmLabel={t('confirm_delete_btn')}
         confirmClass="btn-danger"
         onConfirm={() => { if (confirmDelete) { deleteDraft.mutate(confirmDelete.id); setConfirmDelete(null); } }}
         onCancel={() => setConfirmDelete(null)}
       />
       <ConfirmDialog
         isOpen={!!confirmSubmit}
-        title="申請を提出"
-        message={`「${confirmSubmit?.template_name}」を申請します。提出後は承認フローが開始されます。`}
-        confirmLabel="申請する"
+        title={t('confirm_submit_title')}
+        message={`「${confirmSubmit?.template_name}」${t('confirm_submit_body')}`}
+        confirmLabel={t('btn_submit')}
         confirmClass="btn-primary"
         onConfirm={() => { if (confirmSubmit) { submitDraft.mutate(confirmSubmit.id); setConfirmSubmit(null); } }}
         onCancel={() => setConfirmSubmit(null)}
@@ -122,26 +138,26 @@ export default function History() {
         {/* Header row */}
         <div className="animate-fade-up flex items-end justify-between">
           <div>
-            <p className="section-title mb-0">申請履歴</p>
+            <p className="section-title mb-0">{t('title_history')}</p>
             <p className="text-2xl font-bold text-warmgray-800 mt-1">
-              {applications.length} 件
+              {applications.length} {t('history_items_suffix')}
               {draftCount > 0 && (
                 <span className="ml-2 text-sm font-normal text-warmgray-400">
-                  （下書き {draftCount} 件）
+                  （{t('history_draft_suffix')} {draftCount} {t('history_items_suffix')}）
                 </span>
               )}
             </p>
           </div>
           <Link to="/dashboard" className="btn-outline text-xs">
-            ＋ 新規申請
+            {t('history_new_app')}
           </Link>
         </div>
 
         {/* Filter pills */}
         <div className="animate-fade-up flex gap-2 flex-wrap">
-          {ALL_STATUSES.map((s) => {
+          {ALL_STATUS_KEYS.map((s) => {
             const isActive = statusFilter === s;
-            const cfg = STATUS_CONFIG[s];
+            const label = s === 'ALL' ? t('history_filter_all') : (STATUS_LABEL[s] ?? s);
             return (
               <button
                 key={s}
@@ -152,7 +168,7 @@ export default function History() {
                     : 'bg-white/60 text-warmgray-500 hover:bg-white/90 border border-white/80 backdrop-blur-sm'
                   }`}
               >
-                {cfg?.label ?? s}
+                {label}
               </button>
             );
           })}
@@ -165,15 +181,15 @@ export default function History() {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
             </svg>
-            読み込み中...
+            {t('loading')}
           </div>
         ) : sorted.length === 0 ? (
           <div className="card flex flex-col items-center justify-center py-20 gap-4 text-warmgray-400 animate-fade-up">
             <span className="text-5xl">📭</span>
-            <p className="text-sm font-medium">該当する申請がありません</p>
-            {statusFilter !== '全て' && (
-              <button onClick={() => setStatusFilter('全て')} className="text-xs text-ringo-500 hover:text-ringo-600 font-semibold">
-                フィルターを解除する
+            <p className="text-sm font-medium">{t('history_no_items')}</p>
+            {statusFilter !== 'ALL' && (
+              <button onClick={() => setStatusFilter('ALL')} className="text-xs text-ringo-500 hover:text-ringo-600 font-semibold">
+                {t('history_clear')}
               </button>
             )}
           </div>
@@ -181,11 +197,23 @@ export default function History() {
           <div className="card !p-0 overflow-hidden animate-fade-up">
             <ul className="divide-y divide-white/30">
               {sorted.map((app, idx) => {
-                const cfg = STATUS_CONFIG[app.status] ?? { label: app.status, cls: 'badge-draft' };
+                const cls = STATUS_CLS[app.status] ?? 'badge-draft';
+                const label = STATUS_LABEL[app.status] ?? app.status;
                 const isDraft = app.status === 'DRAFT';
                 const isReturned = app.status === 'RETURNED';
-
                 const isSettleable = app.status === 'APPROVED' && app.has_settlement;
+
+                // Phase badge for 立替精算申請 (two-stage)
+                const isTakekai = app.has_settlement;
+                const phaseBadge: { text: string; cls: string } | null = isTakekai
+                  ? app.status === 'PENDING_APPROVAL'
+                    ? { text: t('phase_ringi'),          cls: 'bg-ringo-50 text-ringo-600 border border-ringo-200/60' }
+                    : app.status === 'APPROVED'
+                    ? { text: t('phase_waiting_settle'), cls: 'bg-amber-50 text-amber-600 border border-amber-200/60' }
+                    : app.status === 'PENDING_SETTLEMENT'
+                    ? { text: t('phase_settlement'),     cls: 'bg-teal-50 text-teal-600 border border-teal-200/60' }
+                    : null
+                  : null;
 
                 return (
                   <li
@@ -208,16 +236,21 @@ export default function History() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-sm font-semibold text-warmgray-800 truncate">{app.template_name}</p>
-                        <span className={cfg.cls}>{cfg.label}</span>
+                        <span className={cls}>{label}</span>
+                        {phaseBadge && (
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${phaseBadge.cls}`}>
+                            {phaseBadge.text}
+                          </span>
+                        )}
                         {(isDraft || isReturned) && (
-                          <span className="text-[10px] text-warmgray-400 font-medium">編集可能</span>
+                          <span className="text-[10px] text-warmgray-400 font-medium">{t('history_editable')}</span>
                         )}
                       </div>
                       <p className="text-[11px] text-warmgray-400 mt-0.5">
                         {app.application_number ? (
                           <span className="font-mono mr-2">{app.application_number}</span>
                         ) : null}
-                        {new Date(app.created_at).toLocaleDateString('ja-JP', {
+                        {new Date(app.created_at).toLocaleDateString(dateLocale, {
                           year: 'numeric', month: 'long', day: 'numeric',
                         })}
                       </p>
@@ -232,29 +265,28 @@ export default function History() {
                             disabled={submitDraft.isPending}
                             onClick={() => setConfirmSubmit(app)}
                           >
-                            申請する
+                            {t('btn_submit')}
                           </button>
                           <Link
                             to={`/applications/${app.id}`}
                             className="btn-outline text-xs px-3 py-1.5 rounded-lg"
                           >
-                            編集
+                            {t('history_edit')}
                           </Link>
                           <button
                             className="text-[11px] text-warmgray-400 hover:text-red-500 transition-colors font-medium"
                             onClick={() => setConfirmDelete(app)}
                           >
-                            削除
+                            {t('history_delete')}
                           </button>
                         </>
                       )}
-                      {/* 精算入力 — APPROVED + has settlement template */}
                       {isSettleable && (
                         <button
                           className="btn-primary text-xs px-3 py-1.5 rounded-lg bg-teal-500 hover:bg-teal-600 border-teal-500 hover:border-teal-600"
                           onClick={() => navigate(`/applications/${app.id}/settlement`)}
                         >
-                          💴 精算入力
+                          💴 {t('btn_settle')}
                         </button>
                       )}
                       {!isDraft && (
@@ -262,7 +294,7 @@ export default function History() {
                           to={`/applications/${app.id}`}
                           className="text-xs font-semibold text-ringo-500 hover:text-ringo-600 transition-colors flex items-center gap-0.5"
                         >
-                          詳細
+                          {t('history_detail')}
                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                           </svg>

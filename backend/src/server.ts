@@ -19,35 +19,52 @@ import settlementRoutes from './routes/settlementRoutes';
 import adminRoutes from './routes/adminRoutes';
 import uploadRoutes from './routes/uploadRoutes';
 import sseRoutes from './routes/sseRoutes';
+import accountingRoutes from './routes/accountingRoutes';
 
 dotenv.config();
 
 const app: Application = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-app.use(helmet());
-app.use(compression());
+// ── Security & parsing ────────────────────────────────────────────────────────
+app.use(helmet({
+  // Allow inline styles/scripts from same origin (Tailwind, Vite HMR)
+  contentSecurityPolicy: process.env.NODE_ENV === 'production' ? undefined : false,
+}));
+
+// Compress all JSON/text responses >1KB — significant win on slow office LAN
+app.use(compression({ threshold: 1024 }));
+
 app.use(cors({
   origin: process.env.FRONTEND_ORIGIN || 'http://localhost:5173',
   credentials: true,
 }));
+
 app.use(express.json({ limit: '2mb' }));
 app.use(cookieParser());
-app.use(morgan('dev'));
 
+// Structured logging: 'combined' in prod (Apache format), 'dev' locally
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+
+// ── Health check ──────────────────────────────────────────────────────────────
 app.get('/health', async (_req, res) => {
   try {
     await pool.query('SELECT 1');
     const redisOk = redis.status === 'ready';
-    res.json({ status: 'ok', db: 'ok', redis: redisOk ? 'ok' : redis.status });
+    res.json({ status: 'ok', db: 'ok', redis: redisOk ? 'ok' : redis.status, ts: Date.now() });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown';
     res.status(503).json({ status: 'degraded', error: message });
   }
 });
 
-// Serve uploaded files as static (swap with Drive URLs when service account ready)
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// ── Static uploads — long-lived cache (content-addressed via filename hash) ───
+app.use('/uploads', (req, res, next) => {
+  // Allow browsers to cache uploaded files for 7 days;
+  // filenames include a timestamp so cache busting is automatic
+  res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+  next();
+}, express.static(path.join(__dirname, '../uploads')));
 
 app.use('/api/auth',         authRoutes);
 app.use('/api/templates',    templateRoutes);
@@ -57,6 +74,7 @@ app.use('/api/settlements',  settlementRoutes);
 app.use('/api/admin',        adminRoutes);
 app.use('/api/uploads',      uploadRoutes);
 app.use('/api/events',       sseRoutes);
+app.use('/api/accounting',   accountingRoutes);
 
 app.use(errorHandler);
 

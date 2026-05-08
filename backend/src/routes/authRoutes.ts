@@ -94,6 +94,77 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+// PATCH /auth/me — update own profile (name only)
+router.patch('/me', async (req: Request, res: Response): Promise<void> => {
+  const token = req.cookies?.token as string | undefined;
+  if (!token) { res.status(401).json({ error: 'Not authenticated' }); return; }
+  const { full_name } = req.body as { full_name?: string };
+  if (!full_name?.trim()) { res.status(400).json({ error: '名前を入力してください' }); return; }
+  try {
+    const { default: jwt } = await import('jsonwebtoken');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as { id: string };
+    const result = await query(
+      `UPDATE users SET full_name = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2 AND is_active = TRUE
+       RETURNING id, full_name, email, role, department_id`,
+      [full_name.trim(), decoded.id],
+    );
+    if (result.rows.length === 0) { res.status(404).json({ error: 'ユーザーが見つかりません' }); return; }
+    res.json({ user: result.rows[0] });
+  } catch {
+    res.status(500).json({ error: '更新に失敗しました' });
+  }
+});
+
+// POST /auth/me/avatar — set custom avatar (base64 data URL, max ~200KB)
+router.post('/me/avatar', async (req: Request, res: Response): Promise<void> => {
+  const token = req.cookies?.token as string | undefined;
+  if (!token) { res.status(401).json({ error: 'Not authenticated' }); return; }
+  const { avatar_url } = req.body as { avatar_url?: string };
+  if (!avatar_url) { res.status(400).json({ error: 'avatar_url is required' }); return; }
+  // Accept base64 data URLs or plain https URLs
+  const isDataUrl = avatar_url.startsWith('data:image/');
+  const isHttps = avatar_url.startsWith('https://');
+  if (!isDataUrl && !isHttps) { res.status(400).json({ error: 'Invalid avatar URL format' }); return; }
+  // Rough size guard: base64 of 300×300 JPEG ~= 30KB → 40000 chars is generous limit
+  if (avatar_url.length > 400_000) { res.status(413).json({ error: '画像サイズが大きすぎます（最大300KB）' }); return; }
+  try {
+    const { default: jwt } = await import('jsonwebtoken');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as { id: string };
+    await query(
+      `UPDATE users SET avatar_url = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+      [avatar_url, decoded.id],
+    );
+    res.json({ avatar_url });
+  } catch {
+    res.status(500).json({ error: 'アバターの更新に失敗しました' });
+  }
+});
+
+// DELETE /auth/me/avatar — remove custom avatar (resets to Google photo or null)
+router.delete('/me/avatar', async (req: Request, res: Response): Promise<void> => {
+  const token = req.cookies?.token as string | undefined;
+  if (!token) { res.status(401).json({ error: 'Not authenticated' }); return; }
+  try {
+    const { default: jwt } = await import('jsonwebtoken');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as { id: string };
+    // Try to find their Google picture by refreshing from google_oauth_sub
+    const userRes = await query(
+      `SELECT google_oauth_sub FROM users WHERE id = $1`,
+      [decoded.id],
+    );
+    const user = userRes.rows[0] as { google_oauth_sub: string | null } | undefined;
+    // Just clear it — next Google login will repopulate
+    await query(
+      `UPDATE users SET avatar_url = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [decoded.id],
+    );
+    res.json({ avatar_url: null, has_google: !!(user?.google_oauth_sub) });
+  } catch {
+    res.status(500).json({ error: 'アバターの削除に失敗しました' });
+  }
+});
+
 // POST /auth/logout
 router.post('/logout', (_req: Request, res: Response): void => {
   res.clearCookie('token', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });

@@ -20,14 +20,15 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
          u.full_name AS applicant_name,
          u.avatar_url AS applicant_avatar,
          s.id AS current_step_id,
-         s.step_order AS current_step,
+         (s.step_order - (s.step_order / 100) * 100) AS current_step,
          s.stage AS current_stage,
          s.label AS current_step_label,
          s.action_type AS current_step_action,
          approver.full_name AS current_approver_name,
          approver.avatar_url AS current_approver_avatar,
          (SELECT COUNT(*) FROM approval_steps
-          WHERE application_id = a.id AND stage = s.stage) AS total_steps
+          WHERE application_id = a.id AND stage = s.stage
+            AND step_order / 100 = s.step_order / 100) AS total_steps
        FROM applications a
        JOIN form_templates t ON a.template_id = t.id
        LEFT JOIN users u ON a.applicant_id = u.id
@@ -197,11 +198,29 @@ router.post('/:id/return', async (req: Request, res: Response): Promise<void> =>
         [id],
       );
       if (r.rows.length === 0) throw Object.assign(new Error('差し戻しできない状態です'), { status: 409 });
+
+      // Find the current pending step (to know its stage)
+      const pendingRes = await client.query(
+        `SELECT id, stage FROM approval_steps WHERE application_id = $1 AND status = 'PENDING' LIMIT 1`,
+        [id],
+      );
+      if (pendingRes.rows.length === 0) throw Object.assign(new Error('保留中のステップが見つかりません'), { status: 409 });
+      const pendingStage = (pendingRes.rows[0] as { stage: string }).stage;
+
+      // Mark the pending step as RETURNED (with comment)
       await client.query(
         `UPDATE approval_steps
          SET status = 'RETURNED', comment = $2, acted_at = CURRENT_TIMESTAMP, acted_by = $3
          WHERE application_id = $1 AND status = 'PENDING'`,
         [id, comment ?? null, userId],
+      );
+
+      // Cancel any downstream WAITING steps in the same stage — they are dead branches now.
+      // This prevents stale WAITING rows from polluting the next round's step chain.
+      await client.query(
+        `UPDATE approval_steps SET status = 'CANCELLED'
+         WHERE application_id = $1 AND stage = $2 AND status = 'WAITING'`,
+        [id, pendingStage],
       );
       await client.query(
         `INSERT INTO audit_logs (action, entity_type, entity_id, metadata)
@@ -251,6 +270,77 @@ router.post('/:id/reject', async (req: Request, res: Response): Promise<void> =>
     if (e.status) { res.status(e.status).json({ error: e.message }); return; }
     console.error('[approvals] reject failed:', err);
     res.status(500).json({ error: '却下処理に失敗しました' });
+  }
+});
+
+// GET /approvals/history — all steps this user has acted on (approved/rejected/returned)
+router.get('/history', async (req: Request, res: Response): Promise<void> => {
+  const userId = req.user!.id;
+  const { stage, status, template_id, date_from, date_to, applicant } = req.query as Record<string, string>;
+
+  // acted_by = who actually clicked approve — only source of truth
+  // No approver_id fallback: assigned ≠ acted; showing unverified attribution would leak other users' approvals
+  const conditions: string[] = [
+    "s.acted_by = $1",
+    "s.status IN ('APPROVED', 'REJECTED', 'RETURNED')",
+  ];
+  const params: unknown[] = [userId];
+  let idx = 2;
+
+  if (stage && stage !== 'ALL') {
+    conditions.push(`s.stage = $${idx++}`);
+    params.push(stage);
+  }
+  if (status && status !== 'ALL') {
+    conditions.push(`s.status = $${idx++}`);
+    params.push(status);
+  }
+  if (template_id && template_id !== 'ALL') {
+    conditions.push(`a.template_id = $${idx++}`);
+    params.push(template_id);
+  }
+  if (date_from) {
+    conditions.push(`s.acted_at >= $${idx++}`);
+    params.push(date_from);
+  }
+  if (date_to) {
+    conditions.push(`s.acted_at < ($${idx++}::date + INTERVAL '1 day')`);
+    params.push(date_to);
+  }
+  if (applicant) {
+    conditions.push(`u_app.full_name ILIKE $${idx++}`);
+    params.push(`%${applicant}%`);
+  }
+
+  try {
+    const sql = `
+      SELECT
+        s.id AS step_id,
+        s.application_id,
+        a.application_number,
+        t.title_ja AS template_name,
+        t.id AS template_id,
+        s.stage,
+        s.label AS step_label,
+        s.action_type,
+        s.status AS action,
+        s.comment,
+        s.acted_at,
+        u_app.full_name AS applicant_name,
+        u_app.avatar_url AS applicant_avatar,
+        a.status AS app_status
+      FROM approval_steps s
+      JOIN applications a ON s.application_id = a.id
+      JOIN form_templates t ON a.template_id = t.id
+      LEFT JOIN users u_app ON a.applicant_id = u_app.id
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY s.acted_at DESC NULLS LAST
+      LIMIT 200`;
+    const result = await query(sql, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[approvals] history failed:', err);
+    res.status(500).json({ error: `承認履歴の取得に失敗しました: ${(err as Error).message}` });
   }
 });
 

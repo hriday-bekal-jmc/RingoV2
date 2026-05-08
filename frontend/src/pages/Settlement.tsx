@@ -1,18 +1,23 @@
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import DynamicForm from '../components/forms/DynamicForm';
+import { useLang } from '../context/LanguageContext';
+import CustomSelect from '../components/forms/CustomSelect';
+import RouteTimeline from '../components/common/RouteTimeline';
 
 interface AppDetail {
   id: string;
+  template_id: string;
   application_number: string | null;
   status: string;
   form_data: Record<string, any>;
   template_name: string;
   template_code: string;
   has_settlement: boolean;
-  settlement_schema: { fields: Array<{ name: string; label: string; type: string; required?: boolean; multiple?: boolean }> } | null;
+  settlement_schema: { fields: Array<{ name: string; label: string; type: string; required?: boolean; multiple?: boolean; computed?: boolean; computes?: string; sum_target?: string }> } | null;
   schema_definition: { fields: Array<{ name: string; label: string; type: string; required?: boolean }> };
   steps: Array<{ step_order: number; stage: string; status: string; label: string; approver_name?: string; acted_at?: string; comment?: string }>;
 }
@@ -29,14 +34,14 @@ function ReadField({ label, value }: { label: string; value: unknown }) {
 }
 
 // ── Original RINGI summary ─────────────────────────────────────────────────────
-function RingiSummary({ app }: { app: AppDetail }) {
+function RingiSummary({ app, badge }: { app: AppDetail; badge: string }) {
   const fields = app.schema_definition?.fields ?? [];
   const data = app.form_data ?? {};
   return (
     <div className="card space-y-3">
       <div className="flex items-center gap-2 mb-2">
         <span className="w-2 h-2 rounded-full bg-emerald-400" />
-        <h4 className="text-xs font-bold uppercase tracking-widest text-warmgray-500">稟議内容（承認済）</h4>
+        <h4 className="text-xs font-bold uppercase tracking-widest text-warmgray-500">{badge}</h4>
         {app.application_number && (
           <span className="ml-auto text-[11px] font-mono text-warmgray-400">{app.application_number}</span>
         )}
@@ -55,27 +60,41 @@ function RingiSummary({ app }: { app: AppDetail }) {
   );
 }
 
-// ── Settlement route preview ──────────────────────────────────────────────────
-function SettlementRouteHint() {
+// ── Route preview types + visual (shared pattern with NewApplication) ─────────
+interface RouteStep {
+  step_order: number;
+  label: string;
+  action_type: string;
+  approver_name?: string;
+  approver_role?: string;
+}
+
+interface ApprovalRoute {
+  id: string;
+  name: string;
+  is_default: boolean;
+  steps: RouteStep[];
+}
+
+interface RoutePreview {
+  routes: ApprovalRoute[];
+  department_has_route: boolean;
+}
+
+// ChevronRight and SettlementRoutePreviewCard replaced by RouteTimeline component
+
+// ── Expected amount reference card ────────────────────────────────────────────
+function ExpectedAmountCard({ app, t }: { app: AppDetail; t: (k: any) => string }) {
+  const expected = Number(app.form_data?.expected_amount);
+  if (!expected) return null;
   return (
-    <div className="flex items-center gap-2 flex-wrap text-[11px] text-warmgray-500">
-      <span className="px-2 py-0.5 rounded-full bg-surface-100 font-medium">申請者</span>
-      {['承認', '承認', '専務/社長', '総務（精算確認）'].map((label, i) => (
-        <span key={i} className="flex items-center gap-2">
-          <svg className="w-3 h-3 text-surface-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-          </svg>
-          <span className={`px-2 py-0.5 rounded-full font-medium ${
-            label.includes('総務') ? 'bg-teal-100 text-teal-700' : 'bg-ringo-50 text-ringo-600'
-          }`}>{label}</span>
-        </span>
-      ))}
-      <span className="flex items-center gap-2">
-        <svg className="w-3 h-3 text-surface-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
-        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">完了</span>
-      </span>
+    <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-50/80 border border-amber-200/60">
+      <span className="text-xl">📋</span>
+      <div>
+        <p className="text-[11px] font-bold uppercase tracking-widest text-amber-700">{t('settle_expected_label')}</p>
+        <p className="text-lg font-bold text-amber-800">¥{expected.toLocaleString('ja-JP')}</p>
+      </div>
+      <p className="ml-auto text-xs text-amber-600">{t('settle_expected_hint')}</p>
     </div>
   );
 }
@@ -85,33 +104,59 @@ export default function Settlement() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { t } = useLang();
+
+  const [selectedRouteId, setSelectedRouteId] = useState<string>('');
 
   const { data: app, isLoading, isError } = useQuery<AppDetail>({
-    queryKey: ['appDetail', id],
+    queryKey: ['application', id],
     queryFn: async () => (await apiClient.get(`/applications/${id}`)).data,
     enabled: !!id,
-    staleTime: 30_000,
+    staleTime: 60_000,
   });
+
+  // Fetch SETTLEMENT routes for this template
+  const { data: routePreview, isLoading: routeLoading } = useQuery<RoutePreview>({
+    queryKey: ['settle-route-preview', app?.template_id],
+    queryFn: async (): Promise<RoutePreview> => {
+      const res = await apiClient.get(
+        `/applications/route-preview?template_id=${app!.template_id}&stage=SETTLEMENT`,
+      );
+      return res.data as RoutePreview;
+    },
+    enabled: !!app?.template_id && app.status === 'APPROVED' && app.has_settlement,
+  });
+
+  useEffect(() => {
+    if (!routePreview) return;
+    const def = routePreview.routes.find((r) => r.is_default) ?? routePreview.routes[0];
+    if (def) setSelectedRouteId(def.id);
+  }, [routePreview]);
+
+  const selectedRoute = routePreview?.routes.find((r) => r.id === selectedRouteId) ?? routePreview?.routes[0];
 
   const mutation = useMutation({
     mutationFn: async (settlement_data: Record<string, unknown>) =>
-      (await apiClient.post(`/applications/${id}/start-settlement`, { settlement_data })).data,
+      (await apiClient.post(`/applications/${id}/start-settlement`, {
+        settlement_data,
+        route_id: selectedRouteId || undefined,
+      })).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['myApplications'] });
-      queryClient.invalidateQueries({ queryKey: ['appDetail', id] });
+      queryClient.invalidateQueries({ queryKey: ['application', id] });
       navigate('/history?settled=1');
     },
   });
 
   if (isLoading) {
     return (
-      <Layout title="精算入力">
+      <Layout title={t('title_settlement')}>
         <div className="flex items-center justify-center h-32 text-warmgray-400 text-sm gap-2">
           <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
           </svg>
-          読み込み中...
+          {t('loading')}
         </div>
       </Layout>
     );
@@ -119,10 +164,10 @@ export default function Settlement() {
 
   if (isError || !app) {
     return (
-      <Layout title="精算入力">
+      <Layout title={t('title_settlement')}>
         <div className="card text-center py-12 text-ringo-500 text-sm">
-          申請が見つかりません。
-          <Link to="/history" className="block mt-3 text-xs text-ringo-400 hover:text-ringo-600">← 申請履歴に戻る</Link>
+          {t('settle_not_found')}
+          <Link to="/history" className="block mt-3 text-xs text-ringo-400 hover:text-ringo-600">← {t('settle_back')}</Link>
         </div>
       </Layout>
     );
@@ -131,10 +176,10 @@ export default function Settlement() {
   // Guard: only APPROVED + has settlement_schema
   if (app.status !== 'APPROVED' || !app.has_settlement || !app.settlement_schema) {
     return (
-      <Layout title="精算入力">
+      <Layout title={t('title_settlement')}>
         <div className="card text-center py-12 text-warmgray-500 text-sm">
-          この申請は精算入力できません。（承認済みかつ精算対応テンプレートのみ）
-          <Link to="/history" className="block mt-3 text-xs text-ringo-400 hover:text-ringo-600">← 申請履歴に戻る</Link>
+          {t('settle_not_available')}
+          <Link to="/history" className="block mt-3 text-xs text-ringo-400 hover:text-ringo-600">← {t('settle_back')}</Link>
         </div>
       </Layout>
     );
@@ -149,7 +194,7 @@ export default function Settlement() {
   };
 
   return (
-    <Layout title="精算入力">
+    <Layout title={t('title_settlement')}>
       <div className="max-w-3xl mx-auto space-y-6">
 
         {/* Header */}
@@ -158,44 +203,97 @@ export default function Settlement() {
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
-            申請履歴に戻る
+            {t('settle_back')}
           </Link>
           <div className="flex items-center gap-3 mt-1">
             <div className="w-10 h-10 rounded-xl bg-teal-100 flex items-center justify-center text-xl shrink-0">💴</div>
             <div>
-              <h2 className="text-xl font-bold text-warmgray-800">{app.template_name} — 精算入力</h2>
-              <p className="text-xs text-warmgray-400 mt-0.5">稟議承認後の実費・領収書を入力して精算フローを開始します</p>
+              <h2 className="text-xl font-bold text-warmgray-800">{app.template_name} — {t('settle_suffix')}</h2>
+              <p className="text-xs text-warmgray-400 mt-0.5">{t('settle_subtitle')}</p>
             </div>
           </div>
         </div>
 
-        {/* Settlement flow hint */}
-        <div className="animate-fade-up card !py-3">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-2">精算承認フロー</p>
-          <SettlementRouteHint />
-          <p className="text-[11px] text-warmgray-400 mt-2">精算ルートは管理者が設定した承認経路に従います。最後に総務部が精算確認して完了となります。</p>
+        {/* Settlement route preview panel */}
+        <div className="animate-fade-up card space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="section-title mb-0">{t('settle_route_title')}</p>
+              {selectedRoute?.name && (
+                <p className="text-xs text-warmgray-500 mt-0.5">{selectedRoute.name}</p>
+              )}
+            </div>
+            {routeLoading && (
+              <span className="text-xs text-warmgray-400 flex items-center gap-1">
+                <svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                {t('route_loading')}
+              </span>
+            )}
+          </div>
+
+          {routePreview && !routePreview.department_has_route && (
+            <div className="flex items-start gap-2.5 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+              <span className="text-base">⚠️</span>
+              <p>{t('settle_no_route_warn')}</p>
+            </div>
+          )}
+
+          {routePreview && routePreview.routes.length > 1 && (
+            <div className="space-y-1.5">
+              <label className="label">{t('route_select')}</label>
+              <CustomSelect
+                options={routePreview.routes.map((r) => ({
+                  value: r.id,
+                  label: `${r.name}${r.is_default ? t('route_default_suffix') : ''}`,
+                }))}
+                value={selectedRouteId}
+                onChange={setSelectedRouteId}
+              />
+            </div>
+          )}
+
+          {selectedRoute && (
+            <div className="bg-white/40 backdrop-blur-sm rounded-xl border border-white/60 p-4">
+              <RouteTimeline
+                steps={selectedRoute.steps}
+                originLabel={t('route_applicant_node')}
+                doneLabel={t('route_done_node')}
+                emptyMessage={t('route_no_steps')}
+                accent="teal"
+              />
+            </div>
+          )}
         </div>
 
         {/* Original RINGI summary */}
         <div className="animate-fade-up">
-          <p className="section-title mb-3">元の稟議内容</p>
-          <RingiSummary app={app} />
+          <p className="section-title mb-3">{t('settle_original')}</p>
+          <RingiSummary app={app} badge={t('settle_original_badge')} />
         </div>
 
         {/* Settlement form */}
         <div className="animate-fade-up">
-          <p className="section-title mb-3">精算情報の入力</p>
+          <p className="section-title mb-3">{t('settle_form_title')}</p>
           {mutation.isError && (
             <div className="mb-4 px-4 py-3 rounded-xl bg-red-50/80 border border-red-200/60 text-red-600 text-sm">
-              {(mutation.error as any)?.response?.data?.error ?? '精算申請に失敗しました。もう一度お試しください。'}
+              {(mutation.error as any)?.response?.data?.error ?? t('toast_submit_error')}
             </div>
           )}
-          <DynamicForm
-            template={pseudoTemplate as any}
-            isSettlementPhase={true}
-            onSubmit={async (data) => { await mutation.mutateAsync(data); }}
-            disabled={mutation.isPending}
-          />
+          <ExpectedAmountCard app={app} t={t} />
+          <div className="mt-4">
+            <DynamicForm
+              template={pseudoTemplate as any}
+              isSettlementPhase={true}
+              onSubmit={async (data) => {
+                const settlementData = (data?.form_data ?? data) as Record<string, unknown>;
+                await mutation.mutateAsync(settlementData);
+              }}
+              disabled={mutation.isPending || routePreview?.department_has_route === false}
+            />
+          </div>
         </div>
       </div>
     </Layout>

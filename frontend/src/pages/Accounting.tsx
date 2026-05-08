@@ -1,0 +1,567 @@
+import { useState, useRef } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
+import apiClient from '../services/apiClient';
+import Layout from '../components/common/Layout';
+import { useLang } from '../context/LanguageContext';
+
+const API_BASE =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace('/api', '') ||
+  'http://localhost:3000';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+interface Settlement {
+  settlement_id: string;
+  application_id: string;
+  application_number: string | null;
+  app_status: string;
+  settlement_status: string;
+  expected_amount: number;
+  actual_amount: number;
+  currency: string;
+  transfer_date: string | null;
+  transfer_proof_url: string | null;
+  accounting_note: string | null;
+  processed_at: string | null;
+  created_at: string;
+  settlement_submitted_at: string | null;
+  template_name: string;
+  applicant_name: string;
+  department_name: string;
+  can_approve: boolean;
+  pending_step_id: string | null;
+  pending_step_label: string | null;
+  pending_approver_name: string | null;
+}
+
+// ── Status badge ──────────────────────────────────────────────────────────────
+const APP_STATUS_CLS: Record<string, string> = {
+  PENDING_SETTLEMENT: 'badge-mustard',
+  SETTLEMENT_APPROVED: 'badge-approved',
+  COMPLETED: 'badge-approved',
+};
+
+// ── Inline transfer date editor ────────────────────────────────────────────────
+function DateEditor({
+  settlementId,
+  currentDate,
+  currentNote,
+  t,
+}: {
+  settlementId: string;
+  currentDate: string | null;
+  currentNote: string | null;
+  t: (k: any) => string;
+}) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [date, setDate] = useState(currentDate ?? '');
+  const [note, setNote] = useState(currentNote ?? '');
+
+  const mutation = useMutation({
+    mutationFn: async () =>
+      (
+        await apiClient.patch(`/accounting/settlements/${settlementId}`, {
+          transfer_date: date || null,
+          accounting_note: note,
+        })
+      ).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accountingSettlements'] });
+      setEditing(false);
+    },
+  });
+
+  if (!editing) {
+    return (
+      <button
+        onClick={() => setEditing(true)}
+        className={`text-xs font-semibold px-2 py-1 rounded-lg transition-colors ${
+          currentDate
+            ? 'text-teal-700 bg-teal-50 border border-teal-200/60 hover:bg-teal-100'
+            : 'text-warmgray-400 hover:text-ringo-500'
+        }`}
+      >
+        {currentDate
+          ? new Date(currentDate).toLocaleDateString('ja-JP')
+          : '— ' + t('accounting_transfer_date_ph')}
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 min-w-[210px] p-3 bg-white/80 rounded-xl border border-white/90 shadow-sm backdrop-blur-sm animate-scale-in">
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_transfer')}</label>
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          className="input-date w-full"
+        />
+      </div>
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_proof')}</label>
+        <input
+          type="text"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder={t('accounting_note_ph')}
+          className="input text-xs py-1.5 px-2.5"
+        />
+      </div>
+      <div className="flex gap-2 pt-0.5">
+        <button
+          onClick={() => mutation.mutate()}
+          disabled={mutation.isPending}
+          className="flex-1 btn-primary text-xs py-1.5 px-3 flex items-center justify-center gap-1.5"
+        >
+          {mutation.isPending ? (
+            <><svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>{t('accounting_saving')}</>
+          ) : (
+            <><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>{t('accounting_save_date')}</>
+          )}
+        </button>
+        <button
+          onClick={() => { setEditing(false); setDate(currentDate ?? ''); setNote(currentNote ?? ''); }}
+          className="btn-ghost text-xs py-1.5 px-2"
+        >
+          {t('btn_cancel')}
+        </button>
+      </div>
+      {mutation.isError && (
+        <p className="text-[11px] text-ringo-500 flex items-center gap-1"><span>⚠</span> 保存に失敗しました</p>
+      )}
+    </div>
+  );
+}
+
+// ── Transfer proof uploader ───────────────────────────────────────────────────
+function ProofUploader({
+  settlementId,
+  proofUrl,
+  t,
+}: {
+  settlementId: string;
+  proofUrl: string | null;
+  t: (k: any) => string;
+}) {
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      await apiClient.post(`/accounting/settlements/${settlementId}/transfer-proof`, fd);
+      queryClient.invalidateQueries({ queryKey: ['accountingSettlements'] });
+    } catch {
+      alert('アップロードに失敗しました');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const fullUrl = proofUrl
+    ? proofUrl.startsWith('http')
+      ? proofUrl
+      : `${API_BASE}${proofUrl}`
+    : null;
+
+  return (
+    <div className="flex items-center gap-2">
+      {fullUrl ? (
+        <>
+          <span className="text-[10px] font-semibold text-teal-600 bg-teal-50 border border-teal-200/60 px-1.5 py-0.5 rounded-full">
+            {t('accounting_proof_uploaded')}
+          </span>
+          <a
+            href={fullUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-ringo-500 hover:text-ringo-600 font-semibold"
+          >
+            {t('accounting_proof_view')}
+          </a>
+        </>
+      ) : null}
+      <label className={`text-xs cursor-pointer font-semibold transition-colors ${
+        uploading ? 'text-warmgray-400' : 'text-warmgray-400 hover:text-ringo-500'
+      }`}>
+        <input ref={fileInputRef} type="file" className="sr-only" onChange={handleFile} disabled={uploading} />
+        {uploading ? t('accounting_uploading') : (fullUrl ? '↺ 更新' : t('accounting_upload_proof'))}
+      </label>
+    </div>
+  );
+}
+
+// ── Inline approve button (gated on transfer_date + proof upload) ─────────────
+function ApproveButton({
+  settlementId,
+  stepLabel,
+  transferDate,
+  proofUrl,
+  t,
+}: {
+  settlementId: string;
+  stepLabel: string | null;
+  transferDate: string | null;
+  proofUrl: string | null;
+  t: (k: any) => string;
+}) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: async () =>
+      (await apiClient.post(`/accounting/settlements/${settlementId}/approve`, {})).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accountingSettlements'] });
+      queryClient.invalidateQueries({ queryKey: ['pendingApprovals'] });
+    },
+  });
+
+  const missingDate  = !transferDate;
+  const missingProof = !proofUrl;
+  const blocked = missingDate || missingProof;
+
+  if (mutation.isSuccess) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+        </svg>
+        {t('accounting_approve_done')}
+      </span>
+    );
+  }
+
+  if (blocked) {
+    const hints: string[] = [];
+    if (missingDate)  hints.push('振込日');
+    if (missingProof) hints.push('振込証明');
+    return (
+      <div className="group relative inline-block">
+        <button
+          disabled
+          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-surface-100/60 text-warmgray-400 border border-surface-200/60 cursor-not-allowed flex items-center gap-1.5"
+        >
+          <svg className="w-3 h-3 text-warmgray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+          </svg>
+          {t('accounting_approve_btn')}
+        </button>
+        {/* Tooltip */}
+        <div className="pointer-events-none absolute bottom-full left-0 mb-2 w-max max-w-[200px] opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
+          <div className="bg-warmgray-800 text-white text-[11px] font-medium rounded-lg px-3 py-2 shadow-lg leading-relaxed">
+            先に {hints.join('・')} を入力してください
+            <div className="absolute top-full left-3 border-4 border-transparent border-t-warmgray-800" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={() => mutation.mutate()}
+      disabled={mutation.isPending}
+      className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-teal-500 text-white hover:bg-teal-600 active:scale-[0.98] shadow-sm transition-all duration-150 disabled:opacity-60 flex items-center gap-1.5"
+    >
+      {mutation.isPending ? (
+        <>
+          <svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+          </svg>
+          {t('accounting_approving')}
+        </>
+      ) : (
+        <>
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+          </svg>
+          {t('accounting_approve_btn')}{stepLabel ? ` (${stepLabel})` : ''}
+        </>
+      )}
+    </button>
+  );
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+export default function Accounting() {
+  const { t, lang } = useLang();
+  const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
+
+  const [filter, setFilter] = useState<'ALL' | 'PENDING' | 'DONE'>('ALL');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const { data: settlements = [], isLoading } = useQuery<Settlement[]>({
+    queryKey: ['accountingSettlements'],
+    queryFn: async () => (await apiClient.get('/accounting/settlements')).data,
+    staleTime: 30_000,
+  });
+
+  const filtered = settlements.filter((s) => {
+    if (filter === 'PENDING') return ['PENDING_SETTLEMENT'].includes(s.app_status);
+    if (filter === 'DONE') return ['COMPLETED', 'SETTLEMENT_APPROVED'].includes(s.app_status);
+    return true;
+  });
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selected.size === filtered.length) setSelected(new Set());
+    else setSelected(new Set(filtered.map((s) => s.settlement_id)));
+  };
+
+  const downloadCSV = () => {
+    const ids = selected.size > 0 ? [...selected].join(',') : '';
+    const url = `${API_BASE}/api/accounting/settlements/csv${ids ? `?ids=${ids}` : ''}`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const STATUS_LABEL: Record<string, string> = {
+    PENDING_SETTLEMENT: t('status_pending_settle'),
+    SETTLEMENT_APPROVED: t('status_settle_approved'),
+    COMPLETED: t('status_completed'),
+  };
+
+  const fmt = (n: number | null | undefined) =>
+    n != null ? `¥${Number(n).toLocaleString('ja-JP')}` : '—';
+
+  return (
+    <Layout title={t('title_accounting')}>
+      <div className="max-w-7xl mx-auto space-y-6">
+
+        {/* Header */}
+        <div className="animate-fade-up flex items-end justify-between">
+          <div>
+            <p className="section-title mb-0">{t('title_accounting')}</p>
+            <p className="text-sm text-warmgray-400 mt-1">{t('accounting_subtitle')}</p>
+          </div>
+          <button
+            onClick={downloadCSV}
+            className="btn-outline text-xs flex items-center gap-1.5"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            {t('accounting_export_csv')}
+            {selected.size > 0
+              ? ` (${t('accounting_export_selected')} ${selected.size})`
+              : ` (${t('accounting_export_all')})`}
+          </button>
+        </div>
+
+        {/* Filter pills */}
+        <div className="animate-fade-up flex gap-2">
+          {(['ALL', 'PENDING', 'DONE'] as const).map((f) => {
+            const label = f === 'ALL' ? t('accounting_filter_all') : f === 'PENDING' ? t('accounting_filter_pending') : t('accounting_filter_done');
+            return (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-150 ${
+                  filter === f
+                    ? 'bg-warmgray-800 text-white shadow-sm'
+                    : 'bg-white/60 text-warmgray-500 hover:bg-white/90 border border-white/80 backdrop-blur-sm'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Table */}
+        {isLoading ? (
+          <div className="card flex items-center justify-center gap-3 py-16 text-warmgray-400">
+            <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+            </svg>
+            {t('loading')}
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="card flex flex-col items-center justify-center py-20 gap-4 text-warmgray-400">
+            <span className="text-5xl">📭</span>
+            <p className="text-sm font-medium">{t('accounting_no_items')}</p>
+          </div>
+        ) : (
+          <div className="card !p-0 overflow-hidden animate-fade-up">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-white/30 bg-surface-50/60">
+                    <th className="px-4 py-3 text-left w-10">
+                      <input
+                        type="checkbox"
+                        checked={selected.size === filtered.length && filtered.length > 0}
+                        onChange={toggleAll}
+                        className="rounded"
+                      />
+                    </th>
+                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_app')}</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_applicant')}</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400 hidden md:table-cell">{t('accounting_col_template')}</th>
+                    <th className="px-4 py-3 text-right text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_expected')}</th>
+                    <th className="px-4 py-3 text-right text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_actual')}</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_transfer')}</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_proof')}</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_status')}</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_approve_btn')}</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('col_detail')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/20">
+                  {filtered.map((s) => {
+                    const statusCls = APP_STATUS_CLS[s.app_status] ?? 'badge-draft';
+                    const delta = s.actual_amount - s.expected_amount;
+                    return (
+                      <tr
+                        key={s.settlement_id}
+                        className="hover:bg-white/30 transition-colors duration-100"
+                      >
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selected.has(s.settlement_id)}
+                            onChange={() => toggleSelect(s.settlement_id)}
+                            className="rounded"
+                          />
+                        </td>
+
+                        {/* App number + link */}
+                        <td className="px-4 py-3">
+                          <Link
+                            to={`/applications/${s.application_id}`}
+                            className="text-xs font-mono text-ringo-500 hover:text-ringo-600 font-semibold"
+                          >
+                            {s.application_number ?? '—'}
+                          </Link>
+                          <p className="text-[10px] text-warmgray-400 mt-0.5">
+                            {s.settlement_submitted_at
+                              ? new Date(s.settlement_submitted_at).toLocaleDateString(dateLocale)
+                              : new Date(s.created_at).toLocaleDateString(dateLocale)}
+                          </p>
+                        </td>
+
+                        {/* Applicant + dept */}
+                        <td className="px-4 py-3">
+                          <p className="text-sm font-medium text-warmgray-800">{s.applicant_name}</p>
+                          <p className="text-[11px] text-warmgray-400">{s.department_name}</p>
+                        </td>
+
+                        {/* Template */}
+                        <td className="px-4 py-3 hidden md:table-cell">
+                          <p className="text-xs text-warmgray-600 font-medium">{s.template_name}</p>
+                        </td>
+
+                        {/* Expected amount */}
+                        <td className="px-4 py-3 text-right">
+                          <span className="text-sm text-warmgray-500">{fmt(s.expected_amount)}</span>
+                        </td>
+
+                        {/* Actual amount + delta */}
+                        <td className="px-4 py-3 text-right">
+                          <span className="text-sm font-bold text-warmgray-800">{fmt(s.actual_amount)}</span>
+                          {s.actual_amount > 0 && delta !== 0 && (
+                            <p className={`text-[10px] font-semibold mt-0.5 ${delta > 0 ? 'text-ringo-500' : 'text-emerald-600'}`}>
+                              {delta > 0 ? '+' : ''}{fmt(delta)}
+                            </p>
+                          )}
+                        </td>
+
+                        {/* Transfer date editor */}
+                        <td className="px-4 py-3">
+                          <DateEditor
+                            settlementId={s.settlement_id}
+                            currentDate={s.transfer_date}
+                            currentNote={s.accounting_note}
+                            t={t}
+                          />
+                        </td>
+
+                        {/* Transfer proof */}
+                        <td className="px-4 py-3">
+                          <ProofUploader
+                            settlementId={s.settlement_id}
+                            proofUrl={s.transfer_proof_url}
+                            t={t}
+                          />
+                        </td>
+
+                        {/* Status */}
+                        <td className="px-4 py-3">
+                          <span className={statusCls}>
+                            {STATUS_LABEL[s.app_status] ?? s.app_status}
+                          </span>
+                        </td>
+
+                        {/* Approve */}
+                        <td className="px-4 py-3">
+                          {s.can_approve ? (
+                            <ApproveButton
+                              settlementId={s.settlement_id}
+                              stepLabel={s.pending_step_label}
+                              transferDate={s.transfer_date}
+                              proofUrl={s.transfer_proof_url}
+                              t={t}
+                            />
+                          ) : s.pending_step_id ? (
+                            /* Pending but not user's turn */
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200/60 px-2 py-0.5 rounded-full whitespace-nowrap">
+                                {t('accounting_awaiting')}
+                              </span>
+                              {s.pending_approver_name && (
+                                <span className="text-[10px] text-warmgray-400 truncate max-w-[100px]">
+                                  {s.pending_approver_name}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            /* No pending step = completed */
+                            <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-full">
+                              ✓ {t('status_completed')}
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Detail link */}
+                        <td className="px-4 py-3">
+                          <Link
+                            to={`/applications/${s.application_id}`}
+                            className="text-xs font-semibold text-ringo-500 hover:text-ringo-600 whitespace-nowrap"
+                          >
+                            {t('col_detail')} →
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    </Layout>
+  );
+}

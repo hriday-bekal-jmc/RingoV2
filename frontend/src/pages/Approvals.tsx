@@ -2,8 +2,8 @@ import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
-import { useSSE } from '../hooks/useSSE';
 import Toast, { useToast } from '../components/common/Toast';
+import { useLang } from '../context/LanguageContext';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:4000/api';
 
@@ -81,7 +81,11 @@ function StepBar({ current, total }: { current: number; total: number }) {
 }
 
 // ── Form data viewer ──────────────────────────────────────────────────────────
-function FormDataViewer({ formData, schema }: { formData: Record<string, unknown>; schema: { fields: FormField[] } | null }) {
+function FormDataViewer({ formData, schema, tFn }: {
+  formData: Record<string, unknown>;
+  schema: { fields: FormField[] } | null;
+  tFn: (k: any) => string;
+}) {
   const fields = schema?.fields ?? [];
 
   if (fields.length === 0) {
@@ -118,7 +122,7 @@ function FormDataViewer({ formData, schema }: { formData: Record<string, unknown
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                         </svg>
-                        添付 {i + 1}
+                        {tFn('attach_label')} {i + 1}
                       </a>
                     );
                   })}
@@ -126,7 +130,7 @@ function FormDataViewer({ formData, schema }: { formData: Record<string, unknown
               ) : val != null && val !== '' ? (
                 <span className={isLong ? 'block whitespace-pre-wrap leading-relaxed' : ''}>{String(val)}</span>
               ) : (
-                <span className="text-warmgray-300 text-xs">未入力</span>
+                <span className="text-warmgray-300 text-xs">{tFn('not_entered')}</span>
               )}
             </dd>
           </div>
@@ -145,13 +149,15 @@ interface DetailModalProps {
 }
 
 function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
+  const { t, lang } = useLang();
+  const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
   const [activeAction, setActiveAction] = useState<'approve' | 'return' | 'reject' | null>(null);
   const [comment, setComment] = useState('');
 
   const actionConfig = {
-    approve: { title: '承認する', btnClass: 'btn-primary',  require: false, icon: '✓', iconBg: 'bg-emerald-100 text-emerald-600' },
-    return:  { title: '差し戻し', btnClass: 'btn-outline',  require: true,  icon: '↩', iconBg: 'bg-amber-100 text-amber-600'   },
-    reject:  { title: '却下する', btnClass: 'btn-danger',   require: true,  icon: '✕', iconBg: 'bg-red-100 text-red-600'       },
+    approve: { title: t('approvals_approve_btn'), btnClass: 'btn-primary',  require: false, icon: '✓', iconBg: 'bg-emerald-100 text-emerald-600' },
+    return:  { title: t('btn_return'),             btnClass: 'btn-outline',  require: true,  icon: '↩', iconBg: 'bg-amber-100 text-amber-600'   },
+    reject:  { title: t('btn_reject'),             btnClass: 'btn-danger',   require: true,  icon: '✕', iconBg: 'bg-red-100 text-red-600'       },
   };
 
   const isFinal = activeAction === 'approve' && Number(app.current_step) === Number(app.total_steps);
@@ -179,10 +185,10 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
               <div className="min-w-0">
                 <h3 className="text-lg font-bold text-warmgray-800 leading-tight">{app.template_name}</h3>
                 {app.applicant_name && (
-                  <p className="text-xs text-warmgray-500 mt-0.5">申請者: {app.applicant_name}</p>
+                  <p className="text-xs text-warmgray-500 mt-0.5">{t('approvals_applicant_lbl')}: {app.applicant_name}</p>
                 )}
                 <p className="text-[11px] text-warmgray-400 mt-0.5">
-                  {new Date(app.created_at).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}
+                  {new Date(app.created_at).toLocaleDateString(dateLocale, { year: 'numeric', month: 'long', day: 'numeric' })}
                 </p>
               </div>
             </div>
@@ -200,7 +206,7 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
           <div className="mt-4">
             <StepBar current={Number(app.current_step)} total={Number(app.total_steps)} />
             {app.current_step_label && (
-              <p className="text-[11px] text-warmgray-400 mt-2">現在: {app.current_step_label}</p>
+              <p className="text-[11px] text-warmgray-400 mt-2">{t('approvals_current_lbl')}: {app.current_step_label}</p>
             )}
           </div>
         </div>
@@ -213,24 +219,24 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
             {app.current_stage === 'SETTLEMENT' && (
               <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-teal-50/80 border border-teal-200/60 text-teal-700 text-xs font-semibold">
                 <span>💴</span>
-                精算承認フェーズ — 実費の確認・精算承認を行ってください
+                {t('approvals_settle_phase')}
               </div>
             )}
 
             {/* Settlement data (if SETTLEMENT stage) */}
             {app.current_stage === 'SETTLEMENT' && app.settlement_data && (
               <div>
-                <p className="section-title mb-4">精算内容</p>
-                <FormDataViewer formData={app.settlement_data} schema={app.settlement_schema ?? null} />
+                <p className="section-title mb-4">{t('approvals_settle_content')}</p>
+                <FormDataViewer formData={app.settlement_data} schema={app.settlement_schema ?? null} tFn={t} />
               </div>
             )}
 
             {/* Original RINGI content */}
             <div>
               <p className="section-title mb-4">
-                {app.current_stage === 'SETTLEMENT' ? '元の稟議内容' : '申請内容'}
+                {app.current_stage === 'SETTLEMENT' ? t('approvals_original') : t('approvals_content')}
               </p>
-              <FormDataViewer formData={app.form_data} schema={app.schema_definition} />
+              <FormDataViewer formData={app.form_data} schema={app.schema_definition} tFn={t} />
             </div>
           </div>
         </div>
@@ -247,7 +253,7 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
                 <div>
                   <p className="text-sm font-bold text-warmgray-800">{cfg!.title}</p>
                   {isFinal && (
-                    <p className="text-xs text-emerald-600 font-medium">最終承認 — 申請番号を発行します</p>
+                    <p className="text-xs text-emerald-600 font-medium">{t('approvals_final_hint')}</p>
                   )}
                 </div>
               </div>
@@ -255,23 +261,23 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
               {/* Comment field */}
               <div>
                 <label className="label-normal text-xs">
-                  コメント
+                  {t('approvals_comment')}
                   {cfg!.require
-                    ? <span className="text-ringo-500 ml-1">*必須</span>
-                    : <span className="text-warmgray-400 ml-1 font-normal">(任意)</span>
+                    ? <span className="text-ringo-500 ml-1">{t('required')}</span>
+                    : <span className="text-warmgray-400 ml-1 font-normal">{t('optional')}</span>
                   }
                 </label>
                 <textarea
                   className={`input resize-none text-sm ${cfg!.require && !comment.trim() ? 'border-amber-300/80 focus:ring-amber-400/50' : ''}`}
                   rows={2}
-                  placeholder={activeAction === 'approve' ? '承認コメント（任意）' : '理由を入力してください（必須）'}
+                  placeholder={activeAction === 'approve' ? t('approvals_approve_ph') : t('approvals_reason_ph')}
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
                   autoFocus
                 />
                 {cfg!.require && !comment.trim() && (
                   <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
-                    <span>⚠</span>理由を入力するとボタンが有効になります
+                    <span>⚠</span>{t('action_require_comment')}
                   </p>
                 )}
               </div>
@@ -279,7 +285,7 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
               {/* Submit / cancel */}
               <div className="flex gap-2">
                 <button className="btn-ghost text-xs" onClick={() => { setActiveAction(null); setComment(''); }}>
-                  戻る
+                  {t('approvals_back')}
                 </button>
                 <div className="flex-1" />
                 <button
@@ -287,21 +293,23 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
                   disabled={isMutating || !canSubmit}
                   onClick={handleSubmit}
                 >
-                  {isMutating ? '処理中...' : cfg!.title}
+                  {isMutating ? t('approvals_processing') : cfg!.title}
                 </button>
               </div>
             </div>
           ) : (
             <div className="flex items-center gap-2 justify-end">
-              <button className="btn-ghost text-sm" onClick={onClose}>閉じる</button>
+              <button className="btn-ghost text-sm" onClick={onClose}>{t('btn_close')}</button>
               <button className="btn-outline text-sm" onClick={() => { setActiveAction('return'); setComment(''); }} disabled={isMutating}>
-                ↩ 差し戻し
+                ↩ {t('btn_return')}
               </button>
               <button className="btn-danger text-sm" onClick={() => { setActiveAction('reject'); setComment(''); }} disabled={isMutating}>
-                ✕ 却下
+                ✕ {t('btn_reject')}
               </button>
               <button className="btn-primary text-sm" onClick={() => { setActiveAction('approve'); setComment(''); }} disabled={isMutating}>
-                {Number(app.current_step) === Number(app.total_steps) ? '✓ 最終承認' : '✓ 承認する'}
+                {Number(app.current_step) === Number(app.total_steps)
+                  ? `✓ ${t('approvals_final_btn')}`
+                  : `✓ ${t('approvals_approve_btn')}`}
               </button>
             </div>
           )}
@@ -316,14 +324,12 @@ export default function Approvals() {
   const queryClient = useQueryClient();
   const { toast, show: showToast, dismiss } = useToast();
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
-
-  // Real-time updates via SSE
-  useSSE();
+  const { t, lang } = useLang();
+  const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
 
   const { data: applications = [], isLoading, isError } = useQuery<Application[]>({
     queryKey: ['pendingApprovals'],
     queryFn: async () => (await apiClient.get('/approvals/pending')).data,
-    // No refetchInterval needed — SSE handles real-time invalidation
     staleTime: 30_000,
   });
 
@@ -338,27 +344,27 @@ export default function Approvals() {
       (await apiClient.post(`/approvals/${id}/approve`, { comment })).data,
     onSuccess: (data) => {
       showToast(
-        data.completed ? '🎉 精算完了 — 申請が完了しました' :
-        data.final ? `✅ 最終承認 — ${data.application?.application_number}` :
-        '✅ 承認しました — 次の承認者へ'
+        data.completed ? `🎉 ${t('status_completed')} — ${t('toast_submitted')}` :
+        data.final ? `✅ ${t('approvals_final_btn')} — ${data.application?.application_number}` :
+        `✅ ${t('toast_approved')}`
       );
       invalidate();
     },
-    onError: (err: any) => showToast(`承認失敗: ${err.message}`, 'error'),
+    onError: (err: any) => showToast(`${t('toast_approve_fail')}: ${err.message}`, 'error'),
   });
 
   const returnMutation = useMutation({
     mutationFn: async ({ id, comment }: { id: string; comment: string }) =>
       (await apiClient.post(`/approvals/${id}/return`, { comment })).data,
-    onSuccess: () => { showToast('↩ 差し戻しました'); invalidate(); },
-    onError: (err: any) => showToast(`差し戻し失敗: ${err.message}`, 'error'),
+    onSuccess: () => { showToast(`↩ ${t('toast_returned')}`); invalidate(); },
+    onError: (err: any) => showToast(`${t('toast_return_fail')}: ${err.message}`, 'error'),
   });
 
   const rejectMutation = useMutation({
     mutationFn: async ({ id, comment }: { id: string; comment: string }) =>
       (await apiClient.post(`/approvals/${id}/reject`, { comment })).data,
-    onSuccess: () => { showToast('✕ 却下しました'); invalidate(); },
-    onError: (err: any) => showToast(`却下失敗: ${err.message}`, 'error'),
+    onSuccess: () => { showToast(`✕ ${t('toast_rejected')}`); invalidate(); },
+    onError: (err: any) => showToast(`${t('toast_reject_fail')}: ${err.message}`, 'error'),
   });
 
   const handleAction = (id: string, action: 'approve' | 'return' | 'reject', comment: string) => {
@@ -371,7 +377,7 @@ export default function Approvals() {
   const isMutating = approveMutation.isPending || returnMutation.isPending || rejectMutation.isPending;
 
   return (
-    <Layout title="承認待ち一覧">
+    <Layout title={t('title_approvals')}>
       {toast && <Toast message={toast.message} type={toast.type} onDismiss={dismiss} />}
 
       <div className="max-w-4xl mx-auto space-y-6">
@@ -379,12 +385,12 @@ export default function Approvals() {
         {/* Header */}
         <div className="animate-fade-up flex items-end justify-between">
           <div>
-            <p className="section-title mb-0">承認インボックス</p>
-            <h2 className="text-2xl font-bold text-warmgray-800 mt-1">承認待ち一覧</h2>
-            <p className="text-sm text-warmgray-400 mt-1">行をクリックして詳細を確認できます</p>
+            <p className="section-title mb-0">{t('approvals_inbox')}</p>
+            <h2 className="text-2xl font-bold text-warmgray-800 mt-1">{t('title_approvals')}</h2>
+            <p className="text-sm text-warmgray-400 mt-1">{t('approvals_subtitle')}</p>
           </div>
           {applications.length > 0 && (
-            <span className="badge-pending px-3 py-1.5 text-sm">{applications.length} 件 保留中</span>
+            <span className="badge-pending px-3 py-1.5 text-sm">{applications.length} {t('approvals_pending_badge')}</span>
           )}
         </div>
 
@@ -395,14 +401,14 @@ export default function Approvals() {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
             </svg>
-            読み込み中...
+            {t('loading')}
           </div>
         )}
 
         {/* Error */}
         {isError && (
           <div className="card text-ringo-600 text-sm text-center py-8">
-            データ取得に失敗しました。ページをリロードしてください。
+            {t('approvals_error_msg')}
           </div>
         )}
 
@@ -410,8 +416,8 @@ export default function Approvals() {
         {!isLoading && applications.length === 0 && (
           <div className="card flex flex-col items-center justify-center py-20 text-warmgray-400">
             <span className="text-4xl mb-3">✅</span>
-            <p className="text-sm font-medium">承認待ちはありません</p>
-            <p className="text-xs mt-1 text-warmgray-300">全て処理済みです</p>
+            <p className="text-sm font-medium">{t('approvals_no_items')}</p>
+            <p className="text-xs mt-1 text-warmgray-300">{t('approvals_all_done')}</p>
           </div>
         )}
 
@@ -421,9 +427,9 @@ export default function Approvals() {
             <table className="w-full text-sm text-left">
               <thead className="border-b border-white/40">
                 <tr>
-                  <th className="px-5 py-3.5 text-[11px] font-bold uppercase tracking-widest text-warmgray-400">申請 / 申請者</th>
-                  <th className="px-5 py-3.5 text-[11px] font-bold uppercase tracking-widest text-warmgray-400">承認ステップ</th>
-                  <th className="px-5 py-3.5 text-[11px] font-bold uppercase tracking-widest text-warmgray-400 hidden sm:table-cell">申請日</th>
+                  <th className="px-5 py-3.5 text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('approvals_col_app')}</th>
+                  <th className="px-5 py-3.5 text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('approvals_col_step')}</th>
+                  <th className="px-5 py-3.5 text-[11px] font-bold uppercase tracking-widest text-warmgray-400 hidden sm:table-cell">{t('approvals_col_date')}</th>
                   <th className="px-5 py-3.5 w-8" />
                 </tr>
               </thead>
@@ -442,7 +448,7 @@ export default function Approvals() {
                           <div className="flex items-center gap-2">
                             <p className="text-sm font-semibold text-warmgray-800 truncate">{app.template_name}</p>
                             {app.current_stage === 'SETTLEMENT' && (
-                              <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700">精算</span>
+                              <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700">{t('approvals_settlement_badge')}</span>
                             )}
                           </div>
                           <p className="text-[11px] text-warmgray-400 mt-0.5 truncate">{app.applicant_name}</p>
@@ -465,7 +471,7 @@ export default function Approvals() {
                       )}
                     </td>
                     <td className="px-5 py-4 hidden sm:table-cell text-[11px] text-warmgray-400 whitespace-nowrap">
-                      {new Date(app.created_at).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })}
+                      {new Date(app.created_at).toLocaleDateString(dateLocale, { month: 'short', day: 'numeric' })}
                     </td>
                     <td className="px-5 py-4 w-8 text-right">
                       <svg className="w-4 h-4 text-warmgray-300 group-hover:text-ringo-400 transition-colors inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
