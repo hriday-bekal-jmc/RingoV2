@@ -70,30 +70,34 @@ export default function Dashboard() {
   const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
   const perms = getPermissions(user?.role);
 
-  // Dashboard: fetch up to 100 own apps for stat counts + recent list.
-  // Separate key suffix ('dashboard') avoids cache conflict with History's infinite query.
-  const { data: myAppsRes } = useQuery<{ items: any[]; hasMore: boolean }>({
-    queryKey: ['myApplications', 'dashboard'],
-    queryFn: async () => (await apiClient.get('/applications?limit=100&offset=0&status=ALL')).data,
+  // Single dashboard summary fetch — backend computes counts + recent +
+  // pending approvals preview in one Redis-cached query.
+  // Replaces the old pattern of fetching 100 apps and filtering client-side.
+  interface DashboardSummary {
+    status_counts: {
+      DRAFT: number; PENDING_APPROVAL: number; RETURNED: number; APPROVED: number;
+      PENDING_SETTLEMENT: number; SETTLEMENT_APPROVED: number; COMPLETED: number; REJECTED: number;
+    };
+    recent_apps: any[];
+    pending_approvals?: { items: any[]; total: number };
+  }
+  const { data: summary } = useQuery<DashboardSummary>({
+    queryKey: ['dashboard', 'summary'],
+    queryFn: async () => (await apiClient.get('/dashboard/summary')).data,
     enabled: !loading,
     staleTime: 30_000,
   });
-  const myApps = myAppsRes?.items ?? [];
 
-  // Pending approvals: need total (accurate count via window fn) + first few for mini-list.
-  const { data: pendingRes } = useQuery<{ items: any[]; hasMore: boolean; total: number }>({
-    queryKey: ['pendingApprovals', 'dashboard'],
-    queryFn: async () => (await apiClient.get('/approvals/pending?limit=5&offset=0')).data,
-    enabled: !loading && perms.canApprove,
-    staleTime: 30_000,
-  });
-  const pendingApprovals      = pendingRes?.items ?? [];
-  const pendingApprovalsTotal = pendingRes?.total  ?? 0;
-
-  const pendingCount  = myApps.filter((a) => a.status === 'PENDING_APPROVAL').length;
-  const draftCount    = myApps.filter((a) => a.status === 'DRAFT').length;
-  const returnedCount = myApps.filter((a) => a.status === 'RETURNED').length;
-  const recentApps    = myApps.slice(0, 5);   // already sorted DESC by server
+  const pendingCount  = summary?.status_counts.PENDING_APPROVAL ?? 0;
+  const draftCount    = summary?.status_counts.DRAFT ?? 0;
+  const returnedCount = summary?.status_counts.RETURNED ?? 0;
+  const recentApps    = summary?.recent_apps ?? [];
+  const pendingApprovals      = summary?.pending_approvals?.items ?? [];
+  const pendingApprovalsTotal = summary?.pending_approvals?.total ?? 0;
+  // Total app count: sum of all status buckets
+  const myAppsTotal = summary
+    ? Object.values(summary.status_counts).reduce((sum, n) => sum + n, 0)
+    : 0;
   const firstName = user?.full_name?.split(' ')[0] ?? 'ゲスト';
 
   const hour = new Date().getHours();
@@ -134,7 +138,7 @@ export default function Dashboard() {
             />
             {perms.canApprove
               ? <StatCard label={t('dash_stat_approval')} value={pendingApprovalsTotal} icon="🔔" color="from-ringo-200/50 to-transparent" to="/approvals" />
-              : <StatCard label={t('dash_stat_total')} value={myApps.length} icon="📁" color="from-indigo-200/30 to-transparent" to="/history" />
+              : <StatCard label={t('dash_stat_total')} value={myAppsTotal} icon="📁" color="from-indigo-200/30 to-transparent" to="/history" />
             }
           </div>
 

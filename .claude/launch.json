@@ -5,12 +5,18 @@
       "name": "backend-api",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "backend", "run", "dev"],
-      "port": 3000
+      "port": 3000,
+      "autoPort": false
     },
     {
       "name": "backend-csv-worker",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "backend", "run", "worker:csv"]
+    },
+    {
+      "name": "backend-outbox-worker",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "backend", "run", "worker:outbox"]
     },
     {
       "name": "frontend-vite",

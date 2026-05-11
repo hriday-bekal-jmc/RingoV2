@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useScrollEnd } from '../hooks/useScrollEnd';
 import apiClient from '../services/apiClient';
@@ -282,10 +283,12 @@ function AppDetailPanel({ appId, onClose, tFn, lang }: {
     );
   };
 
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+  // Portal to body so backdrop-filter on parent glass doesn't trap the
+  // modal's `fixed inset-0` inside a containing block (would cause cutoff).
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-2 md:p-4">
       <div className="absolute inset-0 bg-warmgray-900/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative glass rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col animate-scale-in overflow-hidden">
+      <div className="relative glass rounded-3xl shadow-2xl w-full max-w-4xl max-h-[95vh] md:max-h-[90vh] flex flex-col animate-scale-in overflow-hidden">
 
         {/* Header */}
         <div className="px-6 pt-5 pb-4 border-b border-white/30 shrink-0 flex items-center justify-between gap-4">
@@ -443,7 +446,8 @@ function AppDetailPanel({ appId, onClose, tFn, lang }: {
           })()}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -477,13 +481,14 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
     onAction(app.id, activeAction, comment);
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+  // Portal — see AppDetailPanel comment above for rationale.
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-warmgray-900/60 backdrop-blur-sm" onClick={onClose} />
 
       {/* Panel */}
-      <div className="relative glass rounded-3xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col animate-scale-in overflow-hidden">
+      <div className="relative glass rounded-3xl shadow-2xl w-full max-w-3xl max-h-[95vh] md:max-h-[90vh] flex flex-col animate-scale-in overflow-hidden">
 
         {/* Header */}
         <div className="px-7 pt-7 pb-5 border-b border-white/30 shrink-0">
@@ -639,7 +644,8 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -809,29 +815,29 @@ export default function Approvals() {
 
         {/* Table */}
         {applications.length > 0 && (
-          <div className="card !p-0 overflow-hidden animate-fade-up">
-            <table className="w-full text-sm text-left">
-              <thead className="border-b border-white/40">
+          <div className="card !p-0 md:overflow-hidden animate-fade-up">
+            <table className="table-base table-responsive">
+              <thead>
                 <tr>
-                  <th className="px-5 py-3.5 text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('approvals_col_app')}</th>
-                  <th className="px-5 py-3.5 text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('approvals_col_step')}</th>
-                  <th className="px-5 py-3.5 text-[11px] font-bold uppercase tracking-widest text-warmgray-400 hidden sm:table-cell">{t('approvals_col_date')}</th>
-                  <th className="px-5 py-3.5 w-8" />
+                  <th>{t('approvals_col_app')}</th>
+                  <th>{t('approvals_col_step')}</th>
+                  <th>{t('approvals_col_date')}</th>
+                  <th className="w-8" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/30">
+              <tbody className="md:divide-y md:divide-white/30">
                 {applications.map((app, i) => (
                   <tr
                     key={app.id}
                     className="cursor-pointer hover:bg-white/50 transition-colors duration-100 group animate-fade-up"
-                    style={{ animationDelay: `${i * 40}ms` }}
+                    style={{ animationDelay: `${Math.min(i, 14) * 30}ms` }}
                     onClick={() => setSelectedApp(app)}
                   >
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-3">
+                    <td data-label={t('approvals_col_app')}>
+                      <div className="flex items-center gap-3 md:justify-start justify-end min-w-0">
                         <UserAvatar name={app.applicant_name ?? '?'} avatarUrl={app.applicant_avatar} size={8} />
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
+                        <div className="min-w-0 md:text-left text-right">
+                          <div className="flex items-center gap-2 md:justify-start justify-end">
                             <p className="text-sm font-semibold text-warmgray-800 truncate">{app.template_name}</p>
                             {app.current_stage === 'SETTLEMENT' && (
                               <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700">{t('approvals_settlement_badge')}</span>
@@ -841,25 +847,27 @@ export default function Approvals() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-1.5">
-                        {Array.from({ length: Number(app.total_steps) }).map((_, i) => {
-                          const n = i + 1;
-                          const cur = Number(app.current_step);
-                          return (
-                            <span key={i} className={`w-2 h-2 rounded-full ${n < cur ? 'bg-emerald-400' : n === cur ? 'bg-ringo-500 ring-2 ring-ringo-200' : 'bg-surface-200'}`} />
-                          );
-                        })}
-                        <span className="text-[10px] text-warmgray-400 ml-1">{app.current_step}/{app.total_steps}</span>
+                    <td data-label={t('approvals_col_step')}>
+                      <div className="md:text-left text-right">
+                        <div className="flex items-center gap-1.5 md:justify-start justify-end">
+                          {Array.from({ length: Number(app.total_steps) }).map((_, idx) => {
+                            const n = idx + 1;
+                            const cur = Number(app.current_step);
+                            return (
+                              <span key={idx} className={`w-2 h-2 rounded-full ${n < cur ? 'bg-emerald-400' : n === cur ? 'bg-ringo-500 ring-2 ring-ringo-200' : 'bg-surface-200'}`} />
+                            );
+                          })}
+                          <span className="text-[10px] text-warmgray-400 ml-1">{app.current_step}/{app.total_steps}</span>
+                        </div>
+                        {app.current_step_label && (
+                          <p className="text-[10px] text-warmgray-400 mt-1 truncate md:max-w-[120px]">{app.current_step_label}</p>
+                        )}
                       </div>
-                      {app.current_step_label && (
-                        <p className="text-[10px] text-warmgray-400 mt-1 truncate max-w-[120px]">{app.current_step_label}</p>
-                      )}
                     </td>
-                    <td className="px-5 py-4 hidden sm:table-cell text-[11px] text-warmgray-400 whitespace-nowrap">
+                    <td data-label={t('approvals_col_date')} className="text-[11px] text-warmgray-400 whitespace-nowrap">
                       {new Date(app.created_at).toLocaleDateString(dateLocale, { month: 'short', day: 'numeric' })}
                     </td>
-                    <td className="px-5 py-4 w-8 text-right">
+                    <td className="w-8 text-right">
                       <svg className="w-4 h-4 text-warmgray-300 group-hover:text-ringo-400 transition-colors inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                       </svg>

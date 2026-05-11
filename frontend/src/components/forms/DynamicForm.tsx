@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch, type Control, type UseFormSetValue } from 'react-hook-form';
 import StandardInput from './StandardInput';
 import { useLang } from '../../context/LanguageContext';
 
@@ -18,6 +18,48 @@ interface Template {
   title_ja: string;
   schema_definition: { fields: FormField[] };
   settlement_schema: { fields: FormField[] };
+}
+
+// ─── Sum watcher (isolated re-renders) ──────────────────────────────────────
+//
+// Why this exists:
+//   Previously DynamicForm called `watch(sumSourceNames)` at the parent level.
+//   react-hook-form's `watch()` makes the calling component re-render on
+//   ANY watched value change, which meant every keystroke in a sum-source
+//   field re-rendered the entire form (all StandardInputs + the layout grid).
+//
+//   `useWatch` from react-hook-form scopes the subscription to ONLY the
+//   component that uses it — so we extract a tiny null-rendering child
+//   that subscribes to just the sum-source fields and writes totals back
+//   via setValue. The parent DynamicForm stays stable; only the
+//   SumWatcher re-renders per keystroke.
+interface SumWatcherProps {
+  control:        Control<Record<string, unknown>>;
+  setValue:       UseFormSetValue<Record<string, unknown>>;
+  sumFieldNames:  string[];
+  targetGroups:   Map<string, number[]>;   // target name → indices into sumFieldNames
+}
+
+function SumWatcher({ control, setValue, sumFieldNames, targetGroups }: SumWatcherProps): null {
+  // Subscribe to just these field values. No parent re-render.
+  const values = useWatch({ control, name: sumFieldNames });
+
+  useEffect(() => {
+    targetGroups.forEach((indices, targetName) => {
+      const total = indices.reduce(
+        (sum, i) => sum + (Number((values as unknown[])[i]) || 0),
+        0,
+      );
+      // shouldDirty/shouldTouch/shouldValidate all false → no extra re-render churn
+      setValue(targetName, total, {
+        shouldDirty:    false,
+        shouldTouch:    false,
+        shouldValidate: false,
+      });
+    });
+  }, [values, targetGroups, setValue]);
+
+  return null;
 }
 
 interface DynamicFormProps {
@@ -42,7 +84,10 @@ export default function DynamicForm({
   const { t } = useLang();
   const [isDrafting, setIsDrafting] = useState(false);
 
-  const { register, handleSubmit, getValues, setValue, watch, formState: { errors, isSubmitting } } = useForm({
+  const {
+    register, handleSubmit, getValues, setValue, watch, control,
+    formState: { errors, isSubmitting },
+  } = useForm<Record<string, unknown>>({
     defaultValues,
     mode: 'onSubmit',
     reValidateMode: 'onSubmit',
@@ -51,38 +96,25 @@ export default function DynamicForm({
   const activeSchema = isSettlementPhase ? template.settlement_schema : template.schema_definition;
   const activeFields: FormField[] = useMemo(() => activeSchema?.fields ?? [], [activeSchema]);
 
-  // Build sum-source field names once per schema change
+  // Build sum-source field names once per schema change. Stable across renders.
   const sumSourceNames = useMemo(
     () => activeFields.filter((f) => f.sum_target).map((f) => f.name),
     [activeFields],
   );
 
-  // Watch ONLY the sum-source fields (not the whole form)
-  const watchedSources = watch(sumSourceNames);
-
-  useEffect(() => {
-    if (sumSourceNames.length === 0) return;
-
-    // Group sources by their declared target
-    const targetMap = new Map<string, number[]>();
+  // Pre-build target → source-index map once per schema change.
+  // Passed to <SumWatcher> as a stable ref so its useEffect dep stays stable.
+  const targetGroups = useMemo(() => {
+    const map = new Map<string, number[]>();
     activeFields
       .filter((f) => f.sum_target)
       .forEach((f, i) => {
         const target = f.sum_target as string;
-        if (!targetMap.has(target)) targetMap.set(target, []);
-        targetMap.get(target)!.push(i);
+        if (!map.has(target)) map.set(target, []);
+        map.get(target)!.push(i);
       });
-
-    targetMap.forEach((indices, targetName) => {
-      const total = indices.reduce(
-        (sum, i) => sum + (Number(watchedSources[i]) || 0),
-        0,
-      );
-      setValue(targetName, total, { shouldDirty: false });
-    });
-  // watchedSources reference changes when values change; stable dep
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchedSources]);
+    return map;
+  }, [activeFields]);
 
   const handleFormSubmit = async (data: Record<string, unknown>) => {
     await onSubmit({
@@ -146,6 +178,16 @@ export default function DynamicForm({
           </div>
         ))}
       </div>
+
+      {/* Sum auto-totaling — isolated re-renders, doesn't re-render parent */}
+      {sumSourceNames.length > 0 && (
+        <SumWatcher
+          control={control}
+          setValue={setValue}
+          sumFieldNames={sumSourceNames}
+          targetGroups={targetGroups}
+        />
+      )}
 
       {/* Footer */}
       <div className="pt-4 border-t border-white/30 flex items-center justify-between">

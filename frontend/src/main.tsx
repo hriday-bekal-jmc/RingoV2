@@ -9,23 +9,33 @@ import { SidebarProvider } from './context/SidebarContext';
 import { SSEProvider } from './providers/SSEProvider';
 import './index.css';
 
+/**
+ * React Query cache strategy:
+ *
+ *   - Default gcTime is 2 minutes — most pages don't need long retention since
+ *     SSEProvider keeps live data fresh. Heavy paginated lists (Admin Apps,
+ *     History infinite queries) override gcTime explicitly to 60s at call
+ *     site to free memory faster. Slow-changing reference data (templates,
+ *     departments, profile) overrides up to 30 min.
+ *
+ *   - staleTime 90s globally — request coalescing for rapid nav. SSE
+ *     invalidation flips data to stale immediately on real change, so the
+ *     90s is purely a guard against ping-pong refetches.
+ */
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // Data stays "fresh" for 90s — avoids redundant network hits on nav
       staleTime: 90_000,
-      // Keep unused cache for 10 min (fast back-nav, no spinner flash)
-      gcTime: 10 * 60 * 1000,
-      // Retry once on network error; don't hammer on 4xx
+      gcTime:    2 * 60 * 1000,   // 2min default — call sites override as needed
       retry: (failCount, error: unknown) => {
         const status = (error as { response?: { status?: number } })?.response?.status;
         if (status && status >= 400 && status < 500) return false;
         return failCount < 1;
       },
-      // SSEProvider handles live updates — window focus refetch is noise
+      // SSEProvider drives invalidation — window focus refetch would be noise
       refetchOnWindowFocus: false,
-      refetchOnReconnect: true,
-      networkMode: 'online',
+      refetchOnReconnect:   true,
+      networkMode:          'online',
     },
     mutations: {
       networkMode: 'online',

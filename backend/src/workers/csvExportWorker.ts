@@ -29,6 +29,8 @@ import {
   CsvExportPayload,
   setCsvExportMeta,
 } from '../services/csvExportQueue';
+import { withTransaction } from '../config/db';
+import { insertOutboxEvent } from '../services/eventOutbox';
 
 // ── Output directory ─────────────────────────────────────────────────────────
 const EXPORTS_DIR = path.join(__dirname, '../../exports');
@@ -185,6 +187,23 @@ async function processCsvExport(job: Job<CsvExportPayload>): Promise<{ filename:
     rowCount,
     finishedAt: Date.now(),
   });
+
+  // Notify requesting user via outbox → SSE.
+  // Outbox publisher worker picks this up + fans out to all API instances.
+  try {
+    await withTransaction(async (client) => {
+      await insertOutboxEvent(client, {
+        event_type:         'CSV_EXPORT_READY',
+        entity_type:        'csv_export',
+        entity_id:          null,
+        recipient_user_ids: [userId],
+        payload:            { jobId, filename, rowCount },
+      });
+    });
+  } catch (err) {
+    // Don't fail the job over a missed event — the user can poll status as fallback
+    console.error('[csv-worker] outbox emit failed for job', jobId, err);
+  }
 
   return { filename, rowCount };
 }

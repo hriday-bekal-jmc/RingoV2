@@ -1,4 +1,5 @@
-import { NavLink, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
 import { useSidebar } from '../../context/SidebarContext';
@@ -63,10 +64,22 @@ const NAV_I18N: Record<string, string> = {
 
 export default function Sidebar() {
   const { user } = useAuth();
-  const { collapsed, toggle } = useSidebar();
+  const { collapsed, toggle, mobileOpen, closeMobile } = useSidebar();
   const { t } = useLang();
   const navigate = useNavigate();
+  const location = useLocation();
   const perms = getPermissions(user?.role);
+
+  // Auto-close mobile drawer when route changes
+  useEffect(() => { closeMobile(); }, [location.pathname, closeMobile]);
+
+  // Lock body scroll while mobile drawer is open
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [mobileOpen]);
 
   // limit=1 — only need the total count (COUNT(*) OVER() window fn), not the rows.
   // Separate key suffix 'badge' avoids conflict with Approvals page's infinite query.
@@ -81,13 +94,30 @@ export default function Sidebar() {
   const initial = user?.full_name?.slice(0, 1) ?? '?';
 
   return (
-    <aside
-      className={`
-        h-screen flex flex-col select-none shrink-0 glass-dark relative overflow-hidden
-        transition-[width] duration-200 ease-in-out
-        ${collapsed ? 'w-[60px]' : 'w-60'}
-      `}
-    >
+    <>
+      {/* Mobile backdrop — only visible when drawer is open on small screens.
+          Click anywhere outside drawer to close. */}
+      {mobileOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-40 bg-warmgray-900/50 backdrop-blur-sm animate-fade-in"
+          onClick={closeMobile}
+        />
+      )}
+
+      <aside
+        className={`
+          flex flex-col select-none glass-dark overflow-hidden
+          /* ─ Desktop (md+): static rail, width toggles via collapsed state */
+          md:relative md:h-screen md:shrink-0 md:transition-[width] md:duration-200 md:ease-in-out
+          ${collapsed ? 'md:w-[60px]' : 'md:w-60'}
+          /* ─ Mobile (<md): fixed drawer that slides in from left */
+          fixed inset-y-0 left-0 z-50 w-64 h-screen
+          transition-transform duration-200 ease-in-out
+          ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
+          md:translate-x-0
+        `}
+      >
+        <div className="relative flex flex-col flex-1 overflow-hidden">
       {/* Decorative blobs */}
       <div className="absolute -top-16 -left-16 w-48 h-48 rounded-full bg-ringo-400/20 blur-3xl pointer-events-none" />
       <div className="absolute bottom-0 -right-8 w-32 h-32 rounded-full bg-mustard-500/10 blur-2xl pointer-events-none" />
@@ -185,10 +215,10 @@ export default function Sidebar() {
           )}
         </NavLink>
 
-        {/* Collapse toggle */}
+        {/* Collapse toggle — desktop only; mobile users tap backdrop to close */}
         <button
           onClick={toggle}
-          className={`w-full flex items-center justify-center gap-2 py-1.5 rounded-xl
+          className={`hidden md:flex w-full items-center justify-center gap-2 py-1.5 rounded-xl
                       text-white/40 hover:text-white/70 hover:bg-white/10
                       transition-all duration-150 text-[11px] font-medium`}
           title={collapsed ? '展開' : '折りたたむ'}
@@ -197,6 +227,8 @@ export default function Sidebar() {
           {!collapsed && <span>折りたたむ</span>}
         </button>
       </div>
-    </aside>
+        </div>
+      </aside>
+    </>
   );
 }

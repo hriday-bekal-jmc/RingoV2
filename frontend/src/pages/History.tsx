@@ -93,6 +93,8 @@ export default function History() {
     initialPageParam: 0,
     getNextPageParam: (last, all) => last.hasMore ? all.length * PAGE : undefined,
     staleTime: 30_000,
+    // Heavy paginated list — free pages quickly when user navigates away
+    gcTime:    60_000,
   });
 
   const applications = data?.pages.flatMap(p => p.items) ?? [];
@@ -251,7 +253,7 @@ export default function History() {
                 return (
                   <li
                     key={app.id}
-                    className="flex items-center gap-4 px-5 py-4 hover:bg-white/40 transition-colors duration-100 animate-fade-up"
+                    className="list-virt flex items-center gap-4 px-5 py-4 hover:bg-white/40 transition-colors duration-100 animate-fade-up"
                     style={{ animationDelay: `${Math.min(idx, 12) * 30}ms` }}
                   >
                     {/* Status dot */}

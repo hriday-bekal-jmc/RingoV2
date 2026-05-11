@@ -145,12 +145,85 @@
   .badge-teal     { @apply badge bg-teal-100/80    text-teal-700   border border-teal-200/80    backdrop-blur-sm; }
 
   /* ── Table ── */
+  /* Desktop: clean table layout. Mobile: tables convert to a card list
+     where each <tr> becomes a stacked card and each <td> shows the column
+     name (via `data-label`) inline with its value. This avoids horizontal
+     scroll entirely and keeps all data visible on small screens.
+
+     Per-page usage:
+       <table class="table-base table-responsive">
+         <thead>...</thead>
+         <tbody>
+           <tr><td data-label="氏名">{name}</td>...</tr>
+         </tbody>
+       </table>
+
+     Tables without table-responsive keep the old layout (rarely useful). */
+  .table-scroll          { @apply w-full overflow-x-auto; }
   .table-base            { @apply w-full text-sm text-left; }
   .table-base thead      { @apply border-b border-white/40; }
-  .table-base thead th   { @apply px-4 py-3.5 text-[11px] font-bold uppercase tracking-widest text-warmgray-400; }
+  .table-base thead th   { @apply px-3 md:px-4 py-3 md:py-3.5 text-[11px] font-bold uppercase tracking-widest text-warmgray-400 whitespace-nowrap; }
   .table-base tbody tr   { @apply border-b border-white/30 hover:bg-white/40 transition-colors duration-100; }
-  .table-base tbody td   { @apply px-4 py-3.5 text-warmgray-800; }
+  .table-base tbody td   { @apply px-3 md:px-4 py-3 md:py-3.5 text-warmgray-800; }
   .table-base tbody tr:last-child { @apply border-b-0; }
+}
+
+/* ── Responsive table → card list on mobile ─────────────────────────────────
+   Outside @layer so utility classes win over Tailwind reset.
+   At <md the table morphs:
+     - thead hidden
+     - each <tr> = its own bordered card with vertical stack
+     - each <td> = "label: value" row with column name on the left */
+@media (max-width: 767.98px) {
+  .table-responsive thead {
+    display: none;
+  }
+  .table-responsive tbody,
+  .table-responsive tr,
+  .table-responsive td {
+    display: block;
+    width: 100%;
+  }
+  .table-responsive tbody tr {
+    border: 1px solid rgb(255 255 255 / 0.4);
+    border-radius: 1rem;          /* ~16px */
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.5rem;
+    background: rgb(255 255 255 / 0.3);
+    backdrop-filter: blur(8px);
+  }
+  .table-responsive tbody td {
+    border: 0;
+    padding: 0.4rem 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    text-align: right;
+  }
+  .table-responsive tbody td::before {
+    content: attr(data-label);
+    text-transform: uppercase;
+    font-size: 0.625rem;          /* 10px */
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: rgb(107 114 128 / 0.7);   /* warmgray-400 */
+    flex-shrink: 0;
+    text-align: left;
+  }
+  /* Cells without a data-label (e.g. action buttons) span full width centered */
+  .table-responsive tbody td:not([data-label]) {
+    justify-content: flex-end;
+    padding-top: 0.5rem;
+    border-top: 1px solid rgb(255 255 255 / 0.3);
+    margin-top: 0.25rem;
+  }
+  .table-responsive tbody td:not([data-label])::before {
+    content: none;
+  }
+}
+
+@layer components {
 
   /* ── Misc ── */
   .divider { @apply border-t border-white/40 my-4; }
@@ -223,3 +296,27 @@
 .stagger > *:nth-child(8)  { animation-delay: 0.40s; }
 .stagger > *:nth-child(9)  { animation-delay: 0.45s; }
 .stagger > *:nth-child(10) { animation-delay: 0.50s; }
+
+/* ─── Long-list virtualization (CSS-native) ────────────────────────────────
+   content-visibility: auto lets the browser skip rendering, layout, and
+   paint for off-screen list items. Combined with contain-intrinsic-size,
+   the browser reserves accurate space so scroll position stays stable
+   without needing a JS virtualizer (react-window etc).
+
+   Use case: paginated/infinite-scroll lists where the user can accumulate
+   hundreds of rows (History, Approvals, Admin Applications).
+
+   Supported: Chrome 85+, Edge 85+, Safari 18+. Firefox: graceful fallback
+   (no-op, list still renders fully but no harm done).
+
+   Apply per-row, not on the container. */
+.list-virt {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 80px;   /* approximate row height — browser uses
+                                       as placeholder until first render */
+}
+/* For taller rows (table rows with multiple data cells) */
+.list-virt-tall {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 64px;
+}

@@ -1,8 +1,16 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 
 interface SidebarContextType {
+  /** Desktop: sidebar collapsed to icon-only rail. Persisted in localStorage. */
   collapsed: boolean;
   toggle: () => void;
+  /**
+   * Mobile (< md breakpoint): drawer is open. Off by default; toggled by the
+   * hamburger button in Header. Auto-closes on route change.
+   */
+  mobileOpen: boolean;
+  openMobile:  () => void;
+  closeMobile: () => void;
 }
 
 const SidebarContext = createContext<SidebarContextType | null>(null);
@@ -13,6 +21,8 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
     return localStorage.getItem(STORAGE_KEY) === 'true';
   });
 
+  const [mobileOpen, setMobileOpen] = useState(false);
+
   const toggle = useCallback(() => {
     setCollapsed((prev) => {
       const next = !prev;
@@ -21,8 +31,11 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const openMobile  = useCallback(() => setMobileOpen(true),  []);
+  const closeMobile = useCallback(() => setMobileOpen(false), []);
+
   return (
-    <SidebarContext.Provider value={{ collapsed, toggle }}>
+    <SidebarContext.Provider value={{ collapsed, toggle, mobileOpen, openMobile, closeMobile }}>
       {children}
     </SidebarContext.Provider>
   );

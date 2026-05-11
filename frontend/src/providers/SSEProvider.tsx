@@ -1,16 +1,21 @@
 /**
- * SSEProvider — single persistent SSE connection for the whole app.
+ * SSEProvider — single persistent SSE connection per browser tab.
  *
- * One EventSource per browser tab, regardless of how many pages are mounted.
- * Invalidates React Query caches on every relevant event so all pages stay
- * live without manual refresh.
+ * Backend now uses outbox + Redis pub/sub + targeted recipients, so each
+ * event we receive is meant for this user. We map the event to a minimal
+ * set of React Query keys and debounce invalidations to coalesce bursts
+ * (e.g. submit → approve in quick succession).
  *
- * Placed inside QueryClientProvider + AuthProvider so it can:
- *   1. Access the QueryClient to call invalidateQueries
- *   2. Only connect when the user is authenticated
+ * Why per-event keys + debounce:
+ *   - Before: every SSE event invalidated 4 broad keys → 4 refetches per event
+ *     even when only one was affected. With multiple events per second, this
+ *     thrashed React Query caches and triggered many overlapping HTTP requests.
+ *   - Now: each event chooses a small set of keys to invalidate, and a 50ms
+ *     debounce batches invalidations across a burst. Result: one refetch per
+ *     burst of related events.
  */
 import { useEffect, useRef } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 
 // In dev: use relative path so Vite proxy handles auth cookies correctly.
@@ -19,18 +24,100 @@ const SSE_URL = import.meta.env.VITE_API_BASE_URL
   ? `${(import.meta.env.VITE_API_BASE_URL as string).replace(/\/api$/, '')}/api/events`
   : '/api/events';
 
-// All query keys that SSE events can affect
-const KEYS = {
-  approvals:    ['pendingApprovals'],
-  myApps:       ['myApplications'],
-  accounting:   ['accountingSettlements'],
-  routePreview: ['route-preview'],
-} as const;
+// ─── Invalidation key map ────────────────────────────────────────────────────
+//
+// Each entry returns the React Query keys that should be marked stale for
+// the given event. Keys are query-key prefixes (TanStack matches deeply).
+// Pick the SMALLEST set that captures real staleness — avoid blanket invalidation.
+//
+// Why no broad `['myApplications']` invalidation:
+//   The dashboard summary endpoint is now its own cached resource. We invalidate
+//   it explicitly rather than the old fanned-out keys.
+type KeyList = Array<readonly unknown[]>;
 
-function invalidateApp(qc: ReturnType<typeof useQueryClient>, applicationId?: string) {
-  if (applicationId) {
-    qc.invalidateQueries({ queryKey: ['application', applicationId] });
+interface SubmitPayload    { applicationId?: string; type?: string }
+interface ApprovalPayload  { applicationId?: string; type?: string; final?: boolean }
+interface SettlementPayload{ applicationId?: string; type?: string }
+interface CsvPayload       { jobId?: string }
+
+function keysForApprovalAction(d: ApprovalPayload): KeyList {
+  const keys: KeyList = [
+    ['dashboard', 'summary'],
+    ['pendingApprovals'],
+    ['approvalHistory'],
+  ];
+  if (d.applicationId) {
+    keys.push(['application', d.applicationId]);
+    keys.push(['route-preview']);
   }
+  // Final approval → applicant's history list might shift (status change)
+  if (d.final) keys.push(['myApplications']);
+  return keys;
+}
+
+function keysForApplicationSubmitted(d: SubmitPayload): KeyList {
+  const keys: KeyList = [
+    ['dashboard', 'summary'],
+    ['myApplications'],
+    ['pendingApprovals'],   // approver's inbox flips
+  ];
+  if (d.applicationId) keys.push(['application', d.applicationId]);
+  // Settlement-stage submits also affect accounting list
+  if (d.type === 'settlement_start' || d.type === 'settlement_resubmit') {
+    keys.push(['accountingSettlements']);
+  }
+  return keys;
+}
+
+function keysForSettlementAction(d: SettlementPayload): KeyList {
+  const keys: KeyList = [
+    ['dashboard', 'summary'],
+    ['accountingSettlements'],
+  ];
+  if (d.applicationId) keys.push(['application', d.applicationId]);
+  return keys;
+}
+
+function keysForCsvReady(_d: CsvPayload): KeyList {
+  // Polling component handles UI; SSE just nudges status query to refetch.
+  return [['csv-export-status']];
+}
+
+// ─── Batched invalidation ────────────────────────────────────────────────────
+//
+// Coalesce all invalidation requests in a 50ms window so a burst of events
+// (e.g. user resubmits then immediately gets approved) triggers one batch
+// of refetches instead of one per event.
+
+const DEBOUNCE_MS = 50;
+
+function createDebouncedInvalidator(queryClient: QueryClient): {
+  enqueue: (keys: KeyList) => void;
+  flush:   () => void;
+} {
+  // Use a Set of stringified keys for dedup; map back to arrays on flush.
+  const pending = new Map<string, readonly unknown[]>();
+  let timer: number | null = null;
+
+  const flush = (): void => {
+    timer = null;
+    if (pending.size === 0) return;
+    const keys = Array.from(pending.values());
+    pending.clear();
+    for (const k of keys) {
+      queryClient.invalidateQueries({ queryKey: k as unknown[] });
+    }
+  };
+
+  const enqueue = (keys: KeyList): void => {
+    for (const k of keys) {
+      pending.set(JSON.stringify(k), k);
+    }
+    if (timer !== null) return;
+    timer = window.setTimeout(flush, DEBOUNCE_MS);
+  };
+
+  return { enqueue, flush };
 }
 
 export function SSEProvider({ children }: { children: React.ReactNode }) {
@@ -40,60 +127,61 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!isAuthenticated) return;
-    // Already connected — skip (StrictMode double-invoke guard)
-    if (esRef.current) return;
+    if (esRef.current) return; // StrictMode double-invoke guard
 
     const es = new EventSource(SSE_URL, { withCredentials: true });
     esRef.current = es;
 
-    // ── Event handlers ──────────────────────────────────────────────────────
+    const debounced = createDebouncedInvalidator(queryClient);
 
-    const onApprovalAction = (e: MessageEvent) => {
-      const data = JSON.parse(e.data ?? '{}') as { applicationId?: string };
-      queryClient.invalidateQueries({ queryKey: KEYS.approvals });
-      queryClient.invalidateQueries({ queryKey: KEYS.myApps });
-      queryClient.invalidateQueries({ queryKey: KEYS.accounting });
-      invalidateApp(queryClient, data.applicationId);
+    // ── Event handlers ───────────────────────────────────────────────────
+    const onApprovalAction = (e: MessageEvent): void => {
+      const data = JSON.parse(e.data ?? '{}') as ApprovalPayload;
+      debounced.enqueue(keysForApprovalAction(data));
     };
-
-    const onAppSubmitted = (e: MessageEvent) => {
-      const data = JSON.parse(e.data ?? '{}') as { applicationId?: string };
-      queryClient.invalidateQueries({ queryKey: KEYS.approvals });
-      queryClient.invalidateQueries({ queryKey: KEYS.myApps });
-      queryClient.invalidateQueries({ queryKey: KEYS.accounting });
-      invalidateApp(queryClient, data.applicationId);
+    const onAppSubmitted = (e: MessageEvent): void => {
+      const data = JSON.parse(e.data ?? '{}') as SubmitPayload;
+      debounced.enqueue(keysForApplicationSubmitted(data));
     };
-
-    const onSettlementAction = (e: MessageEvent) => {
-      const data = JSON.parse(e.data ?? '{}') as { applicationId?: string };
-      queryClient.invalidateQueries({ queryKey: KEYS.accounting });
-      queryClient.invalidateQueries({ queryKey: KEYS.myApps });
-      invalidateApp(queryClient, data.applicationId);
+    const onSettlementAction = (e: MessageEvent): void => {
+      const data = JSON.parse(e.data ?? '{}') as SettlementPayload;
+      debounced.enqueue(keysForSettlementAction(data));
+    };
+    const onCsvReady = (e: MessageEvent): void => {
+      const data = JSON.parse(e.data ?? '{}') as CsvPayload;
+      debounced.enqueue(keysForCsvReady(data));
     };
 
     es.addEventListener('APPROVAL_ACTION',       onApprovalAction);
-    es.addEventListener('APPLICATION_SUBMITTED',  onAppSubmitted);
-    es.addEventListener('SETTLEMENT_ACTION',      onSettlementAction);
+    es.addEventListener('APPLICATION_SUBMITTED', onAppSubmitted);
+    es.addEventListener('SETTLEMENT_ACTION',     onSettlementAction);
+    es.addEventListener('CSV_EXPORT_READY',      onCsvReady);
 
     // ── Admin changed THIS user's profile (role / dept / active / password) ─
-    // Backend emits via emitToUsers([userId], 'user-state-changed', ...).
-    // We re-dispatch as a window CustomEvent so AuthContext can listen
-    // without depending on this SSE plumbing directly. AuthContext re-fetches
-    // /me on receipt → fingerprint check → invalidates all caches if changed.
-    const onUserStateChanged = () => {
+    // Backend emits via outbox → emitToUsers([userId], 'user-state-changed').
+    // Re-dispatch as window CustomEvent so AuthContext can listen without
+    // depending directly on the SSE plumbing.
+    const onUserStateChanged = (): void => {
       window.dispatchEvent(new CustomEvent('ringo:user-state-changed'));
     };
     es.addEventListener('user-state-changed', onUserStateChanged);
 
-    es.onerror = () => {
-      // EventSource auto-reconnects — no manual retry needed.
-      // Log in dev only.
+    // On page hide / tab close, flush any pending invalidations so cached
+    // state stays consistent if the user returns later.
+    const onPageHide = (): void => debounced.flush();
+    window.addEventListener('pagehide', onPageHide);
+
+    es.onerror = (): void => {
+      // EventSource auto-reconnects (Last-Event-ID carries cursor server-side).
       if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
         console.warn('[SSE] connection lost — browser will retry automatically');
       }
     };
 
     return () => {
+      debounced.flush();
+      window.removeEventListener('pagehide', onPageHide);
       es.close();
       esRef.current = null;
     };

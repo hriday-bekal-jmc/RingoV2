@@ -3,7 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { query, withTransaction } from '../config/db';
 import { requireAuth } from '../middlewares/authMiddleware';
-import { emitAll } from './sseRoutes';
+import { insertOutboxEvent } from '../services/eventOutbox';
+import { computeApplicationRecipients } from '../services/eventRecipients';
 import { addCsvExportJob, getCsvExportMeta } from '../services/csvExportQueue';
 import type pg from 'pg';
 import multer from 'multer';
@@ -152,21 +153,33 @@ router.patch('/settlements/:id', async (req: Request, res: Response): Promise<vo
   values.push(req.params.id);
 
   try {
-    const result = await query(
-      `UPDATE settlements
-       SET ${setClauses.join(', ')}
-       WHERE id = $${idx}
-       RETURNING id, application_id, transfer_date, accounting_note, processed_at`,
-      values,
-    );
-    if (result.rows.length === 0) {
-      res.status(404).json({ error: '精算記録が見つかりません' });
-      return;
-    }
-    const row = result.rows[0] as { application_id: string };
-    emitAll('SETTLEMENT_ACTION', { type: 'update', applicationId: row.application_id });
-    res.json({ settlement: result.rows[0] });
+    // Wrap in tx so settlement UPDATE + outbox insert commit atomically.
+    const result = await withTransaction(async (client: pg.PoolClient) => {
+      const r = await client.query(
+        `UPDATE settlements
+         SET ${setClauses.join(', ')}
+         WHERE id = $${idx}
+         RETURNING id, application_id, transfer_date, accounting_note, processed_at`,
+        values,
+      );
+      if (r.rows.length === 0) {
+        throw Object.assign(new Error('精算記録が見つかりません'), { status: 404 });
+      }
+      const row = r.rows[0] as { application_id: string };
+      const recipients = await computeApplicationRecipients(client, row.application_id, { includeAccounting: true });
+      await insertOutboxEvent(client, {
+        event_type:         'SETTLEMENT_ACTION',
+        entity_type:        'application',
+        entity_id:          row.application_id,
+        recipient_user_ids: recipients,
+        payload:            { type: 'update', applicationId: row.application_id },
+      });
+      return r.rows[0];
+    });
+    res.json({ settlement: result });
   } catch (err) {
+    const e = err as { status?: number; message?: string };
+    if (e.status) { res.status(e.status).json({ error: e.message }); return; }
     console.error('[accounting] settlement patch failed:', err);
     res.status(500).json({ error: '精算の更新に失敗しました' });
   }
@@ -185,21 +198,31 @@ router.post(
 
     const fileUrl = `/uploads/${file.filename}`;
     try {
-      const result = await query(
-        `UPDATE settlements
-         SET transfer_proof_url = $1, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2
-         RETURNING id, application_id, transfer_proof_url`,
-        [fileUrl, req.params.id],
-      );
-      if (result.rows.length === 0) {
-        res.status(404).json({ error: '精算記録が見つかりません' });
-        return;
-      }
-      const proofRow = result.rows[0] as { application_id: string };
-      emitAll('SETTLEMENT_ACTION', { type: 'proof_uploaded', applicationId: proofRow.application_id });
+      await withTransaction(async (client: pg.PoolClient) => {
+        const r = await client.query(
+          `UPDATE settlements
+           SET transfer_proof_url = $1, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $2
+           RETURNING id, application_id, transfer_proof_url`,
+          [fileUrl, req.params.id],
+        );
+        if (r.rows.length === 0) {
+          throw Object.assign(new Error('精算記録が見つかりません'), { status: 404 });
+        }
+        const proofRow = r.rows[0] as { application_id: string };
+        const recipients = await computeApplicationRecipients(client, proofRow.application_id, { includeAccounting: true });
+        await insertOutboxEvent(client, {
+          event_type:         'SETTLEMENT_ACTION',
+          entity_type:        'application',
+          entity_id:          proofRow.application_id,
+          recipient_user_ids: recipients,
+          payload:            { type: 'proof_uploaded', applicationId: proofRow.application_id },
+        });
+      });
       res.json({ transfer_proof_url: fileUrl });
     } catch (err) {
+      const e = err as { status?: number; message?: string };
+      if (e.status) { res.status(e.status).json({ error: e.message }); return; }
       console.error('[accounting] transfer-proof upload failed:', err);
       res.status(500).json({ error: '振込証明のアップロードに失敗しました' });
     }
@@ -261,11 +284,17 @@ router.post('/settlements/:id/close', async (req: Request, res: Response): Promi
         [row.application_id, JSON.stringify({ actor: req.user!.id })],
       );
 
+      const recipients = await computeApplicationRecipients(client, row.application_id, { includeAccounting: true });
+      await insertOutboxEvent(client, {
+        event_type:         'APPROVAL_ACTION',
+        entity_type:        'application',
+        entity_id:          row.application_id,
+        recipient_user_ids: recipients,
+        payload:            { type: 'accounting_close', applicationId: row.application_id },
+      });
+
       return { application_id: row.application_id };
     });
-
-    const appId = (result as { application_id: string }).application_id;
-    emitAll('APPROVAL_ACTION', { type: 'accounting_close', applicationId: appId });
     res.json({ message: '精算を完了しました — 申請が完了状態になりました' });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };

@@ -3,7 +3,8 @@ import { query, withTransaction } from '../config/db';
 import { requireAuth } from '../middlewares/authMiddleware';
 import { assertCanActOnStep } from '../middlewares/authz';
 import { mutationLimiter } from '../middlewares/rateLimit';
-import { emitAll } from './sseRoutes';
+import { insertOutboxEvent } from '../services/eventOutbox';
+import { computeApplicationRecipients } from '../services/eventRecipients';
 import type pg from 'pg';
 
 const router = Router();
@@ -173,6 +174,26 @@ router.post('/:id/approve', async (req: Request, res: Response): Promise<void> =
         [id, JSON.stringify({ step: currentStep.step_order, actor: userId, comment: comment ?? null })],
       );
 
+      // Targeted SSE event via outbox — atomic with business change.
+      // include accounting users for settlement-stage transitions so their
+      // dashboards refresh immediately.
+      const isSettlementStage = currentStep.stage === 'SETTLEMENT';
+      const appId = String(id);
+      const recipients = await computeApplicationRecipients(client, appId, {
+        includeAccounting: isSettlementStage,
+      });
+      const isFinalForOutbox =
+        ((updatedApp as { status?: string }).status === 'APPROVED') ||
+        ((updatedApp as { status?: string }).status === 'COMPLETED') ||
+        ((updatedApp as { status?: string }).status === 'SETTLEMENT_APPROVED');
+      await insertOutboxEvent(client, {
+        event_type:         'APPROVAL_ACTION',
+        entity_type:        'application',
+        entity_id:          appId,
+        recipient_user_ids: recipients,
+        payload:            { type: 'approve', applicationId: appId, final: isFinalForOutbox },
+      });
+
       return updatedApp;
     });
 
@@ -181,9 +202,6 @@ router.post('/:id/approve', async (req: Request, res: Response): Promise<void> =
     const isFinal = status === 'APPROVED' || status === 'COMPLETED' || status === 'SETTLEMENT_APPROVED';
     const isSettlementApproved = status === 'SETTLEMENT_APPROVED';
     const isCompleted = status === 'COMPLETED';
-
-    // Push real-time update to all connected clients
-    emitAll('APPROVAL_ACTION', { type: 'approve', applicationId: id, final: isFinal });
 
     res.json({
       message: isSettlementApproved
@@ -247,8 +265,18 @@ router.post('/:id/return', async (req: Request, res: Response): Promise<void> =>
          VALUES ('APPROVAL_RETURN', 'application', $1, $2::jsonb)`,
         [id, JSON.stringify({ actor: userId, comment: comment ?? null })],
       );
+
+      const recipients = await computeApplicationRecipients(client, String(id), {
+        includeAccounting: pendingStage === 'SETTLEMENT',
+      });
+      await insertOutboxEvent(client, {
+        event_type:         'APPROVAL_ACTION',
+        entity_type:        'application',
+        entity_id:          String(id),
+        recipient_user_ids: recipients,
+        payload:            { type: 'return', applicationId: id },
+      });
     });
-    emitAll('APPROVAL_ACTION', { type: 'return', applicationId: id });
     res.json({ message: '差し戻しました' });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
@@ -288,8 +316,18 @@ router.post('/:id/reject', async (req: Request, res: Response): Promise<void> =>
          VALUES ('APPROVAL_REJECT', 'application', $1, $2::jsonb)`,
         [id, JSON.stringify({ actor: userId, comment: comment ?? null })],
       );
+
+      const recipients = await computeApplicationRecipients(client, String(id), {
+        includeAccounting: currentStep.stage === 'SETTLEMENT',
+      });
+      await insertOutboxEvent(client, {
+        event_type:         'APPROVAL_ACTION',
+        entity_type:        'application',
+        entity_id:          String(id),
+        recipient_user_ids: recipients,
+        payload:            { type: 'reject', applicationId: id },
+      });
     });
-    emitAll('APPROVAL_ACTION', { type: 'reject', applicationId: id });
     res.json({ message: '却下しました' });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };

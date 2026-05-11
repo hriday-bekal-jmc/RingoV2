@@ -5,6 +5,10 @@ export default defineConfig({
   plugins: [react()],
 
   server: {
+    // host: true exposes dev server on LAN (0.0.0.0) so phones on the same
+    // WiFi can hit http://<laptop-lan-ip>:5173. localhost-only by default
+    // means phones can't reach the dev server.
+    host: true,
     port: 5173,
     proxy: {
       '/api': { target: 'http://localhost:3000', changeOrigin: true },

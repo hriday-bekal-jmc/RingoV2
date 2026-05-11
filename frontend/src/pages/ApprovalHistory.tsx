@@ -489,8 +489,8 @@ export default function ApprovalHistory() {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="table-base">
+            <div className="md:overflow-x-auto">
+              <table className="table-base table-responsive">
                 <thead>
                   <tr>
                     <th>{lang === 'en' ? 'Application' : '申請'}</th>
@@ -514,27 +514,23 @@ export default function ApprovalHistory() {
                         style={{ animationDelay: `${i * 20}ms` }}
                         onClick={() => setSelectedId(item.application_id)}
                       >
-                        {/* Application */}
-                        <td>
-                          <div className="font-semibold text-warmgray-800 text-sm">{item.template_name}</div>
-                          <div className="font-mono text-xs text-warmgray-400">{item.application_number ?? '—'}</div>
+                        <td data-label={lang === 'en' ? 'Application' : '申請'}>
+                          <div className="font-semibold text-warmgray-800 text-sm md:text-left text-right">{item.template_name}</div>
+                          <div className="font-mono text-xs text-warmgray-400 md:text-left text-right">{item.application_number ?? '—'}</div>
                         </td>
 
-                        {/* Applicant */}
-                        <td>
-                          <div className="flex items-center gap-2">
+                        <td data-label={lang === 'en' ? 'Applicant' : '申請者'}>
+                          <div className="flex items-center gap-2 md:justify-start justify-end">
                             <UserAvatar name={item.applicant_name ?? '?'} avatarUrl={item.applicant_avatar} size={7} />
                             <span className="text-sm text-warmgray-700">{item.applicant_name ?? '—'}</span>
                           </div>
                         </td>
 
-                        {/* Step */}
-                        <td>
+                        <td data-label={lang === 'en' ? 'Step' : 'ステップ'}>
                           <span className="text-sm text-warmgray-600">{item.step_label}</span>
                         </td>
 
-                        {/* Stage badge */}
-                        <td>
+                        <td data-label={lang === 'en' ? 'Stage' : 'ステージ'}>
                           {item.stage === 'SETTLEMENT' ? (
                             <span className="badge-teal">{lang === 'en' ? 'Settlement' : '精算'}</span>
                           ) : (
@@ -542,36 +538,36 @@ export default function ApprovalHistory() {
                           )}
                         </td>
 
-                        {/* Action */}
-                        <td>
-                          <span className={act.badge}>
-                            {act.icon} {lang === 'en' ? act.label_en : act.label_ja}
-                          </span>
-                          {item.comment && (
-                            <div className="text-[11px] text-warmgray-400 mt-0.5 max-w-[180px] truncate" title={item.comment}>
-                              "{item.comment}"
-                            </div>
-                          )}
+                        <td data-label={lang === 'en' ? 'Action' : 'アクション'}>
+                          <div className="md:text-left text-right">
+                            <span className={act.badge}>
+                              {act.icon} {lang === 'en' ? act.label_en : act.label_ja}
+                            </span>
+                            {item.comment && (
+                              <div className="text-[11px] text-warmgray-400 mt-0.5 md:max-w-[180px] truncate" title={item.comment}>
+                                "{item.comment}"
+                              </div>
+                            )}
+                          </div>
                         </td>
 
-                        {/* App status */}
-                        <td>
+                        <td data-label={lang === 'en' ? 'App Status' : '申請状態'}>
                           <span className={APP_STATUS_BADGE[item.app_status] ?? 'badge-draft'}>
                             {lang === 'en' ? (appSt?.en ?? item.app_status) : (appSt?.ja ?? item.app_status)}
                           </span>
                         </td>
 
-                        {/* Date */}
-                        <td>
-                          <span className="text-xs text-warmgray-500 tabular-nums whitespace-nowrap">
-                            {new Date(item.acted_at).toLocaleDateString(dateLocale)}
-                          </span>
-                          <div className="text-[11px] text-warmgray-400 tabular-nums">
-                            {new Date(item.acted_at).toLocaleTimeString(dateLocale, { hour: '2-digit', minute: '2-digit' })}
+                        <td data-label={lang === 'en' ? 'Date' : '日時'}>
+                          <div className="md:text-left text-right">
+                            <span className="text-xs text-warmgray-500 tabular-nums whitespace-nowrap">
+                              {new Date(item.acted_at).toLocaleDateString(dateLocale)}
+                            </span>
+                            <div className="text-[11px] text-warmgray-400 tabular-nums">
+                              {new Date(item.acted_at).toLocaleTimeString(dateLocale, { hour: '2-digit', minute: '2-digit' })}
+                            </div>
                           </div>
                         </td>
 
-                        {/* Detail button */}
                         <td onClick={(e) => e.stopPropagation()}>
                           <button
                             className="btn-ghost btn-sm text-ringo-500 hover:text-ringo-600 whitespace-nowrap"

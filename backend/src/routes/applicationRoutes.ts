@@ -4,7 +4,8 @@ import { requireAuth } from '../middlewares/authMiddleware';
 import { assertCanReadApp, assertValidRouteForTemplate } from '../middlewares/authz';
 import { mutationLimiter } from '../middlewares/rateLimit';
 import { resolveApprovalSteps } from '../services/approvalStepService';
-import { emitAll } from './sseRoutes';
+import { insertOutboxEvent } from '../services/eventOutbox';
+import { computeApplicationRecipients } from '../services/eventRecipients';
 import type pg from 'pg';
 
 const router = Router();
@@ -212,10 +213,19 @@ router.post('/:id/resubmit', async (req: Request, res: Response): Promise<void> 
         [req.params.id, JSON.stringify({ route_id, offset, steps: resolvedSteps.length })],
       );
 
+      const appId = String(req.params.id);
+      const recipients = await computeApplicationRecipients(client, appId);
+      await insertOutboxEvent(client, {
+        event_type:         'APPLICATION_SUBMITTED',
+        entity_type:        'application',
+        entity_id:          appId,
+        recipient_user_ids: recipients,
+        payload:            { type: 'resubmit', applicationId: appId },
+      });
+
       return { id: req.params.id, status: 'PENDING_APPROVAL', round_offset: offset };
     });
 
-    emitAll('APPLICATION_SUBMITTED', { type: 'resubmit', applicationId: req.params.id });
     res.json({ message: '再提出しました', application: result });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
@@ -286,9 +296,19 @@ router.post('/:id/submit', async (req: Request, res: Response): Promise<void> =>
         `INSERT INTO audit_logs (action, entity_type, entity_id) VALUES ('DRAFT_SUBMIT', 'application', $1)`,
         [req.params.id],
       );
+
+      const appId = String(req.params.id);
+      const recipients = await computeApplicationRecipients(client, appId);
+      await insertOutboxEvent(client, {
+        event_type:         'APPLICATION_SUBMITTED',
+        entity_type:        'application',
+        entity_id:          appId,
+        recipient_user_ids: recipients,
+        payload:            { type: 'submit', applicationId: appId },
+      });
+
       return { id: req.params.id, status: 'PENDING_APPROVAL', total_steps: resolvedSubmitSteps.length };
     });
-    emitAll('APPLICATION_SUBMITTED', { type: 'submit', applicationId: req.params.id });
     res.json({ message: '申請を提出しました', application: result });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
@@ -405,10 +425,19 @@ router.post('/:id/start-settlement', async (req: Request, res: Response): Promis
         [req.params.id],
       );
 
+      const appId = String(req.params.id);
+      const recipients = await computeApplicationRecipients(client, appId, { includeAccounting: true });
+      await insertOutboxEvent(client, {
+        event_type:         'APPLICATION_SUBMITTED',
+        entity_type:        'application',
+        entity_id:          appId,
+        recipient_user_ids: recipients,
+        payload:            { type: 'settlement_start', applicationId: appId },
+      });
+
       return { id: req.params.id, status: 'PENDING_SETTLEMENT', total_settlement_steps: resolvedSteps.length };
     });
 
-    emitAll('APPLICATION_SUBMITTED', { type: 'settlement_start', applicationId: req.params.id });
     res.json({ message: '精算申請を提出しました', application: result });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
@@ -531,10 +560,19 @@ router.post('/:id/resubmit-settlement', async (req: Request, res: Response): Pro
         [req.params.id],
       );
 
+      const appId = String(req.params.id);
+      const recipients = await computeApplicationRecipients(client, appId, { includeAccounting: true });
+      await insertOutboxEvent(client, {
+        event_type:         'APPLICATION_SUBMITTED',
+        entity_type:        'application',
+        entity_id:          appId,
+        recipient_user_ids: recipients,
+        payload:            { type: 'settlement_resubmit', applicationId: appId },
+      });
+
       return { id: req.params.id, status: 'PENDING_SETTLEMENT' };
     });
 
-    emitAll('APPLICATION_SUBMITTED', { type: 'settlement_resubmit', applicationId: req.params.id });
     res.json({ message: '精算を再提出しました', application: result });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };

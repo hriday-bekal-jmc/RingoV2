@@ -3,7 +3,7 @@ import argon2 from 'argon2';
 import { query, withTransaction } from '../config/db';
 import { requireAuth, requireRole, invalidateUserStateCache } from '../middlewares/authMiddleware';
 import { mutationLimiter } from '../middlewares/rateLimit';
-import { emitToUsers } from './sseRoutes';
+import { insertOutboxEvent } from '../services/eventOutbox';
 import type pg from 'pg';
 
 const router = Router();
@@ -104,9 +104,17 @@ router.patch('/users/:id', async (req: Request, res: Response): Promise<void> =>
     await query(q, params);
     if (bumpTokenVersion) {
       await invalidateUserStateCache(String(id));
-      // Push event to the affected user's SSE channel — replaces 60s /me poll.
+      // Push event to the affected user's SSE channel via outbox — replaces 60s /me poll.
       // Frontend AuthContext listens and re-fetches /me on receipt.
-      emitToUsers([String(id)], 'user-state-changed', { reason: 'profile-updated' });
+      await withTransaction(async (client) => {
+        await insertOutboxEvent(client, {
+          event_type:         'user-state-changed',
+          entity_type:        'user',
+          entity_id:          String(id),
+          recipient_user_ids: [String(id)],
+          payload:            { reason: 'profile-updated' },
+        });
+      });
     }
     res.json({ message: 'ユーザーを更新しました' });
   } catch (err: unknown) {
@@ -142,7 +150,15 @@ router.delete('/users/:id', async (req: Request, res: Response): Promise<void> =
     }
     await invalidateUserStateCache(String(req.params.id));
     // Push event so user's frontend immediately re-checks auth → 401 → redirect to login
-    emitToUsers([String(req.params.id)], 'user-state-changed', { reason: 'deactivated' });
+    await withTransaction(async (client) => {
+      await insertOutboxEvent(client, {
+        event_type:         'user-state-changed',
+        entity_type:        'user',
+        entity_id:          String(req.params.id),
+        recipient_user_ids: [String(req.params.id)],
+        payload:            { reason: 'deactivated' },
+      });
+    });
     res.json({ message: 'ユーザーを削除/無効化しました' });
   } catch (err) {
     console.error('[admin] user delete failed:', err);
@@ -304,6 +320,111 @@ router.get('/applications', async (req: Request, res: Response): Promise<void> =
   } catch (err) {
     console.error('[admin] applications list failed:', err);
     res.status(500).json({ error: '申請一覧の取得に失敗しました' });
+  }
+});
+
+// GET /admin/applications/:id — full admin-only view of one application
+//
+// Returns everything admin needs to diagnose/audit an application:
+//   - application meta + form data (RINGI + SETTLEMENT)
+//   - applicant + department + template
+//   - all approval steps (including CANCELLED + SKIPPED, which the regular
+//     /applications/:id endpoint hides from end users)
+//   - settlement row + transfer details
+//   - uploaded files
+//   - audit log entries for this application (chronological)
+//   - internal flags: version, route_id, raw timestamps
+router.get('/applications/:id', async (req: Request, res: Response): Promise<void> => {
+  const id = String(req.params.id);
+  try {
+    const [appRes, stepsRes, filesRes, auditRes, settleRes] = await Promise.all([
+      // Core app + joined refs
+      query(
+        `SELECT
+           a.id, a.application_number, a.status, a.version,
+           a.form_data, a.settlement_data,
+           a.template_id, a.route_id, a.applicant_id,
+           a.created_at, a.submitted_at, a.settlement_submitted_at, a.completed_at, a.updated_at,
+           t.code AS template_code, t.title_ja AS template_name,
+           t.schema_definition, t.settlement_schema,
+           t.settlement_schema IS NOT NULL AS has_settlement,
+           u.full_name AS applicant_name, u.email AS applicant_email, u.avatar_url AS applicant_avatar,
+           d.name AS department_name, d.id AS department_id
+         FROM applications a
+         JOIN form_templates t ON t.id = a.template_id
+         LEFT JOIN users u ON u.id = a.applicant_id
+         LEFT JOIN departments d ON d.id = u.department_id
+         WHERE a.id = $1`,
+        [id],
+      ),
+
+      // ALL steps (incl CANCELLED/SKIPPED) for full audit view
+      query(
+        `SELECT
+           s.id, s.step_order, s.stage, s.label, s.action_type, s.status,
+           s.comment, s.acted_at, s.acted_by, s.created_at,
+           u.full_name AS approver_name, u.email AS approver_email, u.avatar_url AS approver_avatar,
+           act.full_name AS acted_by_name
+         FROM approval_steps s
+         LEFT JOIN users u   ON u.id   = s.approver_id
+         LEFT JOIN users act ON act.id = s.acted_by
+         WHERE s.application_id = $1
+         ORDER BY s.stage ASC NULLS FIRST, s.step_order ASC`,
+        [id],
+      ),
+
+      // Uploaded files
+      query(
+        `SELECT id, field_name, original_name, file_size, mime_type, drive_url, created_at,
+                uploader_id, stored_path
+         FROM uploaded_files
+         WHERE application_id = $1
+         ORDER BY created_at ASC`,
+        [id],
+      ),
+
+      // Audit log (limit to recent 100 for this app).
+      // Filter by entity_type too — cleaner index use + safer if other
+      // entities ever share UUIDs (cross-table joins via audit).
+      query(
+        `SELECT id, action, entity_type, entity_id, metadata, created_at
+         FROM audit_logs
+         WHERE entity_type = 'application' AND entity_id = $1
+         ORDER BY created_at DESC
+         LIMIT 100`,
+        [id],
+      ),
+
+      // Settlement row if present
+      query(
+        `SELECT s.id, s.expected_amount, s.actual_amount, s.status,
+                s.transfer_date, s.transfer_proof_url, s.accounting_note,
+                s.processed_at, s.processed_by, s.settlement_data,
+                s.created_at, s.updated_at,
+                proc.full_name AS processed_by_name
+         FROM settlements s
+         LEFT JOIN users proc ON proc.id = s.processed_by
+         WHERE s.application_id = $1
+         LIMIT 1`,
+        [id],
+      ),
+    ]);
+
+    if (appRes.rows.length === 0) {
+      res.status(404).json({ error: '申請が見つかりません' });
+      return;
+    }
+
+    res.json({
+      application: appRes.rows[0],
+      steps:       stepsRes.rows,
+      files:       filesRes.rows,
+      audit_logs:  auditRes.rows,
+      settlement:  settleRes.rows[0] ?? null,
+    });
+  } catch (err) {
+    console.error('[admin] application detail failed:', err);
+    res.status(500).json({ error: '申請詳細の取得に失敗しました' });
   }
 });
 

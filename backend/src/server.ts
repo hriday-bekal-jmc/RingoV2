@@ -23,6 +23,7 @@ import uploadRoutes from './routes/uploadRoutes';
 import fileRoutes from './routes/fileRoutes';
 import sseRoutes from './routes/sseRoutes';
 import accountingRoutes from './routes/accountingRoutes';
+import dashboardRoutes from './routes/dashboardRoutes';
 
 const app: Application = express();
 const PORT = env.PORT;
@@ -81,6 +82,7 @@ app.use('/api/uploads',      uploadRoutes);
 app.use('/api/files',        fileRoutes);
 app.use('/api/events',       sseRoutes);
 app.use('/api/accounting',   accountingRoutes);
+app.use('/api/dashboard',    dashboardRoutes);
 
 app.use(errorHandler);
 

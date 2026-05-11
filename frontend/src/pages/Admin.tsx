@@ -1,4 +1,5 @@
 ﻿import { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useScrollEnd } from '../hooks/useScrollEnd';
 import { useScrollLock } from '../hooks/useScrollLock';
@@ -6,6 +7,7 @@ import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import { ROLE_MAP, Role } from '../config/permissions';
 import InlineConfirm from '../components/common/InlineConfirm';
+import AdminAppDetailModal from '../components/admin/AdminAppDetailModal';
 import Toast, { useToast } from '../components/common/Toast';
 import CustomSelect from '../components/forms/CustomSelect';
 import { useLang } from '../context/LanguageContext';
@@ -134,9 +136,13 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
     onSave(payload);
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-warmgray-900/50 backdrop-blur-sm px-4">
-      <div className="glass rounded-3xl w-full max-w-lg p-8 space-y-5 shadow-2xl animate-scale-in">
+  // Portal to document.body so the modal escapes any parent's stacking/
+  // containing-block context (.glass uses backdrop-filter which would
+  // otherwise make `fixed inset-0` resolve against the nearest glass parent
+  // instead of the viewport — causing offset placement + no proper scroll).
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-warmgray-900/50 backdrop-blur-sm px-3 md:px-4 overflow-y-auto py-6">
+      <div className="glass rounded-3xl w-full max-w-lg p-5 md:p-8 space-y-5 shadow-2xl animate-scale-in my-auto">
         <div className="flex items-center gap-3">
           {!isNew && <UserAvatar name={form.full_name || '?'} avatarUrl={user?.avatar_url} size={10} />}
           <div>
@@ -204,7 +210,8 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -295,17 +302,17 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
         />
       )}
 
-      {/* Filters */}
+      {/* Filters — full-width on mobile, inline on tablet+ */}
       <div className="space-y-3 mb-5">
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex flex-wrap items-center gap-2 md:gap-3">
           <input
-            className="input max-w-xs"
+            className="input w-full sm:w-auto sm:max-w-xs"
             placeholder="氏名 / メール / ロールで検索..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
           <CustomSelect
-            className="w-40"
+            className="w-full sm:w-40"
             options={[
               { value: '', label: t('admin_filter_all_dept') },
               ...departments.map((d) => ({ value: d.id, label: d.name })),
@@ -314,7 +321,7 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
             onChange={setDeptFilter}
           />
           <CustomSelect
-            className="w-36"
+            className="w-full sm:w-36"
             options={[
               { value: '', label: t('admin_filter_all_role') },
               ...ROLES.filter((r) => r !== 'ACCOUNTING').map((r) => ({ value: r, label: r })),
@@ -322,20 +329,20 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
             value={roleFilter}
             onChange={setRoleFilter}
           />
-          <div className="flex rounded-xl overflow-hidden border border-white/70">
+          <div className="flex rounded-xl overflow-hidden border border-white/70 w-full sm:w-auto">
             {(['all', 'active', 'inactive'] as const).map((v) => (
               <button
                 key={v}
                 onClick={() => setActiveFilter(v)}
-                className={`px-3 py-1.5 text-xs font-semibold transition-colors ${activeFilter === v ? 'bg-warmgray-800 text-white' : 'bg-white/60 text-warmgray-500 hover:bg-white/90'}`}
+                className={`flex-1 sm:flex-initial px-3 py-1.5 text-xs font-semibold transition-colors ${activeFilter === v ? 'bg-warmgray-800 text-white' : 'bg-white/60 text-warmgray-500 hover:bg-white/90'}`}
               >
                 {v === 'all' ? t('admin_filter_all_people') : v === 'active' ? t('admin_filter_active') : t('admin_filter_inactive')}
               </button>
             ))}
           </div>
           <span className="text-sm text-warmgray-400">{filtered.length} {t('admin_users_count')}</span>
-          <div className="flex-1" />
-          <button className="btn-primary" onClick={() => setEditUser('new')}>
+          <div className="flex-1 hidden sm:block" />
+          <button className="btn-primary w-full sm:w-auto" onClick={() => setEditUser('new')}>
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
             </svg>
@@ -347,8 +354,8 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
       {isLoading ? (
         <div className="text-warmgray-400 text-sm py-8 text-center">読み込み中...</div>
       ) : (
-        <div className="card !p-0 overflow-hidden">
-          <table className="table-base">
+        <div className="card !p-0 md:overflow-hidden">
+          <table className="table-base table-responsive">
             <thead>
               <tr>
                 <th>{t('admin_col_user')}</th>
@@ -365,18 +372,18 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
                   className="animate-fade-up"
                   style={{ animationDelay: `${Math.min(i, 14) * 35}ms` }}
                 >
-                  <td>
-                    <div className="flex items-center gap-3">
+                  <td data-label={t('admin_col_user')}>
+                    <div className="flex items-center gap-3 min-w-0">
                       <UserAvatar name={u.full_name} avatarUrl={u.avatar_url} />
-                      <div>
-                        <p className="font-semibold text-warmgray-800">{u.full_name}</p>
-                        <p className="text-[11px] text-warmgray-400">{u.email}</p>
+                      <div className="min-w-0">
+                        <p className="font-semibold text-warmgray-800 truncate">{u.full_name}</p>
+                        <p className="text-[11px] text-warmgray-400 truncate">{u.email}</p>
                       </div>
                     </div>
                   </td>
-                  <td><RoleBadge role={u.role} /></td>
-                  <td className="text-warmgray-500 text-xs">{u.department_name ?? '—'}</td>
-                  <td>
+                  <td data-label={t('admin_field_role')}><RoleBadge role={u.role} /></td>
+                  <td data-label={t('admin_field_dept')} className="text-warmgray-500 text-xs">{u.department_name ?? '—'}</td>
+                  <td data-label={t('admin_col_status')}>
                     <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${
                       u.is_active
                         ? 'bg-emerald-100/80 text-emerald-700 border border-emerald-200/80'
@@ -387,7 +394,7 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
                     </span>
                   </td>
                   <td>
-                    <div className="flex items-center gap-3 justify-end">
+                    <div className="flex items-center gap-3 justify-end flex-wrap">
                       <button
                         className="text-xs font-semibold text-ringo-500 hover:text-ringo-700 transition-colors"
                         onClick={() => setEditUser(u)}
@@ -575,8 +582,12 @@ function ApproverPicker({ users, departments, value, onChange }: ApproverPickerP
 // ─── Routes Tab ───────────────────────────────────────────────────────────────
 
 function ChainArrow() {
+  // Rotate 90° on mobile so the chain reads top-down. On md+ stays horizontal.
   return (
-    <svg className="w-4 h-4 text-warmgray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+    <svg
+      className="w-4 h-4 text-warmgray-300 shrink-0 rotate-90 md:rotate-0"
+      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+    >
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
     </svg>
   );
@@ -667,9 +678,9 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
       {/* No modal dialogs — delete confirmations are inline on the row itself */}
 
       {/* Route filters */}
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex flex-wrap items-center gap-2 md:gap-3">
         <CustomSelect
-          className="w-40"
+          className="w-full sm:w-40"
           options={[
             { value: '', label: t('admin_filter_all_dept') },
             ...departments.map((d) => ({ value: d.id, label: d.name })),
@@ -678,7 +689,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
           onChange={setRouteDeptFilter}
         />
         <CustomSelect
-          className="w-44"
+          className="w-full sm:w-44"
           options={[
             { value: '', label: t('admin_filter_all_form') },
             ...templates.map((tmpl) => ({ value: tmpl.id, label: tmpl.title_ja })),
@@ -686,21 +697,21 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
           value={routeTemplateFilter}
           onChange={setRouteTemplateFilter}
         />
-        <div className="flex rounded-xl overflow-hidden border border-white/70">
+        <div className="flex rounded-xl overflow-hidden border border-white/70 w-full sm:w-auto">
           {([
             { v: '', label: t('admin_stage_all') },
             { v: 'RINGI', label: t('admin_stage_ringi') },
             { v: 'SETTLEMENT', label: t('admin_stage_settle') },
           ]).map(({ v, label }) => (
             <button key={v} onClick={() => setRouteStageFilter(v)}
-              className={`px-3 py-1.5 text-xs font-semibold transition-colors ${routeStageFilter === v ? 'bg-warmgray-800 text-white' : 'bg-white/60 text-warmgray-500 hover:bg-white/90'}`}>
+              className={`flex-1 sm:flex-initial px-3 py-1.5 text-xs font-semibold transition-colors ${routeStageFilter === v ? 'bg-warmgray-800 text-white' : 'bg-white/60 text-warmgray-500 hover:bg-white/90'}`}>
               {label}
             </button>
           ))}
         </div>
         <span className="text-sm text-warmgray-400">{filteredRoutes.length} {t('admin_routes_count')}</span>
-        <div className="flex-1" />
-        <button className="btn-primary" onClick={() => setShowNewRoute(true)}>
+        <div className="flex-1 hidden sm:block" />
+        <button className="btn-primary w-full sm:w-auto" onClick={() => setShowNewRoute(true)}>
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
           </svg>
@@ -800,9 +811,9 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
             />
           </div>
 
-          {/* Visual chain with avatars */}
+          {/* Visual chain with avatars — vertical on mobile, horizontal on md+ */}
           <div className="bg-surface-50/60 rounded-2xl p-4">
-            <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex flex-col items-center md:flex-row md:items-center gap-3 md:flex-wrap">
               {/* Applicant node */}
               <div className="flex flex-col items-center gap-1.5">
                 <div className="w-10 h-10 rounded-full bg-surface-200 border-2 border-surface-300 flex items-center justify-center text-sm font-bold text-warmgray-600">申</div>
@@ -813,7 +824,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
                 <p className="text-xs text-warmgray-400 italic ml-2">{t('admin_no_steps')}</p>
               ) : (
                 route.steps.map((step) => (
-                  <div key={step.id} className="flex items-center gap-3">
+                  <div key={step.id} className="flex flex-col items-center md:flex-row gap-3">
                     <ChainArrow />
                     <div className="flex flex-col items-center gap-1 group/step relative">
                       {/* Avatar or step number */}
@@ -844,7 +855,9 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
                             </button>
                           ) : (
                             <button
-                              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] items-center justify-center hidden group-hover/step:flex shadow-sm"
+                              /* Always-visible on touch (md:hidden+md:group-hover trick) so phones can tap it.
+                                 Desktop hides until step avatar hovered. */
+                              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center md:hidden md:group-hover/step:flex shadow-sm"
                               onClick={() => setConfirmingStepId(step.id)}
                               title="削除"
                             >
@@ -865,7 +878,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
               )}
 
               {/* End node */}
-              <div className="flex items-center gap-3">
+              <div className="flex flex-col items-center md:flex-row gap-3">
                 <ChainArrow />
                 <div className="flex flex-col items-center gap-1.5">
                   <div className="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center text-white text-sm shadow-sm">✓</div>
@@ -987,6 +1000,8 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
   const [deptFilter, setDeptFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  // Clicked-row → opens AdminAppDetailModal with full audit + flow
+  const [openAppId, setOpenAppId] = useState<string | null>(null);
 
   // Debounce search — 300ms
   useEffect(() => {
@@ -1008,6 +1023,8 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
     initialPageParam: 0,
     getNextPageParam: (last, all) => last.hasMore ? all.length * PAGE_APPS : undefined,
     staleTime: 30_000,
+    // Drop cached pages quickly when admin leaves the tab — large objects
+    gcTime:    60_000,
   });
 
   const apps = data?.pages.flatMap(p => p.items) ?? [];
@@ -1046,16 +1063,21 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
 
   return (
     <div className="space-y-5">
-      {/* Filters */}
-      <div className="flex items-center gap-3 flex-wrap">
+      {/* Admin detail modal — rendered via portal, shows full app data */}
+      {openAppId && (
+        <AdminAppDetailModal appId={openAppId} onClose={() => setOpenAppId(null)} />
+      )}
+
+      {/* Filters — full-width on mobile */}
+      <div className="flex flex-wrap items-center gap-2 md:gap-3">
         <input
-          className="input max-w-xs"
+          className="input w-full sm:w-auto sm:max-w-xs"
           placeholder={t('admin_apps_search_ph')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
         <CustomSelect
-          className="w-40"
+          className="w-full sm:w-40"
           options={[
             { value: '', label: t('admin_filter_all_dept') },
             ...departments.map((d) => ({ value: d.name, label: d.name })),
@@ -1064,7 +1086,7 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
           onChange={setDeptFilter}
         />
         <CustomSelect
-          className="w-36"
+          className="w-full sm:w-36"
           options={[
             { value: '', label: t('admin_filter_all_status') },
             ...Object.entries(statusLabels).map(([k, v]) => ({ value: k, label: v })),
@@ -1088,8 +1110,8 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
       {isLoading ? (
         <div className="text-warmgray-400 text-sm py-8 text-center">読み込み中...</div>
       ) : (
-        <div className="card !p-0 overflow-hidden">
-          <table className="table-base">
+        <div className="card !p-0 md:overflow-hidden">
+          <table className="table-base table-responsive">
             <thead>
               <tr>
                 <th>{t('admin_col_app_number')}</th>
@@ -1105,25 +1127,26 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
               {apps.map((a, i) => (
                 <tr
                   key={a.id}
-                  className="animate-fade-up"
+                  className="animate-fade-up cursor-pointer hover:bg-white/40 transition-colors"
                   style={{ animationDelay: `${Math.min(i, 14) * 35}ms` }}
+                  onClick={() => setOpenAppId(a.id)}
                 >
-                  <td><span className="font-mono text-[11px] text-warmgray-500">{a.application_number ?? '—'}</span></td>
-                  <td className="font-semibold text-warmgray-800">{a.template_name}</td>
-                  <td>
-                    <div>
-                      <p className="text-sm font-medium text-warmgray-800">{a.applicant_name}</p>
-                      <p className="text-[10px] text-warmgray-400">{a.applicant_email}</p>
+                  <td data-label={t('admin_col_app_number')}><span className="font-mono text-[11px] text-warmgray-500">{a.application_number ?? '—'}</span></td>
+                  <td data-label={t('admin_field_template')} className="font-semibold text-warmgray-800">{a.template_name}</td>
+                  <td data-label={t('admin_step_approver')}>
+                    <div className="min-w-0 text-right md:text-left">
+                      <p className="text-sm font-medium text-warmgray-800 truncate">{a.applicant_name}</p>
+                      <p className="text-[10px] text-warmgray-400 truncate">{a.applicant_email}</p>
                     </div>
                   </td>
-                  <td className="text-warmgray-500 text-xs">{a.department_name ?? '—'}</td>
-                  <td>
+                  <td data-label={t('admin_field_dept')} className="text-warmgray-500 text-xs">{a.department_name ?? '—'}</td>
+                  <td data-label={t('admin_col_status')}>
                     <span className={STATUS_BADGE[a.status] ?? 'badge-draft'}>
                       {statusLabels[a.status] ?? a.status}
                     </span>
                   </td>
-                  <td className="text-[11px] text-warmgray-400">{new Date(a.created_at).toLocaleDateString('ja-JP')}</td>
-                  <td>
+                  <td data-label={t('admin_col_submitted')} className="text-[11px] text-warmgray-400">{new Date(a.created_at).toLocaleDateString('ja-JP')}</td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     <InlineConfirm
                       isActive={confirmingId === a.id}
                       onTrigger={() => setConfirmingId(a.id)}
@@ -1190,8 +1213,8 @@ function PermissionsTab() {
       </div>
 
       {/* Permissions table */}
-      <div className="card !p-0 overflow-hidden">
-        <table className="table-base">
+      <div className="card !p-0 md:overflow-hidden">
+        <table className="table-base table-responsive">
           <thead>
             <tr>
               <th>{t('admin_perms_col_role')}</th>
@@ -1212,30 +1235,26 @@ function PermissionsTab() {
                 className="animate-fade-up"
                 style={{ animationDelay: `${i * 45}ms` }}
               >
-                {/* Role badge */}
-                <td>
+                <td data-label={t('admin_perms_col_role')}>
                   <RoleBadge role={role} />
                 </td>
 
-                {/* Display name + description (bilingual) */}
-                <td>
+                <td data-label={t('admin_perms_col_display')}>
                   <div className="font-semibold text-warmgray-800 text-sm">
                     {lang === 'en' ? p.label_en : p.label}
                   </div>
-                  <div className="text-[11px] text-warmgray-400 mt-0.5 max-w-xs">
+                  <div className="text-[11px] text-warmgray-400 mt-0.5 md:max-w-xs">
                     {lang === 'en' ? p.description_en : p.description}
                   </div>
                 </td>
 
-                {/* Permission flags */}
-                <td className="text-center">{check(p.canSubmit)}</td>
-                <td className="text-center">{check(p.canApprove)}</td>
-                <td className="text-center">{check(p.canSettle)}</td>
-                <td className="text-center">{check(p.canAdmin)}</td>
+                <td data-label={t('admin_perms_col_submit')} className="text-center">{check(p.canSubmit)}</td>
+                <td data-label={t('admin_perms_col_approve')} className="text-center">{check(p.canApprove)}</td>
+                <td data-label={t('admin_perms_col_settle')} className="text-center">{check(p.canSettle)}</td>
+                <td data-label={t('admin_perms_col_admin')} className="text-center">{check(p.canAdmin)}</td>
 
-                {/* Accessible pages */}
-                <td>
-                  <div className="flex flex-wrap gap-1">
+                <td data-label={t('admin_perms_col_pages')}>
+                  <div className="flex flex-wrap gap-1 justify-end md:justify-start">
                     {p.navItems.map((nav) => (
                       <span
                         key={nav.to}
@@ -1300,22 +1319,24 @@ export default function Admin() {
       {toast && <Toast {...toast} onDismiss={dismiss} />}
 
       <div className="max-w-5xl mx-auto space-y-6">
-        {/* Pill tab bar */}
-        <div className="animate-fade-up inline-flex items-center gap-1 bg-white/50 backdrop-blur-sm border border-white/70 rounded-2xl p-1.5 shadow-sm">
-          {TAB_CONFIG.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-150 ${
-                tab === t.key
-                  ? 'bg-warmgray-800 text-white shadow-sm'
-                  : 'text-warmgray-500 hover:text-warmgray-800 hover:bg-white/60'
-              }`}
-            >
-              <span className="text-base leading-none">{t.icon}</span>
-              {t.label}
-            </button>
-          ))}
+        {/* Pill tab bar — scrolls horizontally on narrow viewports if too wide to fit */}
+        <div className="animate-fade-up overflow-x-auto -mx-4 md:mx-0 px-4 md:px-0">
+          <div className="inline-flex items-center gap-1 bg-white/50 backdrop-blur-sm border border-white/70 rounded-2xl p-1.5 shadow-sm whitespace-nowrap">
+            {TAB_CONFIG.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`flex items-center gap-1.5 px-3 md:px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-150 ${
+                  tab === t.key
+                    ? 'bg-warmgray-800 text-white shadow-sm'
+                    : 'text-warmgray-500 hover:text-warmgray-800 hover:bg-white/60'
+                }`}
+              >
+                <span className="text-base leading-none">{t.icon}</span>
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div key={tab} className="animate-fade-up">

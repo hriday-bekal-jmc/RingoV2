@@ -12,6 +12,8 @@
     "set-password": "tsx scripts/set-password.ts",
     "worker:csv": "tsx watch src/workers/csvExportWorker.ts",
     "worker:csv:prod": "node dist/workers/csvExportWorker.js",
+    "worker:outbox": "tsx watch src/workers/outboxPublisher.ts",
+    "worker:outbox:prod": "node dist/workers/outboxPublisher.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -459,12 +459,12 @@ export default function Accounting() {
             <p className="text-sm font-medium">{t('accounting_no_items')}</p>
           </div>
         ) : (
-          <div className="card !p-0 overflow-hidden animate-fade-up">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+          <div className="card !p-0 md:overflow-hidden animate-fade-up">
+            <div className="md:overflow-x-auto">
+              <table className="table-base table-responsive">
                 <thead>
-                  <tr className="border-b border-white/30 bg-surface-50/60">
-                    <th className="px-4 py-3 text-left w-10">
+                  <tr>
+                    <th className="w-10">
                       <input
                         type="checkbox"
                         checked={selected.size === filtered.length && filtered.length > 0}
@@ -472,19 +472,19 @@ export default function Accounting() {
                         className="rounded"
                       />
                     </th>
-                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_app')}</th>
-                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_applicant')}</th>
-                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400 hidden md:table-cell">{t('accounting_col_template')}</th>
-                    <th className="px-4 py-3 text-right text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_expected')}</th>
-                    <th className="px-4 py-3 text-right text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_actual')}</th>
-                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_transfer')}</th>
-                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_proof')}</th>
-                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_status')}</th>
-                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">精算処理</th>
-                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest text-warmgray-400">{t('col_detail')}</th>
+                    <th>{t('accounting_col_app')}</th>
+                    <th>{t('accounting_col_applicant')}</th>
+                    <th>{t('accounting_col_template')}</th>
+                    <th className="text-right">{t('accounting_col_expected')}</th>
+                    <th className="text-right">{t('accounting_col_actual')}</th>
+                    <th>{t('accounting_col_transfer')}</th>
+                    <th>{t('accounting_col_proof')}</th>
+                    <th>{t('accounting_col_status')}</th>
+                    <th>精算処理</th>
+                    <th>{t('col_detail')}</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/20">
+                <tbody className="md:divide-y md:divide-white/20">
                   {filtered.map((s) => {
                     const statusCls = APP_STATUS_CLS[s.app_status] ?? 'badge-draft';
                     const delta = s.actual_amount - s.expected_amount;
@@ -493,17 +493,19 @@ export default function Accounting() {
                         key={s.settlement_id}
                         className="hover:bg-white/30 transition-colors duration-100"
                       >
-                        <td className="px-4 py-3">
-                          <input
-                            type="checkbox"
-                            checked={selected.has(s.settlement_id)}
-                            onChange={() => toggleSelect(s.settlement_id)}
-                            className="rounded"
-                          />
+                        <td>
+                          <label className="inline-flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={selected.has(s.settlement_id)}
+                              onChange={() => toggleSelect(s.settlement_id)}
+                              className="rounded"
+                            />
+                            <span className="md:hidden text-[10px] uppercase tracking-widest font-bold text-warmgray-400">選択</span>
+                          </label>
                         </td>
 
-                        {/* App number + link */}
-                        <td className="px-4 py-3">
+                        <td data-label={t('accounting_col_app')}>
                           <Link
                             to={`/applications/${s.application_id}`}
                             className="text-xs font-mono text-ringo-500 hover:text-ringo-600 font-semibold"
@@ -517,34 +519,33 @@ export default function Accounting() {
                           </p>
                         </td>
 
-                        {/* Applicant + dept */}
-                        <td className="px-4 py-3">
-                          <p className="text-sm font-medium text-warmgray-800">{s.applicant_name}</p>
-                          <p className="text-[11px] text-warmgray-400">{s.department_name}</p>
+                        <td data-label={t('accounting_col_applicant')}>
+                          <div className="md:text-left text-right">
+                            <p className="text-sm font-medium text-warmgray-800">{s.applicant_name}</p>
+                            <p className="text-[11px] text-warmgray-400">{s.department_name}</p>
+                          </div>
                         </td>
 
-                        {/* Template */}
-                        <td className="px-4 py-3 hidden md:table-cell">
+                        <td data-label={t('accounting_col_template')}>
                           <p className="text-xs text-warmgray-600 font-medium">{s.template_name}</p>
                         </td>
 
-                        {/* Expected amount */}
-                        <td className="px-4 py-3 text-right">
+                        <td data-label={t('accounting_col_expected')} className="md:text-right">
                           <span className="text-sm text-warmgray-500">{fmt(s.expected_amount)}</span>
                         </td>
 
-                        {/* Actual amount + delta */}
-                        <td className="px-4 py-3 text-right">
-                          <span className="text-sm font-bold text-warmgray-800">{fmt(s.actual_amount)}</span>
-                          {s.actual_amount > 0 && delta !== 0 && (
-                            <p className={`text-[10px] font-semibold mt-0.5 ${delta > 0 ? 'text-ringo-500' : 'text-emerald-600'}`}>
-                              {delta > 0 ? '+' : ''}{fmt(delta)}
-                            </p>
-                          )}
+                        <td data-label={t('accounting_col_actual')} className="md:text-right">
+                          <div className="md:text-right">
+                            <span className="text-sm font-bold text-warmgray-800">{fmt(s.actual_amount)}</span>
+                            {s.actual_amount > 0 && delta !== 0 && (
+                              <p className={`text-[10px] font-semibold mt-0.5 ${delta > 0 ? 'text-ringo-500' : 'text-emerald-600'}`}>
+                                {delta > 0 ? '+' : ''}{fmt(delta)}
+                              </p>
+                            )}
+                          </div>
                         </td>
 
-                        {/* Transfer date editor */}
-                        <td className="px-4 py-3">
+                        <td data-label={t('accounting_col_transfer')}>
                           <DateEditor
                             settlementId={s.settlement_id}
                             currentDate={s.transfer_date}
@@ -553,8 +554,7 @@ export default function Accounting() {
                           />
                         </td>
 
-                        {/* Transfer proof */}
-                        <td className="px-4 py-3">
+                        <td data-label={t('accounting_col_proof')}>
                           <ProofUploader
                             settlementId={s.settlement_id}
                             proofUrl={s.transfer_proof_url}
@@ -562,44 +562,38 @@ export default function Accounting() {
                           />
                         </td>
 
-                        {/* Status */}
-                        <td className="px-4 py-3">
+                        <td data-label={t('accounting_col_status')}>
                           <span className={statusCls}>
                             {STATUS_LABEL[s.app_status] ?? s.app_status}
                           </span>
                         </td>
 
-                        {/* Settlement close / workflow status */}
-                        <td className="px-4 py-3">
+                        <td data-label="精算処理">
                           {s.app_status === 'SETTLEMENT_APPROVED' ? (
-                            /* Phase 2: workflow done, accounting finalises */
                             <CloseButton
                               settlementId={s.settlement_id}
                               transferDate={s.transfer_date}
                               proofUrl={s.transfer_proof_url}
                             />
                           ) : s.app_status === 'PENDING_SETTLEMENT' ? (
-                            /* Phase 1: still in approval flow → action in Approvals page */
-                            <div className="flex flex-col gap-0.5">
+                            <div className="flex flex-col gap-0.5 md:items-start items-end">
                               <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200/60 px-2 py-0.5 rounded-full whitespace-nowrap">
                                 承認フロー進行中
                               </span>
                               {s.pending_approver_name && (
-                                <span className="text-[10px] text-warmgray-400 truncate max-w-[110px]">
+                                <span className="text-[10px] text-warmgray-400 truncate md:max-w-[110px]">
                                   次: {s.pending_approver_name}
                                 </span>
                               )}
                             </div>
                           ) : (
-                            /* COMPLETED */
                             <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-full whitespace-nowrap">
                               ✓ {t('status_completed')}
                             </span>
                           )}
                         </td>
 
-                        {/* Detail link */}
-                        <td className="px-4 py-3">
+                        <td data-label={t('col_detail')}>
                           <Link
                             to={`/applications/${s.application_id}`}
                             className="text-xs font-semibold text-ringo-500 hover:text-ringo-600 whitespace-nowrap"
