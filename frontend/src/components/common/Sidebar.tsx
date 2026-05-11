@@ -128,14 +128,28 @@ export default function Sidebar() {
           onClick={() => navigate('/dashboard')}
           className="flex items-center gap-3 min-w-0 hover:opacity-80 transition-opacity"
         >
+          {/*
+            New RINGO logo (mark only) — rendered as CSS mask so the dark
+            sidebar can tint it white via currentColor on bg-white. SVG file
+            has fill="currentColor" but <img> wouldn't honor that; mask-image
+            uses the SVG as a stencil + the box's background-color shows
+            through. Result: same mark, sidebar-themed white.
+          */}
           <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
-            <svg viewBox="0 0 64 64" className="w-5 h-5" fill="none">
-              <path d="M32 18C28 12 18 13 16 21c-2 9 5 28 16 28s18-19 16-28c-2-8-12-9-16-3z"
-                stroke="rgba(255,255,255,0.9)" strokeWidth="2.5" strokeLinejoin="round" />
-              <path d="M32 18c0-3 1-7 4-9"
-                stroke="rgba(255,255,255,0.9)" strokeWidth="2.5" strokeLinecap="round" />
-              <circle cx="32" cy="34" r="3" fill="#C9A227" />
-            </svg>
+            <span
+              className="w-5 h-5 bg-white"
+              style={{
+                WebkitMaskImage:    'url(/ringo-mark.svg)',
+                maskImage:          'url(/ringo-mark.svg)',
+                WebkitMaskRepeat:   'no-repeat',
+                maskRepeat:         'no-repeat',
+                WebkitMaskPosition: 'center',
+                maskPosition:       'center',
+                WebkitMaskSize:     'contain',
+                maskSize:           'contain',
+              }}
+              aria-label="RINGO"
+            />
           </div>
           {!collapsed && (
             <div className="min-w-0">

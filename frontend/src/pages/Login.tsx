@@ -3,64 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import apiClient from '../services/apiClient';
 
-// ── RINGO logo — matches brand image exactly ────────────────────────────────
-function RingoLogo({ size = 80, color = '#E05046' }: { size?: number; color?: string }) {
-  return (
-    <svg
-      width={size}
-      height={size * 0.88}
-      viewBox="0 0 110 97"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      {/* Apple body — left lobe */}
-      <path
-        d="M 54 52 C 52 34 38 22 22 26 C 6 30 4 52 14 65 C 22 76 38 82 54 78"
-        stroke={color}
-        strokeWidth="5.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
-      {/* Apple body — right lobe */}
-      <path
-        d="M 54 52 C 56 34 70 22 86 26 C 102 30 104 52 94 65 C 86 76 70 82 54 78"
-        stroke={color}
-        strokeWidth="5.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
-      {/* Leaf — left of stem */}
-      <path
-        d="M 54 30 C 47 22 37 18 37 18 C 37 18 44 26 48 32"
-        stroke={color}
-        strokeWidth="5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
-      {/* Arrow stem — rising right */}
-      <path
-        d="M 56 28 C 62 18 74 10 84 5"
-        stroke={color}
-        strokeWidth="5"
-        strokeLinecap="round"
-        fill="none"
-      />
-      {/* Arrow head — upper right */}
-      <path
-        d="M 84 5 L 76 10 M 84 5 L 90 12"
-        stroke={color}
-        strokeWidth="5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
-    </svg>
-  );
-}
-
 // ── Floating orb for background animation ───────────────────────────────────
 function Orb({
   size,
@@ -171,9 +113,29 @@ export default function Login() {
 
           {/* Center content */}
           <div className="relative z-10 flex flex-col items-center text-center px-10 select-none">
-            {/* Logo animation */}
+            {/*
+              Brand logo — official mark (apple + arrow-leaf). Tinted via
+              mask-image so we control color from one source SVG. Light pink
+              on the dark login background keeps it legible without clashing.
+            */}
             <div className="logo-animate mb-6">
-              <RingoLogo size={96} color="#E05046" />
+              <span
+                className="block"
+                style={{
+                  width:              96,
+                  height:             96,
+                  backgroundColor:    '#f5e8e6',
+                  WebkitMaskImage:    'url(/ringo-mark.svg)',
+                  maskImage:          'url(/ringo-mark.svg)',
+                  WebkitMaskRepeat:   'no-repeat',
+                  maskRepeat:         'no-repeat',
+                  WebkitMaskPosition: 'center',
+                  maskPosition:       'center',
+                  WebkitMaskSize:     'contain',
+                  maskSize:           'contain',
+                }}
+                aria-label="RINGO"
+              />
             </div>
 
             {/* Wordmark */}
@@ -225,9 +187,25 @@ export default function Login() {
         >
           <div className="w-full max-w-[380px]">
 
-            {/* Logo — mobile only */}
+            {/* Logo — mobile only. Tinted brand red via mask-image on light bg. */}
             <div className="flex flex-col items-center mb-10 lg:hidden form-fade form-fade-1">
-              <RingoLogo size={56} color="#E05046" />
+              <span
+                className="block"
+                style={{
+                  width:              56,
+                  height:             56,
+                  backgroundColor:    '#D23F3F',
+                  WebkitMaskImage:    'url(/ringo-mark.svg)',
+                  maskImage:          'url(/ringo-mark.svg)',
+                  WebkitMaskRepeat:   'no-repeat',
+                  maskRepeat:         'no-repeat',
+                  WebkitMaskPosition: 'center',
+                  maskPosition:       'center',
+                  WebkitMaskSize:     'contain',
+                  maskSize:           'contain',
+                }}
+                aria-label="RINGO"
+              />
               <div className="mt-3 text-xl font-black tracking-[0.2em] text-warmgray-800">RINGO</div>
               <div className="text-[11px] tracking-widest text-warmgray-400 mt-0.5">稟議・精算</div>
             </div>
