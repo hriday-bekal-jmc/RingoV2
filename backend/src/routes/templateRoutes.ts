@@ -1,18 +1,58 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/db';
+import { redis } from '../config/redis';
 import { requireAuth } from '../middlewares/authMiddleware';
 
 const router = Router();
 router.use(requireAuth);
 
-// GET /templates — list all active templates
-router.get('/', async (_req: Request, res: Response): Promise<void> => {
+// 5-min Redis cache for active-templates list, keyed by user's department.
+// Empty template_permissions for a template = available to ALL departments.
+// Admin role bypasses dept filter (sees everything).
+const TPL_CACHE_PREFIX = 'templates:active';
+const TPL_CACHE_TTL    = 300;
+
+// Wildcard delete pattern for invalidation
+export async function invalidateTemplatesCache(): Promise<void> {
   try {
-    const result = await query(
-      `SELECT id, code, title_ja FROM form_templates WHERE is_active = TRUE ORDER BY title_ja`,
-    );
+    const keys = await redis.keys(`${TPL_CACHE_PREFIX}:*`);
+    if (keys.length > 0) await redis.del(...keys);
+  } catch { /* non-fatal */ }
+}
+
+// GET /templates — list active templates filtered by caller's department
+router.get('/', async (req: Request, res: Response): Promise<void> => {
+  const role   = req.user!.role;
+  const deptId = req.user!.department_id ?? null;
+  const cacheKey = `${TPL_CACHE_PREFIX}:${role}:${deptId ?? 'NULL'}`;
+
+  try {
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) { res.json(JSON.parse(cached)); return; }
+    } catch { /* fall through */ }
+
+    // ADMIN sees everything. Others see templates where either:
+    //   (a) no row in template_permissions (= unrestricted), OR
+    //   (b) template_permissions has a row matching user's department_id
+    const sql = role === 'ADMIN'
+      ? `SELECT id, code, title, title_ja, pattern_id, icon, gradient, description_ja, description_en
+         FROM form_templates WHERE is_active = TRUE ORDER BY title_ja`
+      : `SELECT t.id, t.code, t.title, t.title_ja, t.pattern_id, t.icon, t.gradient, t.description_ja, t.description_en
+         FROM form_templates t
+         WHERE t.is_active = TRUE
+           AND (
+             NOT EXISTS (SELECT 1 FROM template_permissions tp WHERE tp.template_id = t.id)
+             OR EXISTS (SELECT 1 FROM template_permissions tp WHERE tp.template_id = t.id AND tp.department_id = $1)
+           )
+         ORDER BY t.title_ja`;
+    const params = role === 'ADMIN' ? [] : [deptId];
+
+    const result = await query(sql, params);
+    redis.setex(cacheKey, TPL_CACHE_TTL, JSON.stringify(result.rows)).catch(() => {});
     res.json(result.rows);
   } catch (err) {
+    console.error('[templates] list failed:', err);
     res.status(500).json({ error: 'テンプレート一覧の取得に失敗しました' });
   }
 });

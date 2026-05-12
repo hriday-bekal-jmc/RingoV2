@@ -25,6 +25,8 @@ interface ApplicationDetail {
   form_data: Record<string, unknown>;
   settlement_data: Record<string, unknown> | null;
   template_id: string;
+  template_version_id: string | null;
+  template_version_number: number | null;
   template_code: string;
   template_name: string;
   schema_definition: { fields: FormField[] } | null;
@@ -45,9 +47,10 @@ interface ApplicationDetail {
 }
 
 interface FormField {
-  name:  string;
-  label: string;
-  type:  string;
+  name:     string;
+  label:    string;
+  label_en?: string;
+  type:     string;
 }
 
 interface StepRow {
@@ -269,6 +272,19 @@ function MetaCard({ d, lang, dateLocale }: { d: AdminAppDetailResponse; lang: 'j
             {a.application_number && <span className="font-mono">{a.application_number}</span>}
             {a.application_number && <span>·</span>}
             <span>{lang === 'en' ? 'Created' : '作成'}: {fmtDate(a.created_at, dateLocale)}</span>
+            {a.template_version_number != null && (
+              <>
+                <span>·</span>
+                <span
+                  className="font-semibold px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200/60"
+                  title={lang === 'en' ? 'Form schema version this application was submitted under' : 'この申請が提出されたフォームスキーマのバージョン'}
+                >
+                  {lang === 'en' ? 'Schema' : 'スキーマ'} v{a.template_version_number}
+                </span>
+              </>
+            )}
+            <span>·</span>
+            <span className="font-mono text-warmgray-300" title="Template code">{a.template_code}</span>
           </div>
         </div>
 
@@ -345,7 +361,7 @@ function FormDataCard({ title, accent, data, schema, files, lang }: {
 }) {
   const fields = schema?.fields ?? [];
   const entries = fields.length > 0
-    ? fields.map(f => ({ name: f.name, label: f.label, type: f.type, value: data[f.name] }))
+    ? fields.map(f => ({ name: f.name, label: (lang === 'en' && f.label_en) ? f.label_en : f.label, type: f.type, value: data[f.name] }))
     : Object.entries(data).map(([k, v]) => ({ name: k, label: k, type: 'text', value: v }));
 
   if (entries.length === 0) {

@@ -11,6 +11,24 @@ const router = Router();
 router.use(requireAuth);
 router.use(mutationLimiter);
 
+// GET /approvals/pending/count — just total, no rows. For sidebar badge.
+// Sub-millisecond: single indexed COUNT on approval_steps.
+router.get('/pending/count', async (req: Request, res: Response): Promise<void> => {
+  const { id: userId, role } = req.user!;
+  try {
+    const r = await query(
+      role === 'ADMIN' && req.query.all === 'true'
+        ? `SELECT COUNT(*)::int AS total FROM approval_steps WHERE status = 'PENDING'`
+        : `SELECT COUNT(*)::int AS total FROM approval_steps WHERE status = 'PENDING' AND approver_id = $1`,
+      role === 'ADMIN' && req.query.all === 'true' ? [] : [userId],
+    );
+    res.json({ total: r.rows[0]?.total ?? 0 });
+  } catch (err) {
+    console.error('[approvals] count failed:', err);
+    res.status(500).json({ error: 'カウント取得に失敗しました' });
+  }
+});
+
 // GET /approvals/pending — steps assigned to current user  (paginated)
 // ?all=true (ADMIN only) → system-wide view
 // ?limit=25&offset=0
@@ -25,7 +43,9 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
       `SELECT
          a.id, a.application_number, a.status, a.form_data, a.settlement_data, a.created_at,
          t.title_ja AS template_name,
-         t.schema_definition, t.settlement_schema,
+         -- Use locked version schema if present (immune to future form edits)
+         COALESCE(v.schema_definition, t.schema_definition) AS schema_definition,
+         COALESCE(v.settlement_schema, t.settlement_schema) AS settlement_schema,
          u.full_name AS applicant_name,
          u.avatar_url AS applicant_avatar,
          COALESCE(d.name, '—') AS department_name,
@@ -44,6 +64,7 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
        JOIN form_templates t ON a.template_id = t.id
        LEFT JOIN users u ON a.applicant_id = u.id
        LEFT JOIN departments d ON d.id = u.department_id
+       LEFT JOIN form_template_versions v ON v.id = a.template_version_id
        JOIN approval_steps s
          ON s.application_id = a.id AND s.status = 'PENDING'
        LEFT JOIN users approver ON s.approver_id = approver.id

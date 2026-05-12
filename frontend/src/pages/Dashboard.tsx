@@ -8,11 +8,20 @@ import { getPermissions } from '../config/permissions';
 import { TEMPLATE_LABELS, templateLabel, templateDesc } from '../config/templateLabels';
 import apiClient from '../services/apiClient';
 
-// Order matters — this is also the display order on the Dashboard grid
-const TEMPLATE_CODES = [
-  'INQUIRY', 'BUSINESS_TRIP', 'OFFICE_OVERTIME', 'EQUIPMENT_PURCHASE',
-  'PC_TAKEOUT', 'LEAVE', 'TARDINESS', 'INCIDENT_REPORT', 'EXPENSE_CLAIM',
-] as const;
+// Template tiles are now data-driven — fetched from `/templates` so any admin
+// addition appears automatically. Falls back to hardcoded TEMPLATE_LABELS
+// when DB has no icon/desc set (legacy seed rows).
+interface TemplateTile {
+  id:             string;
+  code:           string;
+  title:          string;
+  title_ja:       string;
+  pattern_id:     number;
+  icon:           string | null;
+  gradient:       string | null;
+  description_ja: string | null;
+  description_en: string | null;
+}
 
 function StatusBadge({ status, t }: { status: string; t: (k: any) => string }): JSX.Element {
   const map: Record<string, { cls: string; key: string }> = {
@@ -88,7 +97,15 @@ export default function Dashboard() {
     queryKey: ['dashboard', 'summary'],
     queryFn: async () => (await apiClient.get('/dashboard/summary')).data,
     enabled: !loading,
-    staleTime: 30_000,
+    staleTime: 60_000,   // SSE pushes real changes; this is just ping-pong guard
+  });
+
+  // Active templates for tiles — data-driven so admin additions appear instantly
+  const { data: templates } = useQuery<TemplateTile[]>({
+    queryKey: ['templates', 'active'],
+    queryFn:  async () => (await apiClient.get('/templates')).data,
+    enabled:  !loading,
+    staleTime: 300_000,   // tile list rarely changes; invalidated on form save via SSE
   });
 
   // ── Admin company-wide overview ────────────────────────────────────────────
@@ -102,9 +119,11 @@ export default function Dashboard() {
   const { data: overview } = useQuery<AdminOverview>({
     queryKey: ['dashboard', 'admin-overview'],
     queryFn: async () => (await apiClient.get('/dashboard/admin-overview')).data,
-    enabled: !loading && isAdmin,   // pre-fetch in background — ready instantly when toggle opens
+    // Lazy: only fetch after admin clicks the toggle. Saves a query on every
+    // dashboard load. ~150ms first-tap delay is acceptable (cached after).
+    enabled: !loading && isAdmin && adminView,
     staleTime: 120_000,
-    refetchOnWindowFocus: false,    // SSE invalidates on real changes — no focus polling needed
+    refetchOnWindowFocus: false,
   });
 
   const pendingCount          = summary?.status_counts.PENDING_APPROVAL ?? 0;
@@ -340,31 +359,38 @@ export default function Dashboard() {
                 <div className="lg:col-span-3 space-y-3">
                   <h3 className="section-title">{t('dash_forms_title')}</h3>
                   <div className="grid grid-cols-2 gap-3 stagger">
-                    {TEMPLATE_CODES.map((code) => {
-                      const tmpl = TEMPLATE_LABELS[code];
+                    {(templates ?? []).map((tmpl) => {
+                      const legacy = TEMPLATE_LABELS[tmpl.code];
+                      const icon     = tmpl.icon     ?? legacy?.icon     ?? '📋';
+                      const gradient = tmpl.gradient ?? legacy?.gradient ?? 'from-slate-400/20 to-slate-500/10';
+                      const title    = lang === 'en'
+                        ? (tmpl.title || legacy?.en || tmpl.title_ja)
+                        : (tmpl.title_ja || legacy?.ja || tmpl.title_ja);
+                      const desc = lang === 'en'
+                        ? (tmpl.description_en ?? legacy?.desc_en ?? '')
+                        : (tmpl.description_ja ?? legacy?.desc_ja ?? '');
+                      const isTwoStage = tmpl.pattern_id === 3 || legacy?.twoStage;
                       return (
                         <Link
-                          key={code}
-                          to={`/applications/new/${code}`}
+                          key={tmpl.code}
+                          to={`/applications/new/${tmpl.code}`}
                           className="card-hover group !p-4 flex items-start gap-3 animate-fade-up"
                         >
-                          <div className={`flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br ${tmpl.gradient} flex items-center justify-center text-xl border border-white/60`}>
-                            {tmpl.icon}
+                          <div className={`flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center text-xl border border-white/60`}>
+                            {icon}
                           </div>
                           <div className="min-w-0 pt-0.5">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <p className="text-sm font-semibold text-warmgray-800 leading-tight group-hover:text-ringo-600 transition-colors">
-                                {templateLabel(code, lang, tmpl.ja)}
+                                {title}
                               </p>
-                              {tmpl.twoStage && (
+                              {isTwoStage && (
                                 <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700 border border-teal-200/60 leading-none">
                                   {t('two_stage_badge')}
                                 </span>
                               )}
                             </div>
-                            <p className="text-[11px] text-warmgray-400 mt-0.5 leading-tight">
-                              {templateDesc(code, lang)}
-                            </p>
+                            <p className="text-[11px] text-warmgray-400 mt-0.5 leading-tight">{desc}</p>
                           </div>
                         </Link>
                       );

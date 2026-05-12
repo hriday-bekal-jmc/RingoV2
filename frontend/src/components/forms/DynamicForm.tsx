@@ -6,11 +6,30 @@ import { useLang } from '../../context/LanguageContext';
 interface FormField {
   name: string;
   label: string;
+  label_en?: string;
   type: string;
   required?: boolean;
   multiple?: boolean;
   sum_target?: string;
   computed?: boolean;
+  placeholder?: string;
+  helper_text?: string;
+  default_value?: string | number | boolean | null;
+  options?: Array<{ value: string; label_ja: string; label_en: string }>;
+  // Admin-configurable validation (admin form builder)
+  validation?: {
+    regex?: string;
+    min?: number;
+    max?: number;
+    maxlength?: number;
+  };
+  // Admin-configurable conditional visibility: only render this field when
+  // another field equals a given value. Backend validation should also gate
+  // required-ness so hidden fields aren't required.
+  conditional_on?: {
+    field: string;
+    equals: string | number | boolean;
+  };
 }
 
 interface Template {
@@ -94,7 +113,32 @@ export default function DynamicForm({
   });
 
   const activeSchema = isSettlementPhase ? template.settlement_schema : template.schema_definition;
-  const activeFields: FormField[] = useMemo(() => activeSchema?.fields ?? [], [activeSchema]);
+  const allFields: FormField[] = useMemo(() => activeSchema?.fields ?? [], [activeSchema]);
+
+  // Watch all fields that drive conditional visibility. Subscription
+  // narrowed to just those source names so we don't re-render on every key.
+  const conditionalSources = useMemo(
+    () => Array.from(new Set(allFields.map((f) => f.conditional_on?.field).filter(Boolean))) as string[],
+    [allFields],
+  );
+  const watchedConds = useWatch({ control, name: conditionalSources.length ? conditionalSources : ['__noop__'] });
+
+  // Filtered field list — hide fields whose condition is unmet.
+  // String/number/boolean comparison loose (== rather than ===) since form
+  // values come back as strings even for numeric/boolean inputs.
+  const activeFields: FormField[] = useMemo(() => {
+    if (conditionalSources.length === 0) return allFields;
+    const sourceMap: Record<string, unknown> = {};
+    conditionalSources.forEach((name, i) => {
+      sourceMap[name] = (watchedConds as unknown[])[i];
+    });
+    return allFields.filter((f) => {
+      if (!f.conditional_on) return true;
+      const got = sourceMap[f.conditional_on.field];
+      // eslint-disable-next-line eqeqeq
+      return got != null && String(got) == String(f.conditional_on.equals);
+    });
+  }, [allFields, watchedConds, conditionalSources]);
 
   // Build sum-source field names once per schema change. Stable across renders.
   const sumSourceNames = useMemo(

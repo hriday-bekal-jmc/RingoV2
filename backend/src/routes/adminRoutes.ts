@@ -343,15 +343,18 @@ router.get('/applications/:id', async (req: Request, res: Response): Promise<voi
         `SELECT
            a.id, a.application_number, a.status, a.version,
            a.form_data, a.settlement_data,
-           a.template_id, a.route_id, a.applicant_id,
+           a.template_id, a.template_version_id, a.route_id, a.applicant_id,
            a.created_at, a.submitted_at, a.settlement_submitted_at, a.completed_at, a.updated_at,
            t.code AS template_code, t.title_ja AS template_name,
-           t.schema_definition, t.settlement_schema,
+           COALESCE(v.schema_definition, t.schema_definition) AS schema_definition,
+           COALESCE(v.settlement_schema, t.settlement_schema) AS settlement_schema,
+           v.version_number AS template_version_number,
            t.settlement_schema IS NOT NULL AS has_settlement,
            u.full_name AS applicant_name, u.email AS applicant_email, u.avatar_url AS applicant_avatar,
            d.name AS department_name, d.id AS department_id
          FROM applications a
          JOIN form_templates t ON t.id = a.template_id
+         LEFT JOIN form_template_versions v ON v.id = a.template_version_id
          LEFT JOIN users u ON u.id = a.applicant_id
          LEFT JOIN departments d ON d.id = u.department_id
          WHERE a.id = $1`,

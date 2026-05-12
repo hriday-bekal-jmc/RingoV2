@@ -81,13 +81,14 @@ export default function Sidebar() {
     return () => { document.body.style.overflow = prev; };
   }, [mobileOpen]);
 
-  // limit=1 — only need the total count (COUNT(*) OVER() window fn), not the rows.
+  // Lightweight COUNT-only endpoint (no JOINs, no rows). Sub-ms vs ~11ms before.
   // Separate key suffix 'badge' avoids conflict with Approvals page's infinite query.
   const { data: pendingRes } = useQuery<{ total: number }>({
     queryKey: ['pendingApprovals', 'badge'],
-    queryFn: async () => (await apiClient.get('/approvals/pending?limit=1&offset=0')).data,
+    queryFn: async () => (await apiClient.get('/approvals/pending/count')).data,
     enabled: perms.canApprove,
-    staleTime: 30_000,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
   const pendingCount = pendingRes?.total ?? 0;
 

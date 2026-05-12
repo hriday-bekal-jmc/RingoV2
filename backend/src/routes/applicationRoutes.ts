@@ -4,6 +4,7 @@ import { requireAuth } from '../middlewares/authMiddleware';
 import { assertCanReadApp, assertValidRouteForTemplate } from '../middlewares/authz';
 import { mutationLimiter } from '../middlewares/rateLimit';
 import { resolveApprovalSteps } from '../services/approvalStepService';
+import { validateFormData } from '../services/formValidation';
 import { insertOutboxEvent } from '../services/eventOutbox';
 import { computeApplicationRecipients } from '../services/eventRecipients';
 import type pg from 'pg';
@@ -76,11 +77,17 @@ router.post('/draft', async (req: Request, res: Response): Promise<void> => {
   };
   try {
     const applicant_id = req.user!.id;
+    // Capture active version at draft creation — locks schema to what user is editing
+    const verRes = await query(
+      `SELECT id FROM form_template_versions WHERE template_id = $1 AND is_active = TRUE LIMIT 1`,
+      [template_id],
+    );
+    const versionId = verRes.rows[0]?.id ?? null;
     const result = await query(
-      `INSERT INTO applications (applicant_id, template_id, form_data, status)
-       VALUES ($1, $2, $3::jsonb, 'DRAFT')
+      `INSERT INTO applications (applicant_id, template_id, template_version_id, form_data, status)
+       VALUES ($1, $2, $3, $4::jsonb, 'DRAFT')
        RETURNING id, status`,
-      [applicant_id, template_id, JSON.stringify(form_data)],
+      [applicant_id, template_id, versionId, JSON.stringify(form_data)],
     );
     res.status(201).json({ message: '下書きを保存しました', application: result.rows[0], draft: true });
   } catch (err) {
@@ -635,11 +642,27 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       // Resolve route → concrete steps (single batched role lookup)
       const ringiResolvedSteps = await resolveApprovalSteps(client, route_id, '承認ルート');
 
+      // Capture active form template version — locks schema to what user submitted
+      const verRes = await client.query(
+        `SELECT id, schema_definition FROM form_template_versions WHERE template_id = $1 AND is_active = TRUE LIMIT 1`,
+        [template_id],
+      );
+      const versionId = verRes.rows[0]?.id ?? null;
+      const versionSchema = verRes.rows[0]?.schema_definition;
+
+      // Server-side schema validation — honours conditional_on (hidden fields exempt)
+      if (versionSchema) {
+        const errors = validateFormData(versionSchema, form_data);
+        if (errors.length > 0) {
+          throw Object.assign(new Error(errors.map(e => e.message).join(' / ')), { status: 400 });
+        }
+      }
+
       const appRes = await client.query(
-        `INSERT INTO applications (applicant_id, template_id, route_id, form_data, status, submitted_at)
-         VALUES ($1, $2, $3, $4::jsonb, 'PENDING_APPROVAL', CURRENT_TIMESTAMP)
+        `INSERT INTO applications (applicant_id, template_id, template_version_id, route_id, form_data, status, submitted_at)
+         VALUES ($1, $2, $3, $4, $5::jsonb, 'PENDING_APPROVAL', CURRENT_TIMESTAMP)
          RETURNING id, status`,
-        [applicant_id, template_id, route_id, JSON.stringify(form_data)],
+        [applicant_id, template_id, versionId, route_id, JSON.stringify(form_data)],
       );
       const app = appRes.rows[0] as { id: string; status: string };
 
@@ -720,12 +743,19 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
     //    same-dept manager+, ACCOUNTING, or ADMIN
     await assertCanReadApp({ id: req.user!.id, role: req.user!.role }, String(req.params.id));
 
+    // Schema resolution: prefer the locked version (form_template_versions row
+    // captured at submit time). Falls back to current form_templates schema
+    // only for legacy rows missing template_version_id (pre-migration 018).
+    // COALESCE keeps the contract identical for the frontend.
     const appRes = await query(
       `SELECT a.id, a.application_number, a.status, a.form_data, a.version,
               a.settlement_data, a.settlement_submitted_at,
-              a.template_id, a.created_at, a.submitted_at, a.completed_at,
+              a.template_id, a.template_version_id,
+              a.created_at, a.submitted_at, a.completed_at,
               t.title_ja AS template_name, t.code AS template_code,
-              t.schema_definition, t.settlement_schema,
+              COALESCE(v.schema_definition, t.schema_definition) AS schema_definition,
+              COALESCE(v.settlement_schema, t.settlement_schema) AS settlement_schema,
+              v.version_number AS template_version_number,
               t.settlement_schema IS NOT NULL AS has_settlement,
               u.full_name AS applicant_name,
               u.avatar_url AS applicant_avatar,
@@ -735,6 +765,7 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
               s.status AS settlement_status
        FROM applications a
        JOIN form_templates t ON a.template_id = t.id
+       LEFT JOIN form_template_versions v ON v.id = a.template_version_id
        LEFT JOIN users u ON a.applicant_id = u.id
        LEFT JOIN settlements s ON s.application_id = a.id
        WHERE a.id = $1`,

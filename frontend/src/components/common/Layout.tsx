@@ -1,15 +1,15 @@
 import { ReactNode } from 'react';
 import Sidebar from './Sidebar';
 import Header from './Header';
-import { useSSE } from '../../hooks/useSSE';
 
 interface LayoutProps {
   title: string;
   children: ReactNode;
 }
 
+// SSEProvider (mounted at app root) owns the single EventSource connection.
+// Do NOT call useSSE here — it would open a SECOND connection per page.
 export default function Layout({ title, children }: LayoutProps) {
-  useSSE();
   return (
     <div className="h-screen flex overflow-hidden">
       {/* Sidebar handles its own mobile-drawer vs desktop-rail layout */}

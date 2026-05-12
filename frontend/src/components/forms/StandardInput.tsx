@@ -10,18 +10,22 @@ import {
 import apiClient from '../../services/apiClient';
 import CalendarPicker from './CalendarPicker';
 import CustomSelect from './CustomSelect';
+import { useLang } from '../../context/LanguageContext';
 
 // File URLs are same-origin (vite proxy /api in dev, reverse proxy in prod)
 
 interface FormField {
   name: string;
-  label: string;
+  label: string;          // Japanese (legacy default)
+  label_en?: string;      // English (admin-set)
+  helper_text?: string;
+  placeholder?: string;
   type: string;
   required?: boolean;
   multiple?: boolean;
   computed?: boolean;
   sum_target?: string;
-  options?: string[] | { value: string; label: string }[];
+  options?: string[] | { value: string; label?: string; label_ja?: string; label_en?: string }[];
 }
 
 interface UploadedFile {
@@ -133,12 +137,19 @@ export default function StandardInput({
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
+  const { lang } = useLang();
+  // Prefer EN label when lang=en AND label_en provided; otherwise fall back
+  // to the legacy Japanese `label` field (kept for backward compat).
+  const displayLabel = lang === 'en' && field.label_en ? field.label_en : field.label;
   return (
     <div className="flex flex-col gap-1.5">
       <label className="label-normal">
-        {field.label}
+        {displayLabel}
         {field.required && !isDraft && <span className="text-ringo-500 ml-0.5">*</span>}
       </label>
+      {field.helper_text && (
+        <p className="text-[11px] text-warmgray-400 -mt-0.5">{field.helper_text}</p>
+      )}
 
       {field.type === 'text' && (
         <input
@@ -150,10 +161,16 @@ export default function StandardInput({
 
       {field.type === 'select' && (() => {
         const watched = watch ? String(watch(field.name) ?? '') : '';
-        // Normalise options from schema — string[] or {value,label}[]
-        const opts = (field.options ?? []).map((o) =>
-          typeof o === 'string' ? { value: o, label: o } : o,
-        );
+        // Normalise options — supports string[], {value,label}[], and admin
+        // {value, label_ja, label_en}[]. Pick locale-correct label.
+        const opts = (field.options ?? []).map((o) => {
+          if (typeof o === 'string') return { value: o, label: o };
+          const obj = o as { value: string; label?: string; label_ja?: string; label_en?: string };
+          const label = lang === 'en'
+            ? (obj.label_en || obj.label_ja || obj.label || obj.value)
+            : (obj.label_ja || obj.label || obj.label_en || obj.value);
+          return { value: obj.value, label };
+        });
         return (
           <>
             <input type="hidden" {...register(field.name, { required: requiredRule })} />
@@ -195,6 +212,60 @@ export default function StandardInput({
           rows={3}
         />
       )}
+
+      {/* Checkbox — boolean (single) or multi-choice group with options */}
+      {field.type === 'checkbox' && (() => {
+        const opts = (field.options ?? []) as Array<{ value: string; label_ja?: string; label_en?: string; label?: string }>;
+        // Boolean checkbox when no options configured
+        if (!opts || opts.length === 0) {
+          return (
+            <label className="flex items-center gap-2 cursor-pointer text-sm text-warmgray-700">
+              <input
+                type="checkbox"
+                {...register(field.name)}
+                className="w-4 h-4 accent-ringo-500"
+              />
+              {field.placeholder ?? displayLabel}
+            </label>
+          );
+        }
+        // Multi-select group when options exist
+        const watched = (watch ? watch(field.name) : []) as string[] | string | undefined;
+        const checkedSet = new Set<string>(
+          Array.isArray(watched) ? watched : (watched ? [watched] : []),
+        );
+        return (
+          <>
+            <input type="hidden" {...register(field.name, { required: requiredRule })} />
+            <div className="flex flex-wrap gap-3 px-3 py-2.5 rounded-xl bg-white/50 border border-white/80">
+              {opts.map((o) => {
+                const id = `${field.name}-${o.value}`;
+                const isOn = checkedSet.has(o.value);
+                return (
+                  <label key={o.value} htmlFor={id} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg cursor-pointer text-sm font-medium transition-colors ${
+                    isOn ? 'bg-ringo-50 text-ringo-700 border border-ringo-200/80' : 'bg-white/60 text-warmgray-600 border border-white/80 hover:bg-white/90'
+                  }`}>
+                    <input
+                      id={id}
+                      type="checkbox"
+                      checked={isOn}
+                      onChange={() => {
+                        const next = new Set(checkedSet);
+                        if (next.has(o.value)) next.delete(o.value); else next.add(o.value);
+                        setValue?.(field.name, Array.from(next));
+                      }}
+                      className="w-3.5 h-3.5 accent-ringo-500"
+                    />
+                    {lang === 'en'
+                      ? (o.label_en || o.label_ja || o.label || o.value)
+                      : (o.label_ja || o.label || o.label_en || o.value)}
+                  </label>
+                );
+              })}
+            </div>
+          </>
+        );
+      })()}
 
       {/* Computed total — read-only, driven by DynamicForm auto-sum */}
       {field.type === 'number' && field.computed && (

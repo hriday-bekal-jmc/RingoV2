@@ -23,7 +23,7 @@ const APPROVER_ROLES = new Set(['MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 
 const router = Router();
 router.use(requireAuth);
 
-const CACHE_TTL_SEC = 30;
+const CACHE_TTL_SEC = 60;  // SSE invalidates on real changes — pure ping-pong guard
 const cacheKey = (userId: string) => `dashboard:summary:${userId}`;
 
 interface StatusCounts {

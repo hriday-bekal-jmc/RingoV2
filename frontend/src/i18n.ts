@@ -3,6 +3,17 @@
 
 export type Lang = 'ja' | 'en';
 
+// Field label resolver — picks label_en when lang=en AND label_en is set,
+// otherwise falls back to legacy `label` (Japanese). Used across all places
+// that render a schema field name to keep behavior identical.
+export function fieldLabel(
+  f: { label: string; label_en?: string | null } | undefined,
+  lang: Lang,
+): string {
+  if (!f) return '';
+  return lang === 'en' && f.label_en ? f.label_en : f.label;
+}
+
 const dict = {
   ja: {
     // Nav
@@ -266,6 +277,7 @@ const dict = {
     // Admin page — general
     admin_apps_tab:           '申請管理',
     admin_perms_tab:          'ロール権限',
+    admin_forms_tab:          'フォーム編集',
     admin_add_user:           'ユーザー追加',
     admin_create_user:        'ユーザー新規作成',
     admin_edit_user:          'プロフィール編集',
@@ -612,6 +624,7 @@ const dict = {
     // Admin page — general
     admin_apps_tab:           'Applications',
     admin_perms_tab:          'Permissions',
+    admin_forms_tab:          'Forms',
     admin_add_user:           'Add User',
     admin_create_user:        'Create User',
     admin_edit_user:          'Edit Profile',

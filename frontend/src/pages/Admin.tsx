@@ -8,6 +8,7 @@ import Layout from '../components/common/Layout';
 import { ROLE_MAP, Role } from '../config/permissions';
 import InlineConfirm from '../components/common/InlineConfirm';
 import AdminAppDetailModal from '../components/admin/AdminAppDetailModal';
+import FormsTab from '../components/admin/FormsTab';
 import RingoLoader from '../components/common/RingoLoader';
 import Toast, { useToast } from '../components/common/Toast';
 import CustomSelect from '../components/forms/CustomSelect';
@@ -229,14 +230,19 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
   // Inline confirm — only one row can be in confirm state at a time
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
+  // Admin reference data — changes rarely (few times/month). Cache aggressively.
   const { data: users = [], isLoading } = useQuery<User[]>({
     queryKey: ['admin', 'users'],
-    queryFn: async () => (await apiClient.get('/admin/users')).data,
+    queryFn:  async () => (await apiClient.get('/admin/users')).data,
+    staleTime: 5 * 60_000,
+    gcTime:    10 * 60_000,
   });
 
   const { data: departments = [] } = useQuery<Department[]>({
     queryKey: ['admin', 'departments'],
-    queryFn: async () => (await apiClient.get('/admin/departments')).data,
+    queryFn:  async () => (await apiClient.get('/admin/departments')).data,
+    staleTime: 10 * 60_000,
+    gcTime:    15 * 60_000,
   });
 
   const createUser = useMutation({
@@ -610,22 +616,27 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
 
   const { data: routes = [], isLoading } = useQuery<ApprovalRoute[]>({
     queryKey: ['admin', 'routes'],
-    queryFn: async () => (await apiClient.get('/admin/routes')).data,
+    queryFn:  async () => (await apiClient.get('/admin/routes')).data,
+    staleTime: 5 * 60_000,
   });
 
+  // Shared cache w/ UsersTab — same key = single fetch across tabs
   const { data: users = [] } = useQuery<User[]>({
     queryKey: ['admin', 'users'],
-    queryFn: async () => (await apiClient.get('/admin/users')).data,
+    queryFn:  async () => (await apiClient.get('/admin/users')).data,
+    staleTime: 5 * 60_000,
   });
 
   const { data: departments = [] } = useQuery<Department[]>({
     queryKey: ['admin', 'departments'],
-    queryFn: async () => (await apiClient.get('/admin/departments')).data,
+    queryFn:  async () => (await apiClient.get('/admin/departments')).data,
+    staleTime: 10 * 60_000,
   });
 
   const { data: templates = [] } = useQuery<Template[]>({
     queryKey: ['admin', 'templates'],
-    queryFn: async () => (await apiClient.get('/admin/templates')).data,
+    queryFn:  async () => (await apiClient.get('/admin/templates')).data,
+    staleTime: 10 * 60_000,
   });
 
   const refetch = () => queryClient.invalidateQueries({ queryKey: ['admin', 'routes'] });
@@ -1040,7 +1051,8 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
 
   const { data: departments = [] } = useQuery<Department[]>({
     queryKey: ['admin', 'departments'],
-    queryFn: async () => (await apiClient.get('/admin/departments')).data,
+    queryFn:  async () => (await apiClient.get('/admin/departments')).data,
+    staleTime: 10 * 60_000,
   });
 
   const deleteApp = useMutation({
@@ -1307,7 +1319,7 @@ function PermissionsTab() {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-type Tab = 'routes' | 'users' | 'applications' | 'permissions';
+type Tab = 'routes' | 'users' | 'applications' | 'permissions' | 'forms';
 
 export default function Admin() {
   const [tab, setTab] = useState<Tab>('routes');
@@ -1318,6 +1330,7 @@ export default function Admin() {
     { key: 'routes',       label: t('admin_routes_tab'),  icon: '🔀' },
     { key: 'users',        label: t('admin_users_tab'),   icon: '👥' },
     { key: 'applications', label: t('admin_apps_tab'),    icon: '📋' },
+    { key: 'forms',        label: t('admin_forms_tab'),   icon: '📝' },
     { key: 'permissions',  label: t('admin_perms_tab'),   icon: '🛡️' },
   ];
 
@@ -1350,6 +1363,7 @@ export default function Admin() {
           {tab === 'routes'       && <RoutesTab showToast={showToast} />}
           {tab === 'users'        && <UsersTab showToast={showToast} />}
           {tab === 'applications' && <ApplicationsTab showToast={showToast} />}
+          {tab === 'forms'        && <FormsTab showToast={showToast} />}
           {tab === 'permissions'  && <PermissionsTab />}
         </div>
       </div>
