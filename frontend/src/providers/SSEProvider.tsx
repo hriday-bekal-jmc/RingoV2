@@ -43,6 +43,7 @@ interface CsvPayload       { jobId?: string }
 function keysForApprovalAction(d: ApprovalPayload): KeyList {
   const keys: KeyList = [
     ['dashboard', 'summary'],
+    ['dashboard', 'admin-overview'],
     ['pendingApprovals'],
     ['approvalHistory'],
   ];
@@ -58,6 +59,7 @@ function keysForApprovalAction(d: ApprovalPayload): KeyList {
 function keysForApplicationSubmitted(d: SubmitPayload): KeyList {
   const keys: KeyList = [
     ['dashboard', 'summary'],
+    ['dashboard', 'admin-overview'],
     ['myApplications'],
     ['pendingApprovals'],   // approver's inbox flips
   ];
@@ -72,6 +74,7 @@ function keysForApplicationSubmitted(d: SubmitPayload): KeyList {
 function keysForSettlementAction(d: SettlementPayload): KeyList {
   const keys: KeyList = [
     ['dashboard', 'summary'],
+    ['dashboard', 'admin-overview'],
     ['accountingSettlements'],
   ];
   if (d.applicationId) keys.push(['application', d.applicationId]);

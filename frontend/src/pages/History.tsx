@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { useScrollEnd } from '../hooks/useScrollEnd';
@@ -87,18 +87,35 @@ export default function History() {
     isFetchingNextPage,
     isLoading,
   } = useInfiniteQuery<{ items: Application[]; hasMore: boolean; offset: number }>({
-    queryKey: ['myApplications', statusFilter],
+    queryKey: ['myApplications'],                          // always ALL — filter is client-side
     queryFn: async ({ pageParam = 0 }) => (await apiClient.get(
-      `/applications?limit=${PAGE}&offset=${pageParam}&status=${statusFilter}`
+      `/applications?limit=${PAGE}&offset=${pageParam}&status=ALL`
     )).data,
     initialPageParam: 0,
     getNextPageParam: (last, all) => last.hasMore ? all.length * PAGE : undefined,
     staleTime: 30_000,
-    // Heavy paginated list — free pages quickly when user navigates away
     gcTime:    60_000,
   });
 
   const applications = data?.pages.flatMap(p => p.items) ?? [];
+  // Client-side filter — no re-fetch on tab switch
+  const sorted = statusFilter === 'ALL'
+    ? applications
+    : applications.filter(a => a.status === statusFilter);
+
+  // Auto-fetch next pages when active filter yields too few visible results.
+  // Keeps fetching (same ALL query, next page) until ≥8 filtered items are
+  // visible or all pages are exhausted. Prevents "filter shows 2 items but
+  // 10 more exist 3 pages away" problem without adding new query types.
+  const MIN_VISIBLE = 8;
+  const autoFetchingRef = useRef(false);
+  useEffect(() => {
+    if (statusFilter === 'ALL') return;           // ALL never needs this
+    if (sorted.length >= MIN_VISIBLE) return;     // enough already visible
+    if (!hasNextPage || isFetchingNextPage) return;
+    autoFetchingRef.current = true;
+    fetchNextPage();
+  }, [sorted.length, hasNextPage, isFetchingNextPage, statusFilter, fetchNextPage]);
 
   const sentinelRef = useScrollEnd(
     useCallback(() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }, [hasNextPage, isFetchingNextPage, fetchNextPage]),
@@ -123,8 +140,6 @@ export default function History() {
     onError: (err: any) => showToast(`${t('toast_submit_error')}: ${err.message}`, 'error'),
   });
 
-  // Server handles status filter + sort — just alias locally
-  const sorted = applications;
   const draftCount = applications.filter((a) => a.status === 'DRAFT').length;
 
   return (
@@ -168,7 +183,7 @@ export default function History() {
           <div>
             <p className="section-title mb-0">{t('title_history')}</p>
             <p className="text-2xl font-bold text-warmgray-800 mt-1">
-              {applications.length} {t('history_items_suffix')}
+              {sorted.length}{statusFilter !== 'ALL' && applications.length > sorted.length ? `/${applications.length}` : ''} {t('history_items_suffix')}
               {draftCount > 0 && (
                 <span className="ml-2 text-sm font-normal text-warmgray-400">
                   {lang === 'en'

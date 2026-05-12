@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useScrollEnd } from '../hooks/useScrollEnd';
 import { Link } from 'react-router-dom';
@@ -316,16 +316,28 @@ export default function Accounting() {
     isFetchingNextPage,
     isLoading,
   } = useInfiniteQuery<{ items: Settlement[]; hasMore: boolean; offset: number }>({
-    queryKey: ['accountingSettlements', filter],
+    queryKey: ['accountingSettlements'],                   // always ALL — filter is client-side
     queryFn: async ({ pageParam = 0 }) => (await apiClient.get(
-      `/accounting/settlements?filter=${filter}&limit=${PAGE}&offset=${pageParam}`
+      `/accounting/settlements?filter=ALL&limit=${PAGE}&offset=${pageParam}`
     )).data,
     initialPageParam: 0,
     getNextPageParam: (last, all) => last.hasMore ? all.length * PAGE : undefined,
     staleTime: 30_000,
   });
 
-  const filtered = data?.pages.flatMap(p => p.items) ?? [];
+  const allItems = data?.pages.flatMap(p => p.items) ?? [];
+  // Client-side filter — no re-fetch on tab switch
+  const filtered = filter === 'ALL' ? allItems
+    : filter === 'PENDING' ? allItems.filter(s => s.app_status === 'PENDING_SETTLEMENT')
+    : allItems.filter(s => ['COMPLETED', 'SETTLEMENT_APPROVED'].includes(s.app_status));
+
+  const MIN_VISIBLE = 8;
+  useEffect(() => {
+    if (filter === 'ALL') return;
+    if (filtered.length >= MIN_VISIBLE) return;
+    if (!hasNextPage || isFetchingNextPage) return;
+    fetchNextPage();
+  }, [filtered.length, hasNextPage, isFetchingNextPage, filter, fetchNextPage]);
 
   const sentinelRef = useScrollEnd(
     useCallback(() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }, [hasNextPage, isFetchingNextPage, fetchNextPage]),

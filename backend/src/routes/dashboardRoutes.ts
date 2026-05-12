@@ -205,4 +205,104 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+// ── GET /dashboard/admin-overview — ADMIN only, company-wide stats ────────────
+router.get('/admin-overview', async (req: Request, res: Response): Promise<void> => {
+  if (req.user!.role !== 'ADMIN') {
+    res.status(403).json({ error: 'ADMIN only' });
+    return;
+  }
+
+  const CACHE_KEY = 'dashboard:admin-overview';
+
+  try {
+    const cached = await redis.get(CACHE_KEY);
+    if (cached) { res.json(JSON.parse(cached)); return; }
+  } catch { /* fall through */ }
+
+  try {
+    const [statusRes, deptRes, pendingRes, recentRes, settleRes] = await Promise.all([
+
+      // 1. Company-wide status counts
+      query(
+        `SELECT status, COUNT(*)::int AS n FROM applications GROUP BY status`,
+        [],
+      ),
+
+      // 2. Apps per department
+      query(
+        `SELECT
+           COALESCE(d.name, '未設定') AS dept_name,
+           COUNT(*)::int             AS total,
+           COUNT(*) FILTER (WHERE a.status = 'PENDING_APPROVAL')::int AS pending,
+           COUNT(*) FILTER (WHERE a.status IN ('PENDING_SETTLEMENT','SETTLEMENT_APPROVED'))::int AS in_settlement,
+           COUNT(*) FILTER (WHERE a.status = 'COMPLETED')::int AS completed
+         FROM applications a
+         JOIN users u ON u.id = a.applicant_id
+         LEFT JOIN departments d ON d.id = u.department_id
+         GROUP BY d.name
+         ORDER BY total DESC
+         LIMIT 10`,
+        [],
+      ),
+
+      // 3. Pending approval steps — grouped by assigned approver
+      query(
+        `SELECT
+           COALESCE(u.full_name, '未割当') AS approver_name,
+           COUNT(*)::int AS pending_count
+         FROM approval_steps s
+         LEFT JOIN users u ON u.id = s.approver_id
+         WHERE s.status = 'PENDING'
+         GROUP BY u.full_name
+         ORDER BY pending_count DESC
+         LIMIT 8`,
+        [],
+      ),
+
+      // 4. Recent 8 company-wide apps
+      query(
+        `SELECT
+           a.id, a.application_number, a.status, a.created_at,
+           t.title_ja AS template_name, t.code AS template_code,
+           u.full_name AS applicant_name,
+           COALESCE(d.name, '—') AS dept_name
+         FROM applications a
+         JOIN form_templates t ON t.id = a.template_id
+         JOIN users u ON u.id = a.applicant_id
+         LEFT JOIN departments d ON d.id = u.department_id
+         ORDER BY a.created_at DESC
+         LIMIT 5`,
+        [],
+      ),
+
+      // 5. Settlement overview
+      query(
+        `SELECT
+           COUNT(*) FILTER (WHERE a.status = 'PENDING_SETTLEMENT')::int   AS awaiting_approval,
+           COUNT(*) FILTER (WHERE a.status = 'SETTLEMENT_APPROVED')::int  AS awaiting_transfer,
+           COUNT(*) FILTER (WHERE a.status = 'COMPLETED')::int            AS completed
+         FROM applications a
+         WHERE a.status IN ('PENDING_SETTLEMENT','SETTLEMENT_APPROVED','COMPLETED')`,
+        [],
+      ),
+    ]);
+
+    const overview = {
+      status_counts: Object.fromEntries(
+        statusRes.rows.map((r: any) => [r.status, r.n])
+      ),
+      dept_breakdown: deptRes.rows,
+      pending_by_approver: pendingRes.rows,
+      recent_activity: recentRes.rows,
+      settlement_overview: settleRes.rows[0] ?? { awaiting_approval: 0, awaiting_transfer: 0, completed: 0 },
+    };
+
+    redis.setex(CACHE_KEY, 120, JSON.stringify(overview)).catch(() => {});
+    res.json(overview);
+  } catch (err) {
+    console.error('[dashboard] admin-overview failed:', err);
+    res.status(500).json({ error: '管理者ダッシュボードの取得に失敗しました' });
+  }
+});
+
 export default router;
