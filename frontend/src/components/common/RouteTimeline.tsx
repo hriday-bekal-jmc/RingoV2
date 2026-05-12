@@ -4,10 +4,11 @@
  */
 
 interface RouteStep {
-  step_order: number;
-  label?: string;
+  step_order:   number;
+  label?:        string;
   approver_name?: string;
   approver_role?: string;
+  action_type?:  string;   // 'APPROVE' (default) | 'CONFIRM'
 }
 
 interface RouteTimelineProps {
@@ -38,23 +39,29 @@ function Node({
   variant,
   index,
   accent = 'ringo',
+  actionType = 'APPROVE',
 }: {
   label?: string;
   name: string;
   variant: 'origin' | 'approver' | 'done';
   index?: number;
   accent?: 'ringo' | 'teal';
+  actionType?: string;
 }) {
-  const isOrigin = variant === 'origin';
-  const isDone = variant === 'done';
+  const isOrigin  = variant === 'origin';
+  const isDone    = variant === 'done';
+  const isConfirm = !isOrigin && !isDone && actionType === 'CONFIRM';
 
-  const approverCircle =
-    accent === 'teal'
+  // Confirm steps use amber/mustard palette regardless of accent prop
+  const approverCircle = isConfirm
+    ? 'bg-gradient-to-br from-amber-400 to-mustard-500 shadow-[0_3px_12px_rgba(217,153,52,0.38)]'
+    : accent === 'teal'
       ? 'bg-gradient-to-br from-teal-400 to-teal-600 shadow-[0_3px_12px_rgba(20,184,166,0.38)]'
       : 'bg-gradient-to-br from-ringo-400 to-ringo-600 shadow-[0_3px_12px_rgba(199,91,71,0.38)]';
 
-  const badgeBg =
-    accent === 'teal'
+  const badgeBg = isConfirm
+    ? 'bg-amber-100 text-amber-700 ring-amber-200/60'
+    : accent === 'teal'
       ? 'bg-teal-100 text-teal-600 ring-teal-200/60'
       : 'bg-ringo-100 text-ringo-600 ring-ringo-200/60';
 
@@ -86,6 +93,12 @@ function Node({
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
           </svg>
+        ) : isConfirm ? (
+          /* Eye icon for CONFIRM steps */
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
         ) : (
           <span className="text-xs font-bold">{index}</span>
         )}
@@ -102,6 +115,13 @@ function Node({
       {label && !isOrigin && !isDone && (
         <span className="text-[9px] text-warmgray-400 text-center leading-tight max-w-[72px] mt-0.5">
           {label}
+        </span>
+      )}
+
+      {/* CONFIRM type pill */}
+      {isConfirm && (
+        <span className="mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[8px] font-bold ring-1 ring-amber-200/60 leading-none">
+          確認
         </span>
       )}
     </div>
@@ -133,6 +153,7 @@ export default function RouteTimeline({
               variant="approver"
               index={i + 1}
               accent={accent}
+              actionType={step.action_type ?? 'APPROVE'}
             />
           </div>
         ))}

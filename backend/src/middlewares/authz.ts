@@ -98,7 +98,7 @@ export async function assertCanActOnStep(
   actor: Actor,
   appId: string,
   allowedStatuses: string[],
-): Promise<{ id: string; step_order: number; approver_id: string | null; stage: string }> {
+): Promise<{ id: string; step_order: number; approver_id: string | null; stage: string; action_type: string }> {
   // Lock app row
   const appRow = await client.query(
     `SELECT id, status FROM applications WHERE id = $1 FOR UPDATE`,
@@ -112,7 +112,7 @@ export async function assertCanActOnStep(
 
   // Current pending step
   const stepRes = await client.query(
-    `SELECT id, step_order, approver_id, stage
+    `SELECT id, step_order, approver_id, stage, action_type
      FROM approval_steps
      WHERE application_id = $1 AND status = 'PENDING'
      ORDER BY step_order ASC LIMIT 1`,
@@ -122,7 +122,7 @@ export async function assertCanActOnStep(
     throw httpErr(409, '保留中のステップが見つかりません');
   }
   const step = stepRes.rows[0] as {
-    id: string; step_order: number; approver_id: string | null; stage: string;
+    id: string; step_order: number; approver_id: string | null; stage: string; action_type: string;
   };
 
   if (actor.role === 'ADMIN') return step;

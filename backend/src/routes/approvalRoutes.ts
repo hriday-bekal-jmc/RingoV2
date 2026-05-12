@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../config/db';
 import { requireAuth } from '../middlewares/authMiddleware';
-import { assertCanActOnStep } from '../middlewares/authz';
+import { assertCanActOnStep, httpErr } from '../middlewares/authz';
 import { mutationLimiter } from '../middlewares/rateLimit';
 import { insertOutboxEvent } from '../services/eventOutbox';
 import { computeApplicationRecipients } from '../services/eventRecipients';
@@ -261,6 +261,12 @@ router.post('/:id/return', async (req: Request, res: Response): Promise<void> =>
         String(id),
         ['PENDING_APPROVAL', 'PENDING_SETTLEMENT'],
       );
+
+      // CONFIRM steps are acknowledgment-only — return/reject not permitted.
+      if (currentStep.action_type === 'CONFIRM') {
+        throw httpErr(403, 'このステップは確認のみです。差し戻しはできません。');
+      }
+
       const pendingStage = currentStep.stage;
 
       await client.query(
@@ -323,6 +329,11 @@ router.post('/:id/reject', async (req: Request, res: Response): Promise<void> =>
         String(id),
         ['PENDING_APPROVAL', 'PENDING_SETTLEMENT'],
       );
+
+      // CONFIRM steps are acknowledgment-only — reject not permitted.
+      if (currentStep.action_type === 'CONFIRM') {
+        throw httpErr(403, 'このステップは確認のみです。却下はできません。');
+      }
 
       await client.query(
         `UPDATE applications SET status = 'REJECTED' WHERE id = $1`,

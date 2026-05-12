@@ -883,6 +883,11 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
                           {step.approver_name ?? '(未割当)'}
                         </p>
                         <p className="text-[9px] text-warmgray-400">{step.label}</p>
+                        {step.action_type === 'CONFIRM' && (
+                          <span className="mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[8px] font-bold ring-1 ring-amber-200/60 leading-none">
+                            確認
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -934,8 +939,8 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
                   <label className="label">{t('admin_step_action')}</label>
                   <CustomSelect
                     options={[
-                      { value: 'APPROVE', label: 'APPROVE' },
-                      { value: 'CONFIRM', label: 'CONFIRM' },
+                      { value: 'APPROVE', label: lang === 'en' ? 'Approve (can reject/return)' : '承認（差戻・却下あり）' },
+                      { value: 'CONFIRM', label: lang === 'en' ? 'Confirm (acknowledgment only)' : '確認のみ（差戻・却下なし）' },
                     ]}
                     value={newStep.action_type}
                     onChange={(v) => setNewStep({ ...newStep, action_type: v })}

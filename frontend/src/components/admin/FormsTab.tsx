@@ -14,6 +14,7 @@ import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../../services/apiClient';
 import { useLang } from '../../context/LanguageContext';
+import ConfirmDialog from '../common/ConfirmDialog';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 interface FieldOption {
@@ -138,6 +139,7 @@ export default function FormsTab({ showToast }: { showToast: (m: string, t?: 'su
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating]   = useState(false);
+  const [confirmHardDelete, setConfirmHardDelete] = useState<TemplateListItem | null>(null);
 
   const { data: templates, isLoading } = useQuery<TemplateListItem[]>({
     queryKey: ['form-templates'],
@@ -244,13 +246,7 @@ export default function FormsTab({ showToast }: { showToast: (m: string, t?: 'su
                 {/* Hard delete only when zero apps reference this template */}
                 {t.application_count === 0 && (
                   <button
-                    onClick={() => {
-                      if (confirm(lang === 'en'
-                        ? `Permanently delete "${t.title_ja}"? This cannot be undone.`
-                        : `「${t.title_ja}」を完全に削除しますか？元に戻せません。`)) {
-                        hardDelete.mutate(t.id);
-                      }
-                    }}
+                    onClick={() => setConfirmHardDelete(t)}
                     disabled={hardDelete.isPending}
                     className="text-xs px-2.5 py-1.5 rounded-lg font-semibold border border-red-200/60 text-red-600 hover:bg-red-50 transition-colors"
                     title={lang === 'en' ? 'Permanently delete (no apps reference this)' : '完全削除（申請なし）'}
@@ -278,6 +274,22 @@ export default function FormsTab({ showToast }: { showToast: (m: string, t?: 'su
           showToast={showToast}
         />
       )}
+
+      <ConfirmDialog
+        isOpen={confirmHardDelete !== null}
+        title={lang === 'en' ? 'Permanently delete form?' : 'フォームを完全に削除しますか？'}
+        message={lang === 'en'
+          ? `"${confirmHardDelete?.title_ja}" will be permanently deleted. This cannot be undone.`
+          : `「${confirmHardDelete?.title_ja}」を完全に削除します。この操作は元に戻せません。`}
+        confirmLabel={lang === 'en' ? 'Delete permanently' : '完全に削除する'}
+        confirmClass="btn-danger"
+        cancelLabel={lang === 'en' ? 'Cancel' : 'キャンセル'}
+        onConfirm={() => {
+          if (confirmHardDelete) hardDelete.mutate(confirmHardDelete.id);
+          setConfirmHardDelete(null);
+        }}
+        onCancel={() => setConfirmHardDelete(null)}
+      />
     </div>
   );
 }
@@ -449,7 +461,24 @@ function FormBuilder({
     setCurrentFields(next);
   };
 
+  const checkUniqueNames = (flds: FormField[], schemaLabel: string): boolean => {
+    const names = flds.map(f => f.name.trim()).filter(Boolean);
+    const dupes = names.filter((n, i) => names.indexOf(n) !== i);
+    if (dupes.length) {
+      showToast(
+        `${schemaLabel}: ${lang === 'en' ? 'Duplicate field names' : '重複フィールド名'} — ${[...new Set(dupes)].join(', ')}`,
+        'error',
+      );
+      return false;
+    }
+    return true;
+  };
+
   const handleSave = async () => {
+    // Uniqueness guard — runs for both new and edit paths
+    if (hasRingi && !checkUniqueNames(fields, lang === 'en' ? 'Ringi schema' : '稟議スキーマ')) return;
+    if (hasSettlement && !checkUniqueNames(settleFields, lang === 'en' ? 'Settlement schema' : '精算スキーマ')) return;
+
     if (isNew) {
       if (!code.trim()) { showToast('code が必須です', 'error'); return; }
       if (!titleJa.trim()) { showToast('日本語タイトルが必須です', 'error'); return; }
@@ -814,13 +843,20 @@ function FieldEditor({
       {/* Top row: name + type + move/delete */}
       <div className="flex items-center gap-2">
         <span className="text-[10px] font-bold text-warmgray-400 w-6">#{index + 1}</span>
-        <input
-          type="text"
-          value={field.name}
-          onChange={(e) => onUpdate({ name: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') })}
-          className="input flex-1 text-xs font-mono"
-          placeholder="field_name"
-        />
+        <div className="flex-1 min-w-0">
+          <input
+            type="text"
+            value={field.name}
+            onChange={(e) => onUpdate({ name: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') })}
+            className={`input w-full text-xs font-mono ${siblingNames.includes(field.name) ? 'border-red-400 ring-1 ring-red-300' : ''}`}
+            placeholder="field_name"
+          />
+          {siblingNames.includes(field.name) && (
+            <p className="text-[10px] text-red-500 mt-0.5 pl-0.5">
+              {lang === 'en' ? '⚠ Duplicate name — must be unique' : '⚠ 重複しています — 一意にしてください'}
+            </p>
+          )}
+        </div>
         <select
           value={field.type}
           onChange={(e) => onUpdate({ type: e.target.value })}
@@ -1087,6 +1123,7 @@ function VersionHistory({
   deletingId:   string | undefined;
 }) {
   const { lang } = useLang();
+  const [pendingDelete, setPendingDelete] = useState<TemplateVersion | null>(null);
 
   return (
     <div className="space-y-2">
@@ -1125,9 +1162,7 @@ function VersionHistory({
                     : (lang === 'en' ? 'Activate' : '有効化')}
                 </button>
                 <button
-                  onClick={() => {
-                    if (confirm(lang === 'en' ? `Delete v${v.version_number}?` : `v${v.version_number} を削除しますか？`)) onDelete(v.id);
-                  }}
+                  onClick={() => setPendingDelete(v)}
                   disabled={activatingId === v.id || deletingId === v.id}
                   className="text-xs px-3 py-1.5 rounded-lg font-semibold border border-red-200/60 text-red-600 hover:bg-red-50 transition-colors"
                   title={lang === 'en' ? 'Delete this version (only if no applications reference it)' : 'バージョン削除（参照する申請がない場合のみ）'}
@@ -1139,6 +1174,22 @@ function VersionHistory({
           </li>
         ))}
       </ul>
+
+      <ConfirmDialog
+        isOpen={pendingDelete !== null}
+        title={lang === 'en' ? 'Delete this version?' : 'このバージョンを削除しますか？'}
+        message={lang === 'en'
+          ? `v${pendingDelete?.version_number} will be permanently removed. Applications referencing it cannot be deleted.`
+          : `v${pendingDelete?.version_number} を削除します。このバージョンを参照する申請がある場合は削除できません。`}
+        confirmLabel={lang === 'en' ? 'Delete version' : 'バージョンを削除'}
+        confirmClass="btn-danger"
+        cancelLabel={lang === 'en' ? 'Cancel' : 'キャンセル'}
+        onConfirm={() => {
+          if (pendingDelete) onDelete(pendingDelete.id);
+          setPendingDelete(null);
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

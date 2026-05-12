@@ -460,10 +460,18 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
   const [comment, setComment] = useState('');
   const [showDetail, setShowDetail] = useState(false);
 
+  const isConfirmStep = app.current_step_action === 'CONFIRM';
+
   const actionConfig = {
-    approve: { title: t('approvals_approve_btn'), btnClass: 'btn-primary',  require: false, icon: '✓', iconBg: 'bg-emerald-100 text-emerald-600' },
-    return:  { title: t('btn_return'),             btnClass: 'btn-outline',  require: true,  icon: '↩', iconBg: 'bg-amber-100 text-amber-600'   },
-    reject:  { title: t('btn_reject'),             btnClass: 'btn-danger',   require: true,  icon: '✕', iconBg: 'bg-red-100 text-red-600'       },
+    approve: {
+      title:    isConfirmStep ? (lang === 'en' ? 'Confirm' : '確認する') : t('approvals_approve_btn'),
+      btnClass: 'btn-primary',
+      require:  false,
+      icon:     '✓',
+      iconBg:   'bg-emerald-100 text-emerald-600',
+    },
+    return:  { title: t('btn_return'), btnClass: 'btn-outline', require: true, icon: '↩', iconBg: 'bg-amber-100 text-amber-600' },
+    reject:  { title: t('btn_reject'), btnClass: 'btn-danger',  require: true, icon: '✕', iconBg: 'bg-red-100 text-red-600'    },
   };
 
   const isFinal = activeAction === 'approve' && Number(app.current_step) === Number(app.total_steps);
@@ -630,16 +638,22 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
                 </svg>
               </button>
               <div className="flex-1" />
-              <button className="btn-outline text-sm" onClick={() => { setActiveAction('return'); setComment(''); }} disabled={isMutating}>
-                ↩ {t('btn_return')}
-              </button>
-              <button className="btn-danger text-sm" onClick={() => { setActiveAction('reject'); setComment(''); }} disabled={isMutating}>
-                ✕ {t('btn_reject')}
-              </button>
+              {app.current_step_action !== 'CONFIRM' && (
+                <>
+                  <button className="btn-outline text-sm" onClick={() => { setActiveAction('return'); setComment(''); }} disabled={isMutating}>
+                    ↩ {t('btn_return')}
+                  </button>
+                  <button className="btn-danger text-sm" onClick={() => { setActiveAction('reject'); setComment(''); }} disabled={isMutating}>
+                    ✕ {t('btn_reject')}
+                  </button>
+                </>
+              )}
               <button className="btn-primary text-sm" onClick={() => { setActiveAction('approve'); setComment(''); }} disabled={isMutating}>
-                {Number(app.current_step) === Number(app.total_steps)
-                  ? `✓ ${t('approvals_final_btn')}`
-                  : `✓ ${t('approvals_approve_btn')}`}
+                {app.current_step_action === 'CONFIRM'
+                  ? `✓ ${lang === 'en' ? 'Confirm' : '確認する'}`
+                  : Number(app.current_step) === Number(app.total_steps)
+                    ? `✓ ${t('approvals_final_btn')}`
+                    : `✓ ${t('approvals_approve_btn')}`}
               </button>
             </div>
           )}
