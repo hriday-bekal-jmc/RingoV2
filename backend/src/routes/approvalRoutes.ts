@@ -28,6 +28,7 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
          t.schema_definition, t.settlement_schema,
          u.full_name AS applicant_name,
          u.avatar_url AS applicant_avatar,
+         COALESCE(d.name, '—') AS department_name,
          s.id AS current_step_id,
          (s.step_order - (s.step_order / 100) * 100) AS current_step,
          s.stage AS current_stage,
@@ -42,6 +43,7 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
        FROM applications a
        JOIN form_templates t ON a.template_id = t.id
        LEFT JOIN users u ON a.applicant_id = u.id
+       LEFT JOIN departments d ON d.id = u.department_id
        JOIN approval_steps s
          ON s.application_id = a.id AND s.status = 'PENDING'
        LEFT JOIN users approver ON s.approver_id = approver.id

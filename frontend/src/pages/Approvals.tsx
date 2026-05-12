@@ -26,6 +26,7 @@ interface Application {
   template_name: string;
   applicant_name?: string;
   applicant_avatar?: string | null;
+  department_name?: string;
   current_step_id: string;
   current_step: number;
   current_stage?: string;
@@ -491,7 +492,14 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
               <div className="min-w-0">
                 <h3 className="text-lg font-bold text-warmgray-800 leading-tight">{app.template_name}</h3>
                 {app.applicant_name && (
-                  <p className="text-xs text-warmgray-500 mt-0.5">{t('approvals_applicant_lbl')}: {app.applicant_name}</p>
+                  <p className="text-xs text-warmgray-500 mt-0.5">
+                    {t('approvals_applicant_lbl')}: {app.applicant_name}
+                    {app.department_name && app.department_name !== '—' && (
+                      <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-surface-100/80 text-warmgray-500 border border-surface-200/60">
+                        {app.department_name}
+                      </span>
+                    )}
+                  </p>
                 )}
                 <p className="text-[11px] text-warmgray-400 mt-0.5">
                   {new Date(app.created_at).toLocaleDateString(dateLocale, { year: 'numeric', month: 'long', day: 'numeric' })}
@@ -832,7 +840,14 @@ export default function Approvals() {
                               <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700">{t('approvals_settlement_badge')}</span>
                             )}
                           </div>
-                          <p className="text-[11px] text-warmgray-400 mt-0.5 truncate">{app.applicant_name}</p>
+                          <p className="text-[11px] text-warmgray-400 mt-0.5 truncate">
+                            {app.applicant_name}
+                            {app.department_name && app.department_name !== '—' && (
+                              <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-surface-100/80 text-warmgray-500 border border-surface-200/60">
+                                {app.department_name}
+                              </span>
+                            )}
+                          </p>
                         </div>
                       </div>
                     </td>
