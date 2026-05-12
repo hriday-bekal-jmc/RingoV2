@@ -8,6 +8,7 @@ import Layout from '../components/common/Layout';
 import { ROLE_MAP, Role } from '../config/permissions';
 import InlineConfirm from '../components/common/InlineConfirm';
 import AdminAppDetailModal from '../components/admin/AdminAppDetailModal';
+import RingoLoader from '../components/common/RingoLoader';
 import Toast, { useToast } from '../components/common/Toast';
 import CustomSelect from '../components/forms/CustomSelect';
 import { useLang } from '../context/LanguageContext';
@@ -352,7 +353,7 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
       </div>
 
       {isLoading ? (
-        <div className="text-warmgray-400 text-sm py-8 text-center">読み込み中...</div>
+        <RingoLoader.Block label="読み込み中..." />
       ) : (
         <div className="card !p-0 md:overflow-hidden">
           <table className="table-base table-responsive">
@@ -671,7 +672,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
     return true;
   });
 
-  if (isLoading) return <div className="text-warmgray-400 text-sm py-8 text-center">読み込み中...</div>;
+  if (isLoading) return <RingoLoader.Block label="読み込み中..." />;
 
   return (
     <div className="space-y-4">
@@ -980,12 +981,15 @@ interface AppRecord {
 }
 
 const STATUS_BADGE: Record<string, string> = {
-  PENDING_APPROVAL: 'badge-pending',
-  APPROVED:         'badge-approved',
-  REJECTED:         'badge-rejected',
-  RETURNED:         'badge-returned',
-  DRAFT:            'badge-draft',
-  CANCELLED:        'badge-draft',
+  PENDING_APPROVAL:    'badge-pending',
+  APPROVED:            'badge-approved',
+  REJECTED:            'badge-rejected',
+  RETURNED:            'badge-returned',
+  DRAFT:               'badge-draft',
+  CANCELLED:           'badge-draft',
+  COMPLETED:           'badge-indigo',
+  PENDING_SETTLEMENT:  'badge-mustard',
+  SETTLEMENT_APPROVED: 'badge-teal',
 };
 
 // STATUS_LABEL now computed dynamically in ApplicationsTab using t() for language support
@@ -1051,12 +1055,15 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
 
   // Language-aware status labels (reuses status_* keys already in i18n)
   const statusLabels: Record<string, string> = {
-    PENDING_APPROVAL: t('status_pending'),
-    APPROVED:         t('status_approved'),
-    REJECTED:         t('status_rejected'),
-    RETURNED:         t('status_returned'),
-    DRAFT:            t('status_draft'),
-    CANCELLED:        t('status_cancelled'),
+    PENDING_APPROVAL:    t('status_pending'),
+    APPROVED:            t('status_approved'),
+    REJECTED:            t('status_rejected'),
+    RETURNED:            t('status_returned'),
+    DRAFT:               t('status_draft'),
+    CANCELLED:           t('status_cancelled'),
+    COMPLETED:           t('status_completed'),
+    PENDING_SETTLEMENT:  t('status_pending_settle'),
+    SETTLEMENT_APPROVED: t('status_settle_approved'),
   };
 
   const hasActiveFilter = !!(search || deptFilter || statusFilter);
@@ -1108,7 +1115,7 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
       </div>
 
       {isLoading ? (
-        <div className="text-warmgray-400 text-sm py-8 text-center">読み込み中...</div>
+        <RingoLoader.Block label="読み込み中..." />
       ) : (
         <div className="card !p-0 md:overflow-hidden">
           <table className="table-base table-responsive">

@@ -213,6 +213,8 @@ export default function AdminAppDetailModal({ appId, onClose }: Props) {
                 accent="ringo"
                 data={data.application.form_data}
                 schema={data.application.schema_definition}
+                files={data.files}
+                lang={lang}
               />
               {data.application.settlement_data && (
                 <FormDataCard
@@ -220,6 +222,8 @@ export default function AdminAppDetailModal({ appId, onClose }: Props) {
                   accent="teal"
                   data={data.application.settlement_data}
                   schema={data.application.settlement_schema}
+                  files={data.files}
+                  lang={lang}
                 />
               )}
               <TimelineCard steps={data.steps} lang={lang} dateLocale={dateLocale} />
@@ -312,11 +316,32 @@ function KVField({ label, value, mono }: { label: string; value: string; mono?: 
   );
 }
 
-function FormDataCard({ title, accent, data, schema }: {
+// Extract the file UUID from /api/files/<uuid> URLs (incl comma-joined lists).
+// Returns array of {url, file?} pairs so we can render filename + size if we
+// have metadata, falling back to a generic "添付 N" label if the file row is
+// missing (e.g. legacy data, file deleted, etc).
+function parseFileValue(
+  raw:   unknown,
+  files: FileRow[],
+): Array<{ url: string; file: FileRow | undefined }> {
+  if (raw == null || raw === '') return [];
+  const urls = String(raw).split(',').map((u) => u.trim()).filter(Boolean);
+  return urls.map((url) => {
+    // Match both relative `/api/files/<uuid>` and absolute URLs
+    const m = url.match(/\/api\/files\/([a-f0-9-]{8,})/i);
+    const id = m?.[1];
+    const file = id ? files.find((f) => f.id === id) : undefined;
+    return { url, file };
+  });
+}
+
+function FormDataCard({ title, accent, data, schema, files, lang }: {
   title:  string;
   accent: 'ringo' | 'teal';
   data:   Record<string, unknown>;
   schema: { fields: FormField[] } | null;
+  files:  FileRow[];
+  lang:   'ja' | 'en';
 }) {
   const fields = schema?.fields ?? [];
   const entries = fields.length > 0
@@ -339,7 +364,48 @@ function FormDataCard({ title, accent, data, schema }: {
       </div>
       <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-3">
         {entries.map((f) => {
-          const isLong = typeof f.value === 'string' && (f.type === 'textarea' || f.value.length > 50);
+          const isFile = f.type === 'file';
+          const isLong = !isFile && typeof f.value === 'string' && (f.type === 'textarea' || f.value.length > 50);
+
+          // File-type rendering: tiles instead of raw URL string.
+          if (isFile) {
+            const parsed = parseFileValue(f.value, files);
+            return (
+              <div key={f.name} className="md:col-span-2">
+                <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{f.label}</dt>
+                <dd className="min-h-[36px]">
+                  {parsed.length === 0 ? (
+                    <span className="text-warmgray-300 text-xs">—</span>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {parsed.map(({ url, file }, i) => (
+                        <a
+                          key={url}
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 bg-white/70 hover:bg-white border border-white/80 hover:border-ringo-200 rounded-xl px-3 py-2 transition-colors group max-w-full"
+                        >
+                          <span className="text-base shrink-0">📎</span>
+                          <div className="min-w-0 text-left">
+                            <p className="text-xs font-semibold text-warmgray-800 group-hover:text-ringo-600 truncate">
+                              {file?.original_name ?? (lang === 'en' ? `Attachment ${i + 1}` : `添付 ${i + 1}`)}
+                            </p>
+                            <p className="text-[10px] text-warmgray-400">
+                              {file ? fmtBytes(file.file_size) : (lang === 'en' ? 'file' : 'ファイル')}
+                              {file?.mime_type ? ` · ${file.mime_type.split('/')[1]?.toUpperCase() ?? file.mime_type}` : ''}
+                              {file?.drive_url ? ' · Drive' : ''}
+                            </p>
+                          </div>
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </dd>
+              </div>
+            );
+          }
+
           return (
             <div key={f.name} className={isLong ? 'md:col-span-2' : ''}>
               <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{f.label}</dt>

@@ -7,6 +7,7 @@ import Layout from '../components/common/Layout';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import { useLang } from '../context/LanguageContext';
 import { templateLabel } from '../config/templateLabels';
+import RingoLoader from '../components/common/RingoLoader';
 
 interface Application {
   id: string;
@@ -205,12 +206,8 @@ export default function History() {
 
         {/* List */}
         {isLoading ? (
-          <div className="card flex items-center justify-center gap-3 py-16 text-warmgray-400">
-            <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-            </svg>
-            {t('loading')}
+          <div className="card">
+            <RingoLoader.Block label={t('loading')} />
           </div>
         ) : sorted.length === 0 ? (
           <div className="card flex flex-col items-center justify-center py-20 gap-4 text-warmgray-400 animate-fade-up">

@@ -15,14 +15,15 @@ const TEMPLATE_CODES = [
 
 function StatusBadge({ status, t }: { status: string; t: (k: any) => string }): JSX.Element {
   const map: Record<string, { cls: string; key: string }> = {
-    PENDING_APPROVAL: { cls: 'badge-pending',  key: 'status_pending' },
-    APPROVED:         { cls: 'badge-approved', key: 'status_approved' },
-    REJECTED:         { cls: 'badge-rejected', key: 'status_rejected' },
-    RETURNED:         { cls: 'badge-returned', key: 'status_returned' },
-    DRAFT:            { cls: 'badge-draft',    key: 'status_draft' },
-    COMPLETED:        { cls: 'badge-approved', key: 'status_completed' },
-    CANCELLED:        { cls: 'badge-draft',    key: 'status_cancelled' },
-    PENDING_SETTLEMENT: { cls: 'badge-mustard', key: 'status_pending_settle' },
+    PENDING_APPROVAL:   { cls: 'badge-pending',  key: 'status_pending' },
+    APPROVED:           { cls: 'badge-approved', key: 'status_approved' },
+    REJECTED:           { cls: 'badge-rejected', key: 'status_rejected' },
+    RETURNED:           { cls: 'badge-returned', key: 'status_returned' },
+    DRAFT:              { cls: 'badge-draft',    key: 'status_draft' },
+    COMPLETED:          { cls: 'badge-indigo',   key: 'status_completed' },
+    CANCELLED:          { cls: 'badge-draft',    key: 'status_cancelled' },
+    PENDING_SETTLEMENT: { cls: 'badge-mustard',  key: 'status_pending_settle' },
+    SETTLEMENT_APPROVED:{ cls: 'badge-teal',     key: 'status_settle_approved' },
   };
   const s = map[status];
   if (s) return <span className={s.cls}>{t(s.key as any)}</span>;
@@ -30,7 +31,7 @@ function StatusBadge({ status, t }: { status: string; t: (k: any) => string }): 
 }
 
 function MiniStepDots({ current, total }: { current: number | null; total: number }) {
-  if (!current || !total || total === 0) return null;
+  if (!current || !total || total === 0 || current > total) return null;
   return (
     <div className="flex items-center gap-1 mt-1">
       {Array.from({ length: Number(total) }).map((_, i) => {

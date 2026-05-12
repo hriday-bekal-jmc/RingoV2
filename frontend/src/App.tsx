@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { getPermissions } from './config/permissions';
 import ErrorBoundary from './components/common/ErrorBoundary';
+import RingoLoader from './components/common/RingoLoader';
 
 // ─── Eager imports (small, used on initial load) ─────────────────────────────
 import Login from './pages/Login';
@@ -20,31 +21,15 @@ const Accounting       = lazy(() => import('./pages/Accounting'));
 const ApprovalHistory  = lazy(() => import('./pages/ApprovalHistory'));
 const Settlement       = lazy(() => import('./pages/Settlement'));
 
-// Fallback shown while a lazy chunk downloads — matches the auth-loading look
+// Fallback shown while a lazy chunk downloads — branded line-draw loader
 function RouteLoading() {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-cream-100">
-      <div className="flex items-center gap-3 text-warmgray-600 text-sm">
-        <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-        </svg>
-        読み込み中...
-      </div>
-    </div>
-  );
+  return <RingoLoader.Page />;
 }
 
 // ─── ログイン認証ガード ───
 function RequireAuth({ children }: { children: ReactNode }) {
   const { isAuthenticated, loading } = useAuth();
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-cream-100">
-        <div className="text-warmgray-600 text-sm">読み込み中...</div>
-      </div>
-    );
-  }
+  if (loading) return <RingoLoader.Page />;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }

@@ -143,6 +143,7 @@
   .badge-ringo    { @apply badge bg-ringo-100/80   text-ringo-700   border border-ringo-200/80   backdrop-blur-sm; }
   .badge-mustard  { @apply badge bg-mustard-400/10 text-mustard-600 border border-mustard-400/30; }
   .badge-teal     { @apply badge bg-teal-100/80    text-teal-700   border border-teal-200/80    backdrop-blur-sm; }
+  .badge-indigo   { @apply badge bg-indigo-100/80  text-indigo-700 border border-indigo-200/80  backdrop-blur-sm; }
 
   /* ── Table ── */
   /* Desktop: clean table layout. Mobile: tables convert to a card list

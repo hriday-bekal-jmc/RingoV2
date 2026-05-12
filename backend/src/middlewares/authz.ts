@@ -48,7 +48,7 @@ interface Actor { id: string; role: string }
  *   - any user listed in approval_steps as approver_id (assigned approver)
  *   - any user who has acted on the app (acted_by)
  *   - users in same department as applicant + role >= MANAGER (departmental visibility)
- *   - ACCOUNTING (sees settlements)
+ *   - ACCOUNTING / SOUMU (both see all settlements; SOUMU handles accounting)
  *   - ADMIN
  */
 export async function assertCanReadApp(
@@ -56,7 +56,7 @@ export async function assertCanReadApp(
   appId: string,
   client?: pg.PoolClient,
 ): Promise<void> {
-  if (actor.role === 'ADMIN' || actor.role === 'ACCOUNTING') return;
+  if (actor.role === 'ADMIN' || actor.role === 'ACCOUNTING' || actor.role === 'SOUMU') return;
 
   const q = client ? client.query.bind(client) : query;
   const r = await q(

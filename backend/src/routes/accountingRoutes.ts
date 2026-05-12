@@ -24,16 +24,18 @@ function requireAccounting(req: Request, res: Response, next: NextFunction): voi
 router.use(requireAccounting);
 
 // ── File upload (transfer proof) ──────────────────────────────────────────────
-const proofStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, path.join(__dirname, '../../uploads')),
-  filename: (_req, file, cb) => {
-    const ts = Date.now();
-    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
-    cb(null, `proof_${ts}_${safe}`);
-  },
-});
+// Memory storage so we can either:
+//   (a) push to Google Drive when service account is configured, or
+//   (b) write to local FS as a fallback.
+// Either way the file is served via the auth-gated /api/files/:id route, so
+// no public /uploads mount is needed.
+import { isDriveEnabled, uploadToDrive } from '../services/driveService';
+
+const PROOF_UPLOADS_DIR = path.join(__dirname, '../../uploads');
+fs.mkdirSync(PROOF_UPLOADS_DIR, { recursive: true });
+
 const proofUpload = multer({
-  storage: proofStorage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = [
@@ -46,6 +48,12 @@ const proofUpload = multer({
     else cb(new Error(`対応していないファイル形式: ${file.mimetype}`));
   },
 });
+
+function safeProofName(original: string): string {
+  const ts = Date.now();
+  const safe = original.replace(/[^a-zA-Z0-9._-]/g, '_');
+  return `proof_${ts}_${safe}`;
+}
 
 // ── GET /accounting/settlements  (paginated, server-side filter)
 // ?filter=ALL|PENDING|DONE  &limit=25&offset=0
@@ -196,9 +204,59 @@ router.post(
       return;
     }
 
-    const fileUrl = `/uploads/${file.filename}`;
     try {
+      // Store file: Drive when configured, else local FS. Either way, the
+      // resulting URL is auth-gated /api/files/<id> so admins + the applicant
+      // can later view it from the AdminAppDetailModal or settlement page.
+      let stored_path  = '';
+      let drive_file_id: string | null = null;
+      let drive_url:     string | null = null;
+
+      if (isDriveEnabled()) {
+        const r = await uploadToDrive(file.originalname, file.mimetype, file.buffer, 'receipts');
+        drive_file_id = r.fileId;
+        drive_url     = r.webViewLink;
+        stored_path   = `drive:${r.fileId}`;
+      } else {
+        stored_path = safeProofName(file.originalname);
+        fs.writeFileSync(path.join(PROOF_UPLOADS_DIR, stored_path), file.buffer);
+      }
+
+      let fileUrl = '';
       await withTransaction(async (client: pg.PoolClient) => {
+        // Find the settlement's application so we can link the file to it
+        const settle = await client.query(
+          `SELECT application_id FROM settlements WHERE id = $1`,
+          [req.params.id],
+        );
+        if (settle.rows.length === 0) {
+          throw Object.assign(new Error('精算記録が見つかりません'), { status: 404 });
+        }
+        const applicationId = settle.rows[0].application_id as string;
+
+        // Insert uploaded_files row so the auth-gated /api/files/:id route
+        // can serve it (Drive redirect or local FS stream).
+        const fileRow = await client.query(
+          `INSERT INTO uploaded_files
+             (application_id, uploader_id, field_name, original_name,
+              stored_path, file_size, mime_type, drive_url, drive_file_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           RETURNING id`,
+          [
+            applicationId,
+            req.user!.id,
+            'transfer_proof',
+            file.originalname,
+            stored_path,
+            file.size,
+            file.mimetype,
+            drive_url,
+            drive_file_id,
+          ],
+        );
+        fileUrl = `/api/files/${fileRow.rows[0].id}`;
+
+        // Save URL on settlement
         const r = await client.query(
           `UPDATE settlements
            SET transfer_proof_url = $1, updated_at = CURRENT_TIMESTAMP
@@ -206,10 +264,8 @@ router.post(
            RETURNING id, application_id, transfer_proof_url`,
           [fileUrl, req.params.id],
         );
-        if (r.rows.length === 0) {
-          throw Object.assign(new Error('精算記録が見つかりません'), { status: 404 });
-        }
         const proofRow = r.rows[0] as { application_id: string };
+
         const recipients = await computeApplicationRecipients(client, proofRow.application_id, { includeAccounting: true });
         await insertOutboxEvent(client, {
           event_type:         'SETTLEMENT_ACTION',

@@ -27,11 +27,32 @@ export const redis = new Redis(baseOptions);
 // Do NOT issue regular commands on this client — they'll fail.
 export const redisSub = new Redis(baseOptions);
 
-// Helpful logging for both
-redis.on('error',    (err: Error) => console.error('[redis] connection error', err.message));
-redis.on('ready',    () => console.log('[redis] connected'));
-redisSub.on('error', (err: Error) => console.error('[redis-sub] connection error', err.message));
-redisSub.on('ready', () => console.log('[redis-sub] connected (pub/sub)'));
+// Helpful logging — but DEDUPED so a flapping connection doesn't flood logs.
+// ioredis fires 'error' on EVERY retry (100ms-3s). Log once per disconnect
+// cycle: first error → log it + set flag. Reconnect ('ready' event) clears
+// flag and logs once. All retries in between are silent.
+function attachDedupedLogging(client: Redis, label: string): void {
+  let disconnectLogged = false;
+  client.on('error', (err: Error) => {
+    if (disconnectLogged) return;
+    disconnectLogged = true;
+    console.warn(`[${label}] disconnected: ${err.message} (retries silent until reconnect)`);
+  });
+  client.on('ready', () => {
+    if (disconnectLogged) console.log(`[${label}] reconnected`);
+    else                  console.log(`[${label}] connected`);
+    disconnectLogged = false;
+  });
+  client.on('end', () => {
+    if (!disconnectLogged) {
+      disconnectLogged = true;
+      console.warn(`[${label}] connection closed`);
+    }
+  });
+}
+
+attachDedupedLogging(redis,    'redis');
+attachDedupedLogging(redisSub, 'redis-sub');
 
 // BullMQ wants a plain options object, not a client — it manages its own
 // connections internally for queue + worker pairs.

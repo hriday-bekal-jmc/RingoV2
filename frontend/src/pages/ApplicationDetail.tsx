@@ -64,12 +64,15 @@ function UserAvatar({ name, avatarUrl, size = 8 }: { name: string; avatarUrl?: s
 // ── UI Components ─────────────────────────────────────────────────────────────
 
 const STATUS_BADGE: Record<string, string> = {
-  PENDING_APPROVAL: 'badge-pending',
-  APPROVED: 'badge-approved',
-  REJECTED: 'badge-rejected',
-  RETURNED: 'badge-returned',
-  DRAFT: 'badge-draft',
-  CANCELLED: 'badge-draft',
+  PENDING_APPROVAL:    'badge-pending',
+  APPROVED:            'badge-approved',
+  REJECTED:            'badge-rejected',
+  RETURNED:            'badge-returned',
+  DRAFT:               'badge-draft',
+  CANCELLED:           'badge-draft',
+  COMPLETED:           'badge-indigo',
+  PENDING_SETTLEMENT:  'badge-mustard',
+  SETTLEMENT_APPROVED: 'badge-teal',
 };
 
 // ── View Mode: 申請データを綺麗に表示するコンポーネント ──
@@ -490,8 +493,9 @@ export default function ApplicationDetail() {
     RETURNED:         t('status_returned'),
     DRAFT:            t('status_draft'),
     CANCELLED:        t('status_cancelled'),
-    COMPLETED:        t('status_completed'),
-    PENDING_SETTLEMENT: t('status_pending_settle'),
+    COMPLETED:           t('status_completed'),
+    PENDING_SETTLEMENT:  t('status_pending_settle'),
+    SETTLEMENT_APPROVED: t('status_settle_approved'),
   };
 
   if (isLoading) return <Layout title={t('loading')}><div className="p-8 text-warmgray-500">{t('loading')}</div></Layout>;

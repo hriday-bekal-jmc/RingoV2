@@ -48,7 +48,17 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
 
     // Local fallback — stream from disk
     const abs = path.join(__dirname, '../../uploads', f.stored_path);
-    if (!fs.existsSync(abs)) { res.status(404).json({ error: 'File missing on disk' }); return; }
+    if (!fs.existsSync(abs)) {
+      // WARN not ERROR: recoverable, often caused by deleted/migrated files,
+      // not a code bug. Internal path NOT leaked to client (info-disclosure
+      // risk). Server-side log gets enough to grep + diagnose.
+      console.warn('[files] missing on disk', {
+        fileId:      f.id,
+        stored_path: f.stored_path,
+      });
+      res.status(404).json({ error: 'ファイルが見つかりません' });
+      return;
+    }
 
     res.setHeader('Content-Type', f.mime_type || 'application/octet-stream');
     res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(f.original_name)}"`);
