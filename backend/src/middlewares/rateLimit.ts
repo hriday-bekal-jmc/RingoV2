@@ -26,6 +26,7 @@ export const uploadLimiter = rateLimit({
 export const mutationLimiter = rateLimit({
   windowMs: 60 * 1000,
   limit:    300,
+  skip:     (req) => ['GET', 'HEAD', 'OPTIONS'].includes(req.method),
   standardHeaders: true,
   legacyHeaders:   false,
   message: { error: 'リクエストが多すぎます。少し待ってから再度お試しください。' },

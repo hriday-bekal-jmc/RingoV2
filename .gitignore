@@ -6,6 +6,9 @@ backend/uploads/*
 backend/exports/*
 !backend/exports/.gitkeep
 
+# Local Redis persistence
+backend/redis-data/
+
 # Dependencies
 node_modules/
 .pnp

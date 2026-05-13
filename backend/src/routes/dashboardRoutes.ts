@@ -86,19 +86,19 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
   }
 
   try {
-    // Parallel queries via Promise.all — all read-only, safe
-    const [countsRes, recentRes, pendingRes] = await Promise.all([
-      // 1. Status counts via GROUP BY (one row per status)
-      query(
+    // Keep these sequential to avoid one dashboard request occupying multiple
+    // Postgres connections on a cache miss. The individual queries are small.
+    // 1. Status counts via GROUP BY (one row per status)
+    const countsRes = await query(
         `SELECT status, COUNT(*)::text AS n
          FROM applications
          WHERE applicant_id = $1
          GROUP BY status`,
         [userId],
-      ),
+    );
 
-      // 2. Recent 5 with template join + step counts in one query
-      query(
+    // 2. Recent 5 with template join + step counts in one query
+    const recentRes = await query(
         `SELECT
            a.id, a.application_number, a.status, a.created_at, a.submitted_at,
            t.title_ja AS template_name, t.code AS template_code,
@@ -130,11 +130,11 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
          ORDER BY a.created_at DESC
          LIMIT 5`,
         [userId],
-      ),
+    );
 
       // 3. Pending approvals — only for approvers
-      canApprove
-        ? query(
+    const pendingRes = canApprove
+      ? await query(
             `SELECT
                s.id, s.application_id, a.application_number,
                t.title_ja AS template_name,
@@ -150,8 +150,7 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
              LIMIT 5`,
             [userId],
           )
-        : Promise.resolve({ rows: [] as Array<Record<string, unknown>> }),
-    ]);
+      : { rows: [] as Array<Record<string, unknown>> };
 
     // Build status_counts
     const status_counts: StatusCounts = { ...ZERO_COUNTS };
@@ -220,16 +219,17 @@ router.get('/admin-overview', async (req: Request, res: Response): Promise<void>
   } catch { /* fall through */ }
 
   try {
-    const [statusRes, deptRes, pendingRes, recentRes, settleRes] = await Promise.all([
+    // Keep this sequential to avoid a single admin request occupying five
+    // Postgres connections on a cache miss.
 
       // 1. Company-wide status counts
-      query(
+      const statusRes = await query(
         `SELECT status, COUNT(*)::int AS n FROM applications GROUP BY status`,
         [],
-      ),
+      );
 
       // 2. Apps per department
-      query(
+      const deptRes = await query(
         `SELECT
            COALESCE(d.name, '未設定') AS dept_name,
            COUNT(*)::int             AS total,
@@ -243,10 +243,10 @@ router.get('/admin-overview', async (req: Request, res: Response): Promise<void>
          ORDER BY total DESC
          LIMIT 10`,
         [],
-      ),
+      );
 
       // 3. Pending approval steps — grouped by assigned approver
-      query(
+      const pendingRes = await query(
         `SELECT
            COALESCE(u.full_name, '未割当') AS approver_name,
            COUNT(*)::int AS pending_count
@@ -257,10 +257,10 @@ router.get('/admin-overview', async (req: Request, res: Response): Promise<void>
          ORDER BY pending_count DESC
          LIMIT 8`,
         [],
-      ),
+      );
 
       // 4. Recent 8 company-wide apps
-      query(
+      const recentRes = await query(
         `SELECT
            a.id, a.application_number, a.status, a.created_at,
            t.title_ja AS template_name, t.code AS template_code,
@@ -273,10 +273,10 @@ router.get('/admin-overview', async (req: Request, res: Response): Promise<void>
          ORDER BY a.created_at DESC
          LIMIT 5`,
         [],
-      ),
+      );
 
       // 5. Settlement overview
-      query(
+      const settleRes = await query(
         `SELECT
            COUNT(*) FILTER (WHERE a.status = 'PENDING_SETTLEMENT')::int   AS awaiting_approval,
            COUNT(*) FILTER (WHERE a.status = 'SETTLEMENT_APPROVED')::int  AS awaiting_transfer,
@@ -284,8 +284,7 @@ router.get('/admin-overview', async (req: Request, res: Response): Promise<void>
          FROM applications a
          WHERE a.status IN ('PENDING_SETTLEMENT','SETTLEMENT_APPROVED','COMPLETED')`,
         [],
-      ),
-    ]);
+      );
 
     const overview = {
       status_counts: Object.fromEntries(
