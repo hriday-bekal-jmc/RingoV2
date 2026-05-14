@@ -125,10 +125,12 @@
     background-color: rgba(199,91,71,0.08);
   }
   .label {
-    @apply block text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1.5;
+    @apply block text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1.5 break-words;
+    overflow-wrap: anywhere;
   }
   .label-normal {
-    @apply block text-sm font-medium text-warmgray-600 mb-1.5;
+    @apply block text-sm font-medium text-warmgray-600 mb-1.5 break-words;
+    overflow-wrap: anywhere;
   }
 
   /* ── Badges ── */

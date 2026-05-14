@@ -67,6 +67,7 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
          ON s.application_id = a.id AND s.status = 'PENDING'
        LEFT JOIN users approver ON s.approver_id = approver.id
        WHERE a.status IN ('PENDING_APPROVAL', 'PENDING_SETTLEMENT')
+         AND a.archived_at IS NULL
          AND ($1 OR s.approver_id = $2)
          AND (
            $3::timestamptz IS NULL

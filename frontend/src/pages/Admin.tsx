@@ -994,6 +994,8 @@ interface AppRecord {
   applicant_email: string;
   department_name: string;
   created_at: string;
+  archived_at?: string | null;
+  archive_reason?: string | null;
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -1011,6 +1013,7 @@ const STATUS_BADGE: Record<string, string> = {
 // STATUS_LABEL now computed dynamically in ApplicationsTab using t() for language support
 
 const PAGE_APPS = 30;
+const ARCHIVABLE_STATUSES = new Set(['COMPLETED', 'REJECTED', 'CANCELLED']);
 
 function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error' | 'info') => void }) {
   const queryClient = useQueryClient();
@@ -1019,6 +1022,7 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [deptFilter, setDeptFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [archiveFilter, setArchiveFilter] = useState<'active' | 'archived' | 'all'>('active');
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   // Clicked-row → opens AdminAppDetailModal with full audit + flow
   const [openAppId, setOpenAppId] = useState<string | null>(null);
@@ -1036,11 +1040,11 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
     isFetchingNextPage,
     isLoading,
   } = useInfiniteQuery<{ items: AppRecord[]; hasMore: boolean; offset: number; nextCursor?: string | null }>({
-    queryKey: ['admin', 'applications', debouncedSearch, deptFilter, statusFilter],
+    queryKey: ['admin', 'applications', debouncedSearch, deptFilter, statusFilter, archiveFilter],
     queryFn: async ({ pageParam = null }) => {
       const cursor = pageParam ? `&cursor=${encodeURIComponent(String(pageParam))}` : '';
       return (await apiClient.get(
-        `/admin/applications?search=${encodeURIComponent(debouncedSearch)}&dept=${encodeURIComponent(deptFilter)}&status=${encodeURIComponent(statusFilter)}&limit=${PAGE_APPS}${cursor}`
+        `/admin/applications?search=${encodeURIComponent(debouncedSearch)}&dept=${encodeURIComponent(deptFilter)}&status=${encodeURIComponent(statusFilter)}&archive=${archiveFilter}&limit=${PAGE_APPS}${cursor}`
       )).data;
     },
     initialPageParam: null,
@@ -1063,14 +1067,25 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
     staleTime: 10 * 60_000,
   });
 
-  const deleteApp = useMutation({
-    mutationFn: async (id: string) => (await apiClient.delete(`/admin/applications/${id}`)).data,
+  const archiveApp = useMutation({
+    mutationFn: async (id: string) => (await apiClient.post(`/admin/applications/${id}/archive`, {})).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'applications'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       setConfirmingId(null);
-      showToast('申請を削除しました');
+      showToast('申請をアーカイブしました');
     },
-    onError: (err: any) => showToast(`削除失敗: ${err.message}`, 'error'),
+    onError: (err: any) => showToast(`アーカイブ失敗: ${err.message}`, 'error'),
+  });
+
+  const unarchiveApp = useMutation({
+    mutationFn: async (id: string) => (await apiClient.post(`/admin/applications/${id}/unarchive`, {})).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'applications'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      showToast('アーカイブを解除しました');
+    },
+    onError: (err: any) => showToast(`解除失敗: ${err.message}`, 'error'),
   });
 
   // Language-aware status labels (reuses status_* keys already in i18n)
@@ -1086,7 +1101,7 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
     SETTLEMENT_APPROVED: t('status_settle_approved'),
   };
 
-  const hasActiveFilter = !!(search || deptFilter || statusFilter);
+  const hasActiveFilter = !!(search || deptFilter || statusFilter || archiveFilter !== 'active');
 
   return (
     <div className="space-y-5">
@@ -1121,13 +1136,23 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
           value={statusFilter}
           onChange={setStatusFilter}
         />
+        <CustomSelect
+          className="w-full sm:w-36"
+          options={[
+            { value: 'active', label: '通常' },
+            { value: 'archived', label: 'アーカイブ' },
+            { value: 'all', label: '全て' },
+          ]}
+          value={archiveFilter}
+          onChange={(v) => setArchiveFilter(v as 'active' | 'archived' | 'all')}
+        />
         <span className="text-sm text-warmgray-400">
           {apps.length}{hasNextPage ? '+' : ''} {t('admin_apps_count')}
         </span>
         {hasActiveFilter && (
           <button
             className="text-xs text-ringo-500 hover:text-ringo-700 font-semibold"
-            onClick={() => { setSearch(''); setDeptFilter(''); setStatusFilter(''); }}
+            onClick={() => { setSearch(''); setDeptFilter(''); setStatusFilter(''); setArchiveFilter('active'); }}
           >
             {t('admin_clear_filter')}
           </button>
@@ -1168,22 +1193,40 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
                   </td>
                   <td data-label={t('admin_field_dept')} className="text-warmgray-500 text-xs">{a.department_name ?? '—'}</td>
                   <td data-label={t('admin_col_status')}>
-                    <span className={STATUS_BADGE[a.status] ?? 'badge-draft'}>
-                      {statusLabels[a.status] ?? a.status}
-                    </span>
+                    <div className="flex flex-wrap justify-end md:justify-start gap-1.5">
+                      <span className={STATUS_BADGE[a.status] ?? 'badge-draft'}>
+                        {statusLabels[a.status] ?? a.status}
+                      </span>
+                      {a.archived_at && (
+                        <span className="badge-draft">アーカイブ</span>
+                      )}
+                    </div>
                   </td>
                   <td data-label={t('admin_col_submitted')} className="text-[11px] text-warmgray-400">{new Date(a.created_at).toLocaleDateString('ja-JP')}</td>
                   <td onClick={(e) => e.stopPropagation()}>
-                    <InlineConfirm
-                      isActive={confirmingId === a.id}
-                      onTrigger={() => setConfirmingId(a.id)}
-                      onConfirm={() => deleteApp.mutate(a.id)}
-                      onCancel={() => setConfirmingId(null)}
-                      message="完全削除しますか？"
-                      confirmLabel="完全削除"
-                      triggerClass="text-xs text-warmgray-400 hover:text-red-500 transition-colors font-medium"
-                      disabled={deleteApp.isPending}
-                    />
+                    {a.archived_at ? (
+                      <button
+                        type="button"
+                        onClick={() => unarchiveApp.mutate(a.id)}
+                        disabled={unarchiveApp.isPending}
+                        className="text-xs text-teal-600 hover:text-teal-700 disabled:opacity-50 transition-colors font-medium"
+                      >
+                        解除
+                      </button>
+                    ) : ARCHIVABLE_STATUSES.has(a.status) ? (
+                      <InlineConfirm
+                        isActive={confirmingId === a.id}
+                        onTrigger={() => setConfirmingId(a.id)}
+                        onConfirm={() => archiveApp.mutate(a.id)}
+                        onCancel={() => setConfirmingId(null)}
+                        message="アーカイブしますか？"
+                        confirmLabel="アーカイブ"
+                        triggerClass="text-xs text-warmgray-400 hover:text-ringo-500 transition-colors font-medium"
+                        disabled={archiveApp.isPending}
+                      />
+                    ) : (
+                      <span className="text-[11px] text-warmgray-300">保持中</span>
+                    )}
                   </td>
                 </tr>
               ))}

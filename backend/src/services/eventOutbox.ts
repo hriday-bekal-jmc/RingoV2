@@ -11,6 +11,8 @@ import { pool, query } from '../config/db';
 import type pg from 'pg';
 import { publish, BusEvent } from './sseEventBus';
 
+export const OUTBOX_NOTIFY_CHANNEL = 'event_outbox_new';
+
 export interface OutboxInsertInput {
   event_type:         string;
   entity_type:        string;
@@ -43,7 +45,9 @@ export async function insertOutboxEvent(
       JSON.stringify(input.payload ?? {}),
     ],
   );
-  return r.rows[0].id as string;
+  const id = r.rows[0].id as string;
+  await client.query(`SELECT pg_notify($1, $2)`, [OUTBOX_NOTIFY_CHANNEL, id]);
+  return id;
 }
 
 /**
@@ -57,31 +61,31 @@ export async function insertOutboxEvent(
  * Redis first, then calls markPublished() on success.
  */
 export async function claimUnpublished(batchSize = 50): Promise<BusEvent[]> {
-  // Note: claim must happen inside its own transaction. Released on COMMIT.
-  // We run the publish OUTSIDE the tx so a Redis hang doesn't lock rows.
+  // Claim rows with a short lease, then publish outside the tx. The lease
+  // prevents another worker from claiming the same row while this worker is
+  // publishing. If this process crashes, locked_until expires and the row is
+  // retried by another worker.
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const r = await client.query(
-      `SELECT id, event_type, entity_type, entity_id, recipient_user_ids, payload
-       FROM event_outbox
-       WHERE published_at IS NULL
-       ORDER BY created_at ASC
-       LIMIT $1
-       FOR UPDATE SKIP LOCKED`,
+      `WITH claim AS (
+         SELECT id
+         FROM event_outbox
+         WHERE published_at IS NULL
+           AND (locked_until IS NULL OR locked_until < NOW())
+         ORDER BY created_at ASC
+         LIMIT $1
+         FOR UPDATE SKIP LOCKED
+       )
+       UPDATE event_outbox e
+       SET attempts = attempts + 1,
+           locked_until = NOW() + INTERVAL '30 seconds'
+       FROM claim
+       WHERE e.id = claim.id
+       RETURNING e.id, e.event_type, e.entity_type, e.entity_id, e.recipient_user_ids, e.payload`,
       [batchSize],
     );
-    // Mark attempts++ now, before publish — so even if publish hangs we know
-    // we tried this batch. Real publish success marks published_at separately.
-    if (r.rows.length > 0) {
-      const ids = r.rows.map((row) => row.id);
-      await client.query(
-        `UPDATE event_outbox
-         SET attempts = attempts + 1
-         WHERE id = ANY($1::uuid[])`,
-        [ids],
-      );
-    }
     await client.query('COMMIT');
 
     return r.rows.map((row) => ({
@@ -107,7 +111,8 @@ export async function markPublished(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
   await query(
     `UPDATE event_outbox
-     SET published_at = NOW()
+     SET published_at = NOW(),
+         locked_until = NULL
      WHERE id = ANY($1::uuid[])`,
     [ids],
   );
@@ -121,7 +126,8 @@ export async function recordPublishError(ids: string[], message: string): Promis
   if (ids.length === 0) return;
   await query(
     `UPDATE event_outbox
-     SET last_error = $2
+     SET last_error = $2,
+         locked_until = NULL
      WHERE id = ANY($1::uuid[])`,
     [ids, message.slice(0, 500)],
   );

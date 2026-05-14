@@ -23,12 +23,36 @@ interface AppDetail {
 }
 
 // ── Read-only field display ────────────────────────────────────────────────────
-function ReadField({ label, value }: { label: string; value: unknown }) {
+function formatReadValue(value: unknown): string {
+  if (Array.isArray(value)) return value.map((v) => String(v)).join('\n');
+  if (typeof value === 'object' && value !== null) return JSON.stringify(value, null, 2);
+  return String(value);
+}
+
+function shouldSpanSummary(value: unknown, type?: string): boolean {
+  const text = value == null ? '' : formatReadValue(value);
+  return type === 'textarea' || type === 'file' || text.length > 80 || text.includes('\n');
+}
+
+function ReadField({
+  label,
+  value,
+  fullWidth = false,
+}: {
+  label: string;
+  value: unknown;
+  fullWidth?: boolean;
+}) {
   if (value == null || value === '') return null;
+  const text = formatReadValue(value);
   return (
-    <div>
-      <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-0.5">{label}</dt>
-      <dd className="text-sm text-warmgray-800">{String(value)}</dd>
+    <div className={`min-w-0 ${fullWidth ? 'md:col-span-2' : ''}`}>
+      <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-0.5 break-words [overflow-wrap:anywhere]">
+        {label}
+      </dt>
+      <dd className="text-sm leading-relaxed text-warmgray-800 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+        {text}
+      </dd>
     </div>
   );
 }
@@ -39,20 +63,27 @@ function RingiSummary({ app, badge }: { app: AppDetail; badge: string }) {
   const data = app.form_data ?? {};
   return (
     <div className="card space-y-3">
-      <div className="flex items-center gap-2 mb-2">
+      <div className="flex items-start gap-2 mb-2 min-w-0 flex-wrap">
         <span className="w-2 h-2 rounded-full bg-emerald-400" />
-        <h4 className="text-xs font-bold uppercase tracking-widest text-warmgray-500">{badge}</h4>
+        <h4 className="min-w-0 text-xs font-bold uppercase tracking-widest text-warmgray-500 break-words [overflow-wrap:anywhere]">
+          {badge}
+        </h4>
         {app.application_number && (
-          <span className="ml-auto text-[11px] font-mono text-warmgray-400">{app.application_number}</span>
+          <span className="ml-auto max-w-full text-[11px] font-mono text-warmgray-400 break-all">{app.application_number}</span>
         )}
       </div>
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-3">
+      <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
         {fields.length > 0
           ? fields.map((f) => (
-              <ReadField key={f.name} label={f.label} value={data[f.name]} />
+              <ReadField
+                key={f.name}
+                label={f.label}
+                value={data[f.name]}
+                fullWidth={shouldSpanSummary(data[f.name], f.type)}
+              />
             ))
           : Object.entries(data).map(([k, v]) => (
-              <ReadField key={k} label={k} value={v} />
+              <ReadField key={k} label={k} value={v} fullWidth={shouldSpanSummary(v)} />
             ))
         }
       </dl>
@@ -88,13 +119,13 @@ function ExpectedAmountCard({ app, t }: { app: AppDetail; t: (k: any) => string 
   const expected = Number(app.form_data?.expected_amount);
   if (!expected) return null;
   return (
-    <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-50/80 border border-amber-200/60">
-      <span className="text-xl">📋</span>
-      <div>
-        <p className="text-[11px] font-bold uppercase tracking-widest text-amber-700">{t('settle_expected_label')}</p>
+    <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-50/80 border border-amber-200/60 min-w-0 flex-wrap">
+      <span className="text-xl shrink-0">📋</span>
+      <div className="min-w-0">
+        <p className="text-[11px] font-bold uppercase tracking-widest text-amber-700 break-words [overflow-wrap:anywhere]">{t('settle_expected_label')}</p>
         <p className="text-lg font-bold text-amber-800">¥{expected.toLocaleString('ja-JP')}</p>
       </div>
-      <p className="ml-auto text-xs text-amber-600">{t('settle_expected_hint')}</p>
+      <p className="ml-auto min-w-0 text-xs text-amber-600 break-words [overflow-wrap:anywhere]">{t('settle_expected_hint')}</p>
     </div>
   );
 }
@@ -205,11 +236,11 @@ export default function Settlement() {
             </svg>
             {t('settle_back')}
           </Link>
-          <div className="flex items-center gap-3 mt-1">
+          <div className="flex items-start gap-3 mt-1 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-teal-100 flex items-center justify-center text-xl shrink-0">💴</div>
-            <div>
-              <h2 className="text-xl font-bold text-warmgray-800">{app.template_name} — {t('settle_suffix')}</h2>
-              <p className="text-xs text-warmgray-400 mt-0.5">{t('settle_subtitle')}</p>
+            <div className="min-w-0">
+              <h2 className="text-xl font-bold text-warmgray-800 break-words [overflow-wrap:anywhere]">{app.template_name} — {t('settle_suffix')}</h2>
+              <p className="text-xs text-warmgray-400 mt-0.5 break-words [overflow-wrap:anywhere]">{t('settle_subtitle')}</p>
             </div>
           </div>
         </div>

@@ -4,6 +4,8 @@ import { query, withTransaction } from '../config/db';
 import { requireAuth, requireRole, invalidateUserStateCache } from '../middlewares/authMiddleware';
 import { mutationLimiter } from '../middlewares/rateLimit';
 import { insertOutboxEvent } from '../services/eventOutbox';
+import { computeApplicationRecipients } from '../services/eventRecipients';
+import { redis } from '../config/redis';
 import { getJsonCache, setJsonCache } from '../services/cache';
 import {
   ADMIN_REF_CACHE_TTL_SEC,
@@ -319,13 +321,51 @@ router.get('/applications', async (req: Request, res: Response): Promise<void> =
   const search = ((req.query.search as string | undefined) ?? '').trim();
   const dept   = ((req.query.dept   as string | undefined) ?? '').trim();
   const status = ((req.query.status as string | undefined) ?? '').trim().toUpperCase();
+  const archive = ((req.query.archive as string | undefined) ?? 'active').trim().toLowerCase();
   const limit  = parsePageLimit(req.query.limit, 30, 200);
   const offset = Math.max(Number(req.query.offset ?? 0),  0);
   const cursor = decodeCursor(req.query.cursor);
 
   try {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    let idx = 1;
+
+    if (search) {
+      conditions.push(`(
+        u.full_name ILIKE $${idx} OR
+        t.title_ja ILIKE $${idx} OR
+        a.application_number ILIKE $${idx}
+      )`);
+      params.push(`%${search}%`);
+      idx++;
+    }
+    if (dept) {
+      conditions.push(`d.name = $${idx++}`);
+      params.push(dept);
+    }
+    if (status) {
+      conditions.push(`a.status = $${idx++}`);
+      params.push(status);
+    }
+    if (archive === 'archived') {
+      conditions.push('a.archived_at IS NOT NULL');
+    } else if (archive !== 'all') {
+      conditions.push('a.archived_at IS NULL');
+    }
+    if (cursor) {
+      conditions.push(`(a.created_at, a.id) < ($${idx++}::timestamptz, $${idx++}::uuid)`);
+      params.push(cursor.created_at, cursor.id);
+    }
+    params.push(limit + 1);
+    const limitIdx = idx++;
+    params.push(cursor ? 0 : offset);
+    const offsetIdx = idx++;
+    const whereSql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
     const result = await query(
       `SELECT a.id, a.application_number, a.status, a.created_at,
+              a.archived_at, a.archive_reason,
               t.title_ja AS template_name,
               u.full_name AS applicant_name,
               u.email AS applicant_email,
@@ -334,31 +374,11 @@ router.get('/applications', async (req: Request, res: Response): Promise<void> =
        JOIN form_templates t ON a.template_id = t.id
        LEFT JOIN users u ON a.applicant_id = u.id
        LEFT JOIN departments d ON d.id = u.department_id
-       WHERE ($1 = '' OR (
-         u.full_name ILIKE $1 OR
-         t.title_ja  ILIKE $1 OR
-         a.application_number ILIKE $1
-       ))
-       AND ($2 = '' OR d.name = $2)
-       AND ($3 = '' OR a.status = $3)
-       AND (
-         $4::timestamptz IS NULL
-         OR (a.created_at, a.id) < ($4::timestamptz, $5::uuid)
-       )
+       ${whereSql}
        ORDER BY a.created_at DESC, a.id DESC
-       LIMIT $6 OFFSET $7`,
-      [
-        `%${search}%`.replace('%%', '%'),
-        dept,
-        status,
-        cursor?.created_at ?? null,
-        cursor?.id ?? null,
-        limit + 1,
-        cursor ? 0 : offset,
-      ],
+       LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      params,
     );
-    // Empty search = '' → ILIKE '%' matches everything. But we pass '%search%' so
-    // for empty search the condition becomes "'' = '' OR ..." which short-circuits. ✓
     const rows    = result.rows;
     const hasMore = rows.length > limit;
     if (hasMore) rows.pop();
@@ -396,6 +416,7 @@ router.get('/applications/:id', async (req: Request, res: Response): Promise<voi
            a.form_data, a.settlement_data,
            a.template_id, a.template_version_id, a.route_id, a.applicant_id,
            a.created_at, a.submitted_at, a.settlement_submitted_at, a.completed_at, a.updated_at,
+           a.archived_at, a.archived_by, a.archive_reason,
            t.code AS template_code, t.title_ja AS template_name,
            COALESCE(v.schema_definition, t.schema_definition) AS schema_definition,
            COALESCE(v.settlement_schema, t.settlement_schema) AS settlement_schema,
@@ -482,10 +503,165 @@ router.get('/applications/:id', async (req: Request, res: Response): Promise<voi
   }
 });
 
+const ARCHIVABLE_STATUSES = new Set(['COMPLETED', 'REJECTED', 'CANCELLED']);
+
+router.post('/applications/:id/archive', async (req: Request, res: Response): Promise<void> => {
+  const id = String(req.params.id);
+  const reasonRaw = (req.body as { reason?: string } | undefined)?.reason;
+  const reason = typeof reasonRaw === 'string' ? reasonRaw.trim().slice(0, 500) : null;
+
+  try {
+    const result = await withTransaction(async (client: pg.PoolClient) => {
+      const appRes = await client.query(
+        `SELECT id, status, archived_at
+         FROM applications
+         WHERE id = $1
+         FOR UPDATE`,
+        [id],
+      );
+      if (appRes.rows.length === 0) {
+        throw Object.assign(new Error('申請が見つかりません'), { status: 404 });
+      }
+
+      const app = appRes.rows[0] as { id: string; status: string; archived_at: Date | null };
+      if (app.archived_at) {
+        const recipients = await computeApplicationRecipients(client, id, { includeAccounting: true });
+        return {
+          application: { id, archived_at: app.archived_at, already_archived: true },
+          recipients,
+        };
+      }
+      if (!ARCHIVABLE_STATUSES.has(app.status)) {
+        throw Object.assign(
+          new Error(`完了・却下・キャンセル済みの申請のみアーカイブできます (現在: ${app.status})`),
+          { status: 409 },
+        );
+      }
+
+      const archived = await client.query(
+        `UPDATE applications
+         SET archived_at = NOW(),
+             archived_by = $2,
+             archive_reason = $3,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1
+         RETURNING id, archived_at, archive_reason`,
+        [id, req.user!.id, reason],
+      );
+
+      await client.query(
+        `INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, metadata)
+         VALUES ($1, 'APPLICATION_ARCHIVE', 'application', $2, $3::jsonb)`,
+        [req.user!.id, id, JSON.stringify({ reason })],
+      );
+
+      const recipients = await computeApplicationRecipients(client, id, { includeAccounting: true });
+      await insertOutboxEvent(client, {
+        event_type:         'APPLICATION_CHANGED',
+        entity_type:        'application',
+        entity_id:          id,
+        recipient_user_ids: recipients,
+        payload:            { type: 'archive', applicationId: id },
+      });
+
+      return { application: archived.rows[0], recipients };
+    });
+
+    const dashboardKeys = [
+      'dashboard:admin-overview',
+      ...result.recipients.map((uid) => `dashboard:summary:${uid}`),
+    ];
+    await redis.del(...dashboardKeys).catch(() => {});
+    res.json({ application: result.application });
+  } catch (err: unknown) {
+    const e = err as { status?: number; message?: string };
+    if (e.status) { res.status(e.status).json({ error: e.message }); return; }
+    console.error('[admin] application archive failed:', err);
+    res.status(500).json({ error: '申請のアーカイブに失敗しました' });
+  }
+});
+
+router.post('/applications/:id/unarchive', async (req: Request, res: Response): Promise<void> => {
+  const id = String(req.params.id);
+
+  try {
+    const result = await withTransaction(async (client: pg.PoolClient) => {
+      const appRes = await client.query(
+        `UPDATE applications
+         SET archived_at = NULL,
+             archived_by = NULL,
+             archive_reason = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1 AND archived_at IS NOT NULL
+         RETURNING id`,
+        [id],
+      );
+      if (appRes.rows.length === 0) {
+        throw Object.assign(new Error('アーカイブ済み申請が見つかりません'), { status: 404 });
+      }
+
+      await client.query(
+        `INSERT INTO audit_logs (actor_id, action, entity_type, entity_id)
+         VALUES ($1, 'APPLICATION_UNARCHIVE', 'application', $2)`,
+        [req.user!.id, id],
+      );
+
+      const recipients = await computeApplicationRecipients(client, id, { includeAccounting: true });
+      await insertOutboxEvent(client, {
+        event_type:         'APPLICATION_CHANGED',
+        entity_type:        'application',
+        entity_id:          id,
+        recipient_user_ids: recipients,
+        payload:            { type: 'unarchive', applicationId: id },
+      });
+
+      return { application: appRes.rows[0], recipients };
+    });
+
+    const dashboardKeys = [
+      'dashboard:admin-overview',
+      ...result.recipients.map((uid) => `dashboard:summary:${uid}`),
+    ];
+    await redis.del(...dashboardKeys).catch(() => {});
+    res.json({ application: result.application });
+  } catch (err: unknown) {
+    const e = err as { status?: number; message?: string };
+    if (e.status) { res.status(e.status).json({ error: e.message }); return; }
+    console.error('[admin] application unarchive failed:', err);
+    res.status(500).json({ error: '申請のアーカイブ解除に失敗しました' });
+  }
+});
+
 router.delete('/applications/:id', async (req: Request, res: Response): Promise<void> => {
   try {
-    await query(`DELETE FROM applications WHERE id = $1`, [req.params.id]);
-    res.json({ message: '申請データを削除しました' });
+    if (req.query.hard !== 'true') {
+      res.status(405).json({ error: '物理削除は無効です。/archive を使用してください。' });
+      return;
+    }
+
+    const confirm = String(req.query.confirm ?? '');
+    const appRes = await query(
+      `SELECT id, application_number, archived_at
+       FROM applications
+       WHERE id = $1`,
+      [req.params.id],
+    );
+    if (appRes.rows.length === 0) {
+      res.status(404).json({ error: '申請が見つかりません' });
+      return;
+    }
+    const app = appRes.rows[0] as { id: string; application_number: string | null; archived_at: Date | null };
+    if (!app.archived_at) {
+      res.status(409).json({ error: '物理削除はアーカイブ済み申請のみ可能です' });
+      return;
+    }
+    if (confirm !== app.id && confirm !== app.application_number) {
+      res.status(400).json({ error: 'confirm に申請IDまたは申請番号を指定してください' });
+      return;
+    }
+
+    await query(`DELETE FROM applications WHERE id = $1 AND archived_at IS NOT NULL`, [req.params.id]);
+    res.json({ message: 'アーカイブ済み申請データを物理削除しました' });
   } catch (err) {
     console.error('[admin] application delete failed:', err);
     res.status(500).json({ error: '申請の削除に失敗しました' });

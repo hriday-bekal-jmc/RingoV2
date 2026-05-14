@@ -36,6 +36,7 @@ const SSE_URL = import.meta.env.VITE_API_BASE_URL
 type KeyList = Array<readonly unknown[]>;
 
 interface SubmitPayload    { applicationId?: string; type?: string }
+interface ChangePayload    { applicationId?: string; type?: string }
 interface ApprovalPayload  { applicationId?: string; type?: string; final?: boolean }
 interface SettlementPayload{ applicationId?: string; type?: string }
 interface CsvPayload       { jobId?: string }
@@ -68,6 +69,16 @@ function keysForApplicationSubmitted(d: SubmitPayload): KeyList {
   if (d.type === 'settlement_start' || d.type === 'settlement_resubmit') {
     keys.push(['accountingSettlements']);
   }
+  return keys;
+}
+
+function keysForApplicationChanged(d: ChangePayload): KeyList {
+  const keys: KeyList = [
+    ['dashboard', 'summary'],
+    ['dashboard', 'admin-overview'],
+    ['myApplications'],
+  ];
+  if (d.applicationId) keys.push(['application', d.applicationId]);
   return keys;
 }
 
@@ -146,6 +157,10 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
       const data = JSON.parse(e.data ?? '{}') as SubmitPayload;
       debounced.enqueue(keysForApplicationSubmitted(data));
     };
+    const onAppChanged = (e: MessageEvent): void => {
+      const data = JSON.parse(e.data ?? '{}') as ChangePayload;
+      debounced.enqueue(keysForApplicationChanged(data));
+    };
     const onSettlementAction = (e: MessageEvent): void => {
       const data = JSON.parse(e.data ?? '{}') as SettlementPayload;
       debounced.enqueue(keysForSettlementAction(data));
@@ -157,6 +172,7 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
 
     es.addEventListener('APPROVAL_ACTION',       onApprovalAction);
     es.addEventListener('APPLICATION_SUBMITTED', onAppSubmitted);
+    es.addEventListener('APPLICATION_CHANGED',   onAppChanged);
     es.addEventListener('SETTLEMENT_ACTION',     onSettlementAction);
     es.addEventListener('CSV_EXPORT_READY',      onCsvReady);
 

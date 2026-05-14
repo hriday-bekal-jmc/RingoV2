@@ -93,6 +93,7 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
         `SELECT status, COUNT(*)::text AS n
          FROM applications
          WHERE applicant_id = $1
+           AND archived_at IS NULL
          GROUP BY status`,
         [userId],
     );
@@ -127,6 +128,7 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
          FROM applications a
          JOIN form_templates t ON a.template_id = t.id
          WHERE a.applicant_id = $1
+           AND a.archived_at IS NULL
          ORDER BY a.created_at DESC
          LIMIT 5`,
         [userId],
@@ -145,7 +147,9 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
              JOIN applications a   ON a.id = s.application_id
              JOIN form_templates t ON t.id = a.template_id
              JOIN users u          ON u.id = a.applicant_id
-             WHERE s.approver_id = $1 AND s.status = 'PENDING'
+             WHERE s.approver_id = $1
+               AND s.status = 'PENDING'
+               AND a.archived_at IS NULL
              ORDER BY s.created_at ASC
              LIMIT 5`,
             [userId],
@@ -224,7 +228,10 @@ router.get('/admin-overview', async (req: Request, res: Response): Promise<void>
 
       // 1. Company-wide status counts
       const statusRes = await query(
-        `SELECT status, COUNT(*)::int AS n FROM applications GROUP BY status`,
+        `SELECT status, COUNT(*)::int AS n
+         FROM applications
+         WHERE archived_at IS NULL
+         GROUP BY status`,
         [],
       );
 
@@ -239,6 +246,7 @@ router.get('/admin-overview', async (req: Request, res: Response): Promise<void>
          FROM applications a
          JOIN users u ON u.id = a.applicant_id
          LEFT JOIN departments d ON d.id = u.department_id
+         WHERE a.archived_at IS NULL
          GROUP BY d.name
          ORDER BY total DESC
          LIMIT 10`,
@@ -270,6 +278,7 @@ router.get('/admin-overview', async (req: Request, res: Response): Promise<void>
          JOIN form_templates t ON t.id = a.template_id
          JOIN users u ON u.id = a.applicant_id
          LEFT JOIN departments d ON d.id = u.department_id
+         WHERE a.archived_at IS NULL
          ORDER BY a.created_at DESC
          LIMIT 5`,
         [],
@@ -282,7 +291,8 @@ router.get('/admin-overview', async (req: Request, res: Response): Promise<void>
            COUNT(*) FILTER (WHERE a.status = 'SETTLEMENT_APPROVED')::int  AS awaiting_transfer,
            COUNT(*) FILTER (WHERE a.status = 'COMPLETED')::int            AS completed
          FROM applications a
-         WHERE a.status IN ('PENDING_SETTLEMENT','SETTLEMENT_APPROVED','COMPLETED')`,
+         WHERE a.status IN ('PENDING_SETTLEMENT','SETTLEMENT_APPROVED','COMPLETED')
+           AND a.archived_at IS NULL`,
         [],
       );
 

@@ -71,6 +71,7 @@ router.get('/form-templates/:id', async (req: Request, res: Response): Promise<v
       `SELECT
          v.id, v.version_number, v.schema_definition, v.settlement_schema,
          v.is_active, v.notes, v.created_at,
+         (SELECT COUNT(*)::int FROM applications a WHERE a.template_version_id = v.id) AS application_count,
          u.full_name AS created_by_name
        FROM form_template_versions v
        LEFT JOIN users u ON u.id = v.created_by

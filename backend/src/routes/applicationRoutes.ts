@@ -78,19 +78,30 @@ router.post('/draft', async (req: Request, res: Response): Promise<void> => {
   };
   try {
     const applicant_id = req.user!.id;
-    // Capture active version at draft creation — locks schema to what user is editing
-    const verRes = await query(
-      `SELECT id FROM form_template_versions WHERE template_id = $1 AND is_active = TRUE LIMIT 1`,
-      [template_id],
-    );
-    const versionId = verRes.rows[0]?.id ?? null;
-    const result = await query(
-      `INSERT INTO applications (applicant_id, template_id, template_version_id, form_data, status)
-       VALUES ($1, $2, $3, $4::jsonb, 'DRAFT')
-       RETURNING id, status`,
-      [applicant_id, template_id, versionId, JSON.stringify(form_data)],
-    );
-    res.status(201).json({ message: '下書きを保存しました', application: result.rows[0], draft: true });
+    const result = await withTransaction(async (client: pg.PoolClient) => {
+      // Capture active version at draft creation — locks schema to what user is editing
+      const verRes = await client.query(
+        `SELECT id FROM form_template_versions WHERE template_id = $1 AND is_active = TRUE LIMIT 1`,
+        [template_id],
+      );
+      const versionId = verRes.rows[0]?.id ?? null;
+      const appRes = await client.query(
+        `INSERT INTO applications (applicant_id, template_id, template_version_id, form_data, status)
+         VALUES ($1, $2, $3, $4::jsonb, 'DRAFT')
+         RETURNING id, status`,
+        [applicant_id, template_id, versionId, JSON.stringify(form_data)],
+      );
+      const app = appRes.rows[0] as { id: string; status: string };
+      await insertOutboxEvent(client, {
+        event_type:         'APPLICATION_CHANGED',
+        entity_type:        'application',
+        entity_id:          app.id,
+        recipient_user_ids: [applicant_id],
+        payload:            { type: 'draft_create', applicationId: app.id },
+      });
+      return app;
+    });
+    res.status(201).json({ message: '下書きを保存しました', application: result, draft: true });
   } catch (err) {
     console.error('[applications] draft save failed:', err);
     res.status(500).json({ error: '下書きの保存に失敗しました' });
@@ -102,18 +113,32 @@ router.patch('/:id', async (req: Request, res: Response): Promise<void> => {
   const { form_data } = req.body as { form_data: Record<string, unknown> };
   const applicant_id = req.user!.id;
   try {
-    const result = await query(
-      `UPDATE applications
-       SET form_data = $1::jsonb, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2 AND applicant_id = $3 AND status IN ('DRAFT', 'RETURNED')
-       RETURNING id, status`,
-      [JSON.stringify(form_data), req.params.id, applicant_id],
-    );
-    if (result.rows.length === 0) {
-      res.status(404).json({ error: '申請が見つかりません（または編集権限がありません）' }); return;
-    }
-    res.json({ message: '申請を更新しました', application: result.rows[0] });
-  } catch (err) {
+    const result = await withTransaction(async (client: pg.PoolClient) => {
+      const appRes = await client.query(
+        `UPDATE applications
+         SET form_data = $1::jsonb, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2 AND applicant_id = $3 AND status IN ('DRAFT', 'RETURNED')
+         RETURNING id, status`,
+        [JSON.stringify(form_data), req.params.id, applicant_id],
+      );
+      if (appRes.rows.length === 0) {
+        throw Object.assign(new Error('申請が見つかりません（または編集権限がありません）'), { status: 404 });
+      }
+      const app = appRes.rows[0] as { id: string; status: string };
+      const recipients = await computeApplicationRecipients(client, app.id);
+      await insertOutboxEvent(client, {
+        event_type:         'APPLICATION_CHANGED',
+        entity_type:        'application',
+        entity_id:          app.id,
+        recipient_user_ids: recipients,
+        payload:            { type: 'form_update', applicationId: app.id },
+      });
+      return app;
+    });
+    res.json({ message: '申請を更新しました', application: result });
+  } catch (err: unknown) {
+    const e = err as { status?: number; message?: string };
+    if (e.status) { res.status(e.status).json({ error: e.message }); return; }
     console.error('[applications] update failed:', err);
     res.status(500).json({ error: '申請の更新に失敗しました' });
   }
@@ -682,6 +707,15 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         [app.id, JSON.stringify({ template_id, stage, steps: ringiResolvedSteps.length })],
       );
 
+      const recipients = await computeApplicationRecipients(client, app.id);
+      await insertOutboxEvent(client, {
+        event_type:         'APPLICATION_SUBMITTED',
+        entity_type:        'application',
+        entity_id:          app.id,
+        recipient_user_ids: recipients,
+        payload:            { type: 'submit', applicationId: app.id },
+      });
+
       return { ...app, total_steps: ringiResolvedSteps.length };
     });
 
@@ -702,6 +736,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
   const offset = Math.max(Number(req.query.offset ?? 0), 0);
   const status = ((req.query.status as string | undefined) ?? 'ALL').toUpperCase();
   const cursor = decodeCursor(req.query.cursor);
+  const includeArchived = req.query.include_archived === 'true';
 
   try {
     const result = await query(
@@ -724,13 +759,14 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
        JOIN form_templates t ON a.template_id = t.id
        WHERE a.applicant_id = $1
          AND ($2 = 'ALL' OR a.status = $2)
+         AND ($7::boolean OR a.archived_at IS NULL)
          AND (
            $3::timestamptz IS NULL
            OR (a.created_at, a.id) < ($3::timestamptz, $4::uuid)
          )
        ORDER BY a.created_at DESC, a.id DESC
        LIMIT $5 OFFSET $6`,
-      [req.user!.id, status, cursor?.created_at ?? null, cursor?.id ?? null, limit + 1, cursor ? 0 : offset],
+      [req.user!.id, status, cursor?.created_at ?? null, cursor?.id ?? null, limit + 1, cursor ? 0 : offset, includeArchived],
     );
     const rows    = result.rows;
     const hasMore = rows.length > limit;
@@ -806,17 +842,30 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
 // DELETE /applications/:id — delete own DRAFT only
 router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await query(
-      `DELETE FROM applications
-       WHERE id = $1 AND applicant_id = $2 AND status = 'DRAFT'
-       RETURNING id`,
-      [req.params.id, req.user!.id],
-    );
-    if (result.rows.length === 0) {
-      res.status(404).json({ error: '下書きが見つかりません（または削除権限がありません）' }); return;
-    }
+    await withTransaction(async (client: pg.PoolClient) => {
+      const result = await client.query(
+        `DELETE FROM applications
+         WHERE id = $1 AND applicant_id = $2 AND status = 'DRAFT'
+         RETURNING id`,
+        [req.params.id, req.user!.id],
+      );
+      if (result.rows.length === 0) {
+        throw Object.assign(new Error('下書きが見つかりません（または削除権限がありません）'), { status: 404 });
+      }
+      const app = result.rows[0] as { id: string };
+      await insertOutboxEvent(client, {
+        event_type:         'APPLICATION_CHANGED',
+        entity_type:        'application',
+        entity_id:          app.id,
+        recipient_user_ids: [req.user!.id],
+        payload:            { type: 'draft_delete', applicationId: app.id },
+      });
+      return app;
+    });
     res.json({ message: '下書きを削除しました' });
-  } catch (err) {
+  } catch (err: unknown) {
+    const e = err as { status?: number; message?: string };
+    if (e.status) { res.status(e.status).json({ error: e.message }); return; }
     console.error('[applications] draft delete failed:', err);
     res.status(500).json({ error: '下書きの削除に失敗しました' });
   }

@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { withTransaction } from '../config/db';
 import { requireAuth } from '../middlewares/authMiddleware';
 import { mutationLimiter } from '../middlewares/rateLimit';
+import { insertOutboxEvent } from '../services/eventOutbox';
+import { computeApplicationRecipients } from '../services/eventRecipients';
 import type pg from 'pg';
 
 const router = Router();
@@ -63,6 +65,15 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
          VALUES ('SETTLEMENT_SUBMIT', 'application', $1)`,
         [application_id],
       );
+
+      const recipients = await computeApplicationRecipients(client, application_id, { includeAccounting: true });
+      await insertOutboxEvent(client, {
+        event_type:         'APPLICATION_SUBMITTED',
+        entity_type:        'application',
+        entity_id:          application_id,
+        recipient_user_ids: recipients,
+        payload:            { type: 'settlement_start', applicationId: application_id },
+      });
 
       return settleRes.rows[0] as { id: string };
     });

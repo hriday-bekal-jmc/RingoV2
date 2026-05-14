@@ -81,6 +81,7 @@ interface TemplateVersion {
   is_active:          boolean;
   notes:              string | null;
   created_at:         string;
+  application_count:  number;
   created_by_name:    string | null;
 }
 
@@ -1148,6 +1149,8 @@ function VersionHistory({
               {v.created_by_name && <p className="text-[10px] text-warmgray-400 mt-0.5">by {v.created_by_name}</p>}
               <p className="text-[10px] text-warmgray-400 mt-0.5">
                 {v.schema_definition?.fields?.length ?? 0} {lang === 'en' ? 'fields' : '項目'}
+                {' · '}
+                {v.application_count ?? 0} apps
               </p>
             </div>
             {!v.is_active && (
@@ -1161,14 +1164,23 @@ function VersionHistory({
                     ? (lang === 'en' ? 'Activating...' : '切替中...')
                     : (lang === 'en' ? 'Activate' : '有効化')}
                 </button>
-                <button
-                  onClick={() => setPendingDelete(v)}
-                  disabled={activatingId === v.id || deletingId === v.id}
-                  className="text-xs px-3 py-1.5 rounded-lg font-semibold border border-red-200/60 text-red-600 hover:bg-red-50 transition-colors"
-                  title={lang === 'en' ? 'Delete this version (only if no applications reference it)' : 'バージョン削除（参照する申請がない場合のみ）'}
-                >
-                  {deletingId === v.id ? '...' : '✕'}
-                </button>
+                {(v.application_count ?? 0) === 0 ? (
+                  <button
+                    onClick={() => setPendingDelete(v)}
+                    disabled={activatingId === v.id || deletingId === v.id}
+                    className="text-xs px-3 py-1.5 rounded-lg font-semibold border border-red-200/60 text-red-600 hover:bg-red-50 transition-colors"
+                    title={lang === 'en' ? 'Delete this unused version' : '未使用バージョンを削除'}
+                  >
+                    {deletingId === v.id ? '...' : '✕'}
+                  </button>
+                ) : (
+                  <span
+                    className="text-[10px] px-2 py-1 rounded-full border border-warmgray-200 text-warmgray-500 bg-warmgray-50"
+                    title={lang === 'en' ? 'Locked because applications reference it' : '参照する申請があるため削除不可'}
+                  >
+                    {v.application_count} apps
+                  </span>
+                )}
               </div>
             )}
           </li>

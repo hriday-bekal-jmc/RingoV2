@@ -104,6 +104,7 @@ router.get('/settlements', async (req: Request, res: Response): Promise<void> =>
        WHERE ($1 = 'ALL'
           OR ($1 = 'PENDING' AND a.status = 'PENDING_SETTLEMENT')
           OR ($1 = 'DONE'    AND a.status IN ('COMPLETED', 'SETTLEMENT_APPROVED')))
+         AND a.archived_at IS NULL
          AND (
            $2::timestamptz IS NULL
            OR (s.created_at, s.id) < ($2::timestamptz, $3::uuid)

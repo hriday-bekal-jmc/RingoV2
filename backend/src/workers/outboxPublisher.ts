@@ -1,64 +1,106 @@
 // Outbox publisher worker.
 //
-// Runs as a separate process (PM2 proc 3 alongside api + csv-worker).
-// Polls event_outbox for unpublished rows, publishes them to Redis pub/sub
-// via sseEventBus, marks them published.
+// Runs as a separate process alongside the API and CSV worker.
+// Delivery path:
+//   route transaction -> event_outbox row + pg_notify on commit
+//   outbox worker LISTEN wake-up -> Redis pub/sub publish
+//   API SSE connections -> browser cache invalidation
 //
-// Why a separate process:
-//   - Decouples API uptime from event delivery. API crash mid-emit doesn't
-//     lose events — they sit in outbox until worker picks them up.
-//   - Keeps event publishing off the request hot path. POST returns the
-//     instant the DB tx commits; user doesn't wait for Redis.
-//   - Multiple instances can run safely thanks to FOR UPDATE SKIP LOCKED.
-//
-// Start (dev):    npm run worker:outbox    (tsx watch)
-// Start (prod):   node dist/workers/outboxPublisher.js  (via PM2)
+// LISTEN/NOTIFY gives near-real-time delivery without hot polling. The 30s
+// fallback sweep is only a safety net for missed notifications, worker restarts,
+// or rows created before this process started.
 
-// Boot env first — fail fast on bad config
 import '../config/env';
 
 import { pool } from '../config/db';
-import { drainOnce, cleanupPublished } from '../services/eventOutbox';
+import {
+  OUTBOX_NOTIFY_CHANNEL,
+  cleanupPublished,
+  drainOnce,
+} from '../services/eventOutbox';
+import type pg from 'pg';
 
-const POLL_INTERVAL_MS = 250;        // 4× per second
-const BATCH_SIZE       = 50;          // rows per claim
-const CLEANUP_EVERY_MS = 5 * 60_000;  // 5 min
-const RETENTION_HOURS  = 24;          // keep published rows for replay window
+const BATCH_SIZE       = 50;
+const FALLBACK_POLL_MS = 30_000;
+const RETRY_POLL_MS    = 2_000;
+const CLEANUP_EVERY_MS = 5 * 60_000;
+const RETENTION_HOURS  = 24;
 
 let stopping = false;
-let pollTimer:    NodeJS.Timeout | null = null;
-let cleanupTimer: NodeJS.Timeout | null = null;
+let drainTimer:           NodeJS.Timeout | null = null;
+let cleanupTimer:         NodeJS.Timeout | null = null;
+let fallbackTimer:        NodeJS.Timeout | null = null;
+let listenReconnectTimer: NodeJS.Timeout | null = null;
+let listenClient:         pg.PoolClient | null = null;
+let draining = false;
 
-// Adaptive backoff: when many rows drained, poll faster. When idle, slow down
-// to reduce DB load. Floor 250ms, ceil 2s.
-let currentInterval = POLL_INTERVAL_MS;
-const MIN_INTERVAL  = 250;
-const MAX_INTERVAL  = 2_000;
-
-async function tick(): Promise<void> {
+function scheduleDrain(delayMs = 0): void {
   if (stopping) return;
-  try {
-    const drained = await drainOnce(BATCH_SIZE);
+  if (drainTimer) {
+    if (delayMs > 0) return;
+    clearTimeout(drainTimer);
+    drainTimer = null;
+  }
 
-    // Adjust interval based on activity
-    if (drained > 0) {
-      currentInterval = MIN_INTERVAL;
-      if (drained === BATCH_SIZE) {
-        // Hit the batch ceiling — there's likely more, poll again immediately
-        setImmediate(tick);
-        return;
-      }
-    } else {
-      currentInterval = Math.min(MAX_INTERVAL, currentInterval * 1.5);
+  drainTimer = setTimeout(() => {
+    drainTimer = null;
+    void drainLoop();
+  }, delayMs);
+  drainTimer.unref();
+}
+
+async function drainLoop(): Promise<void> {
+  if (stopping || draining) return;
+  draining = true;
+
+  try {
+    while (!stopping) {
+      const drained = await drainOnce(BATCH_SIZE);
+      if (drained < BATCH_SIZE) break;
     }
   } catch (err) {
     console.error('[outbox-publisher] drain failed', err);
-    // Back off on error to avoid hammering broken systems
-    currentInterval = MAX_INTERVAL;
+    scheduleDrain(RETRY_POLL_MS);
   } finally {
-    if (!stopping) {
-      pollTimer = setTimeout(tick, currentInterval);
-    }
+    draining = false;
+  }
+}
+
+function scheduleListenReconnect(): void {
+  if (stopping || listenReconnectTimer) return;
+  listenReconnectTimer = setTimeout(() => {
+    listenReconnectTimer = null;
+    void startOutboxListener();
+  }, RETRY_POLL_MS);
+  listenReconnectTimer.unref();
+}
+
+async function startOutboxListener(): Promise<void> {
+  if (stopping || listenClient) return;
+
+  let client: pg.PoolClient | null = null;
+  try {
+    client = await pool.connect();
+    listenClient = client;
+
+    client.on('notification', (msg) => {
+      if (msg.channel === OUTBOX_NOTIFY_CHANNEL) scheduleDrain(0);
+    });
+
+    client.on('error', (err) => {
+      console.error('[outbox-publisher] LISTEN connection failed', err);
+      if (listenClient === client) listenClient = null;
+      try { client?.release(); } catch { /* ignore */ }
+      scheduleListenReconnect();
+    });
+
+    await client.query(`LISTEN ${OUTBOX_NOTIFY_CHANNEL}`);
+    console.log(`[outbox-publisher] listening on ${OUTBOX_NOTIFY_CHANNEL}`);
+  } catch (err) {
+    if (listenClient === client) listenClient = null;
+    try { client?.release(); } catch { /* ignore */ }
+    console.error('[outbox-publisher] LISTEN setup failed', err);
+    scheduleListenReconnect();
   }
 }
 
@@ -72,25 +114,38 @@ async function cleanupTick(): Promise<void> {
   } finally {
     if (!stopping) {
       cleanupTimer = setTimeout(cleanupTick, CLEANUP_EVERY_MS);
+      cleanupTimer.unref();
     }
   }
 }
 
-// ── Boot ────────────────────────────────────────────────────────────────────
 console.log('[outbox-publisher] starting');
-pollTimer    = setTimeout(tick,        POLL_INTERVAL_MS);
+void startOutboxListener();
+scheduleDrain(0);
+fallbackTimer = setInterval(() => scheduleDrain(0), FALLBACK_POLL_MS);
+fallbackTimer.unref();
 cleanupTimer = setTimeout(cleanupTick, CLEANUP_EVERY_MS);
+cleanupTimer.unref();
 
-// ── Graceful shutdown ───────────────────────────────────────────────────────
 const shutdown = async (signal: string): Promise<void> => {
   console.log(`[outbox-publisher] ${signal} received, draining`);
   stopping = true;
-  if (pollTimer)    clearTimeout(pollTimer);
-  if (cleanupTimer) clearTimeout(cleanupTimer);
-  // Best-effort final drain so in-flight events get out
+
+  if (drainTimer)           clearTimeout(drainTimer);
+  if (cleanupTimer)         clearTimeout(cleanupTimer);
+  if (fallbackTimer)        clearInterval(fallbackTimer);
+  if (listenReconnectTimer) clearTimeout(listenReconnectTimer);
+
+  if (listenClient) {
+    await listenClient.query(`UNLISTEN ${OUTBOX_NOTIFY_CHANNEL}`).catch(() => {});
+    listenClient.release();
+    listenClient = null;
+  }
+
   try { await drainOnce(BATCH_SIZE); } catch { /* ignore */ }
   await pool.end();
   process.exit(0);
 };
+
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT',  () => void shutdown('SIGINT'));
