@@ -4,6 +4,13 @@ import { query, withTransaction } from '../config/db';
 import { requireAuth, requireRole, invalidateUserStateCache } from '../middlewares/authMiddleware';
 import { mutationLimiter } from '../middlewares/rateLimit';
 import { insertOutboxEvent } from '../services/eventOutbox';
+import { getJsonCache, setJsonCache } from '../services/cache';
+import {
+  ADMIN_REF_CACHE_TTL_SEC,
+  adminRefCacheKey,
+  invalidateAdminReferenceCache,
+} from '../services/adminReferenceCache';
+import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
 import type pg from 'pg';
 
 const router = Router();
@@ -17,7 +24,8 @@ router.get('/users', async (_req: Request, res: Response): Promise<void> => {
   try {
     const result = await query(`
       SELECT u.id, u.full_name, u.email, u.role, u.is_active, u.department_id,
-             u.avatar_url, d.name AS department_name
+             CASE WHEN u.avatar_url LIKE 'data:%' THEN NULL ELSE u.avatar_url END AS avatar_url,
+             d.name AS department_name
       FROM users u
       LEFT JOIN departments d ON u.department_id = d.id
       ORDER BY u.created_at DESC
@@ -41,6 +49,7 @@ router.post('/users', async (req: Request, res: Response): Promise<void> => {
        VALUES ($1, $2, $3, $4, $5, $6)`,
       [full_name, email.toLowerCase().trim(), role, department_id ?? null, hash, is_active ?? true],
     );
+    void invalidateAdminReferenceCache('routes');
     res.status(201).json({ message: 'ユーザーを作成しました' });
   } catch (err: unknown) {
     const e = err as { code?: string };
@@ -102,6 +111,7 @@ router.patch('/users/:id', async (req: Request, res: Response): Promise<void> =>
     params.push(id);
 
     await query(q, params);
+    await invalidateUserStateCache(String(id));
     if (bumpTokenVersion) {
       await invalidateUserStateCache(String(id));
       // Push event to the affected user's SSE channel via outbox — replaces 60s /me poll.
@@ -116,6 +126,7 @@ router.patch('/users/:id', async (req: Request, res: Response): Promise<void> =>
         });
       });
     }
+    void invalidateAdminReferenceCache('routes');
     res.json({ message: 'ユーザーを更新しました' });
   } catch (err: unknown) {
     const e = err as { code?: string };
@@ -159,6 +170,7 @@ router.delete('/users/:id', async (req: Request, res: Response): Promise<void> =
         payload:            { reason: 'deactivated' },
       });
     });
+    void invalidateAdminReferenceCache('routes');
     res.json({ message: 'ユーザーを削除/無効化しました' });
   } catch (err) {
     console.error('[admin] user delete failed:', err);
@@ -170,7 +182,12 @@ router.delete('/users/:id', async (req: Request, res: Response): Promise<void> =
 
 router.get('/departments', async (_req: Request, res: Response): Promise<void> => {
   try {
+    const cacheKey = adminRefCacheKey('departments');
+    const cached = await getJsonCache<unknown[]>(cacheKey);
+    if (cached) { res.json(cached); return; }
+
     const result = await query(`SELECT id, name, code FROM departments ORDER BY created_at`);
+    void setJsonCache(cacheKey, result.rows, ADMIN_REF_CACHE_TTL_SEC);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: '部署一覧の取得に失敗しました' });
@@ -179,7 +196,12 @@ router.get('/departments', async (_req: Request, res: Response): Promise<void> =
 
 router.get('/templates', async (_req: Request, res: Response): Promise<void> => {
   try {
+    const cacheKey = adminRefCacheKey('templates');
+    const cached = await getJsonCache<unknown[]>(cacheKey);
+    if (cached) { res.json(cached); return; }
+
     const result = await query(`SELECT id, code, title_ja FROM form_templates ORDER BY created_at`);
+    void setJsonCache(cacheKey, result.rows, ADMIN_REF_CACHE_TTL_SEC);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: 'テンプレート一覧の取得に失敗しました' });
@@ -190,6 +212,10 @@ router.get('/templates', async (_req: Request, res: Response): Promise<void> => 
 
 router.get('/routes', async (_req: Request, res: Response): Promise<void> => {
   try {
+    const cacheKey = adminRefCacheKey('routes');
+    const cached = await getJsonCache<unknown[]>(cacheKey);
+    if (cached) { res.json(cached); return; }
+
     const routes = await query(`
       SELECT r.id, r.name, r.stage, r.is_active, r.is_default,
              t.title_ja AS template_name, t.id AS template_id,
@@ -201,7 +227,8 @@ router.get('/routes', async (_req: Request, res: Response): Promise<void> => {
     `);
     const steps = await query(`
       SELECT s.id, s.route_id, s.step_order, s.label, s.action_type,
-             s.approver_id, u.full_name AS approver_name, u.avatar_url AS approver_avatar
+             s.approver_id, u.full_name AS approver_name,
+             CASE WHEN u.avatar_url LIKE 'data:%' THEN NULL ELSE u.avatar_url END AS approver_avatar
       FROM approval_route_steps s
       LEFT JOIN users u ON s.approver_id = u.id
       ORDER BY s.route_id, s.step_order
@@ -212,7 +239,9 @@ router.get('/routes', async (_req: Request, res: Response): Promise<void> => {
       acc[key].push(s);
       return acc;
     }, {});
-    res.json(routes.rows.map((r: { id: string }) => ({ ...r, steps: stepsByRoute[r.id] ?? [] })));
+    const payload = routes.rows.map((r: { id: string }) => ({ ...r, steps: stepsByRoute[r.id] ?? [] }));
+    void setJsonCache(cacheKey, payload, ADMIN_REF_CACHE_TTL_SEC);
+    res.json(payload);
   } catch (err) {
     console.error('[admin] routes list failed:', err);
     res.status(500).json({ error: 'ルート一覧の取得に失敗しました' });
@@ -229,6 +258,7 @@ router.post('/routes', async (req: Request, res: Response): Promise<void> => {
        VALUES ($1, $2, $3, $4, TRUE)`,
       [template_id, department_id, name, stage ?? 'RINGI'],
     );
+    void invalidateAdminReferenceCache('routes');
     res.status(201).json({ message: 'ルートを作成しました' });
   } catch (err) {
     console.error('[admin] route create failed:', err);
@@ -239,6 +269,7 @@ router.post('/routes', async (req: Request, res: Response): Promise<void> => {
 router.delete('/routes/:id', async (req: Request, res: Response): Promise<void> => {
   try {
     await query(`DELETE FROM approval_routes WHERE id = $1`, [req.params.id]);
+    void invalidateAdminReferenceCache('routes');
     res.json({ message: 'ルートを削除しました' });
   } catch (err) {
     res.status(500).json({ error: 'ルートの削除に失敗しました' });
@@ -262,6 +293,7 @@ router.post('/routes/:id/steps', async (req: Request, res: Response): Promise<vo
         [req.params.id, order, approver_id ?? null, label ?? `ステップ${order}`, action_type ?? 'APPROVE'],
       );
     });
+    void invalidateAdminReferenceCache('routes');
     res.status(201).json({ message: 'ステップを追加しました' });
   } catch (err) {
     console.error('[admin] step add failed:', err);
@@ -272,6 +304,7 @@ router.post('/routes/:id/steps', async (req: Request, res: Response): Promise<vo
 router.delete('/route-steps/:id', async (req: Request, res: Response): Promise<void> => {
   try {
     await query(`DELETE FROM approval_route_steps WHERE id = $1`, [req.params.id]);
+    void invalidateAdminReferenceCache('routes');
     res.json({ message: 'ステップを削除しました' });
   } catch (err) {
     res.status(500).json({ error: 'ステップの削除に失敗しました' });
@@ -286,8 +319,9 @@ router.get('/applications', async (req: Request, res: Response): Promise<void> =
   const search = ((req.query.search as string | undefined) ?? '').trim();
   const dept   = ((req.query.dept   as string | undefined) ?? '').trim();
   const status = ((req.query.status as string | undefined) ?? '').trim().toUpperCase();
-  const limit  = Math.min(Number(req.query.limit  ?? 30), 200);
+  const limit  = parsePageLimit(req.query.limit, 30, 200);
   const offset = Math.max(Number(req.query.offset ?? 0),  0);
+  const cursor = decodeCursor(req.query.cursor);
 
   try {
     const result = await query(
@@ -307,16 +341,33 @@ router.get('/applications', async (req: Request, res: Response): Promise<void> =
        ))
        AND ($2 = '' OR d.name = $2)
        AND ($3 = '' OR a.status = $3)
-       ORDER BY a.created_at DESC
-       LIMIT $4 OFFSET $5`,
-      [`%${search}%`.replace('%%', '%'), dept, status, limit + 1, offset],
+       AND (
+         $4::timestamptz IS NULL
+         OR (a.created_at, a.id) < ($4::timestamptz, $5::uuid)
+       )
+       ORDER BY a.created_at DESC, a.id DESC
+       LIMIT $6 OFFSET $7`,
+      [
+        `%${search}%`.replace('%%', '%'),
+        dept,
+        status,
+        cursor?.created_at ?? null,
+        cursor?.id ?? null,
+        limit + 1,
+        cursor ? 0 : offset,
+      ],
     );
     // Empty search = '' → ILIKE '%' matches everything. But we pass '%search%' so
     // for empty search the condition becomes "'' = '' OR ..." which short-circuits. ✓
     const rows    = result.rows;
     const hasMore = rows.length > limit;
     if (hasMore) rows.pop();
-    res.json({ items: rows, hasMore, offset });
+    res.json({
+      items: rows,
+      hasMore,
+      offset,
+      nextCursor: hasMore ? encodeCursor(rows[rows.length - 1]) : null,
+    });
   } catch (err) {
     console.error('[admin] applications list failed:', err);
     res.status(500).json({ error: '申請一覧の取得に失敗しました' });

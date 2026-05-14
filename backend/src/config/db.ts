@@ -31,10 +31,35 @@ pool.on('error', (err: Error) => {
   console.error('[pg] unexpected pool error', err);
 });
 
-export const query = (
+export async function warmPgPool(): Promise<void> {
+  const count = Math.max(env.PG_POOL_MIN, 1);
+  const clients = await Promise.all(
+    Array.from({ length: count }, async () => {
+      const client = await pool.connect();
+      await client.query('SELECT 1');
+      return client;
+    }),
+  );
+  clients.forEach((client) => client.release());
+}
+
+const normalizeSql = (text: string): string =>
+  text.replace(/\s+/g, ' ').trim().slice(0, 600);
+
+export const query = async (
   text: string,
   params?: unknown[],
-): Promise<QueryResult<any>> => pool.query(text, params);
+): Promise<QueryResult<any>> => {
+  const start = Date.now();
+  try {
+    return await pool.query(text, params);
+  } finally {
+    const durationMs = Date.now() - start;
+    if (durationMs >= env.SLOW_QUERY_MS) {
+      console.warn(`[pg] slow query ${durationMs}ms ${normalizeSql(text)}`);
+    }
+  }
+};
 
 export const withTransaction = async <T>(
   fn: (client: pg.PoolClient) => Promise<T>,

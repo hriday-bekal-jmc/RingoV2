@@ -18,9 +18,9 @@ interface Application {
   id: string;
   application_number: string | null;
   status: string;
-  form_data: Record<string, unknown>;
+  form_data?: Record<string, unknown>;
   settlement_data?: Record<string, unknown> | null;
-  schema_definition: { fields: FormField[] } | null;
+  schema_definition?: { fields: FormField[] } | null;
   settlement_schema?: { fields: FormField[] } | null;
   created_at: string;
   template_name: string;
@@ -459,6 +459,17 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
   const [activeAction, setActiveAction] = useState<'approve' | 'return' | 'reject' | null>(null);
   const [comment, setComment] = useState('');
   const [showDetail, setShowDetail] = useState(false);
+  const {
+    data: detail,
+    isLoading: isDetailLoading,
+    isError: isDetailError,
+  } = useQuery<AppDetailData>({
+    queryKey: ['appDetail', app.id],
+    queryFn: async () => (await apiClient.get(`/applications/${app.id}`)).data,
+    staleTime: 60_000,
+  });
+
+  const viewApp = { ...app, ...detail } as Application;
 
   const isConfirmStep = app.current_step_action === 'CONFIRM';
 
@@ -538,6 +549,11 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
         <div className="flex-1 overflow-y-auto">
           <div className="px-7 py-5 space-y-6">
 
+            {isDetailLoading && <RingoLoader.Block label={t('loading')} />}
+            {isDetailError && (
+              <div className="text-sm text-ringo-500 text-center py-8">{t('approvals_error_msg')}</div>
+            )}
+
             {/* Settlement stage badge */}
             {app.current_stage === 'SETTLEMENT' && (
               <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-teal-50/80 border border-teal-200/60 text-teal-700 text-xs font-semibold">
@@ -547,20 +563,22 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
             )}
 
             {/* Settlement data (if SETTLEMENT stage) */}
-            {app.current_stage === 'SETTLEMENT' && app.settlement_data && (
+            {!isDetailLoading && !isDetailError && app.current_stage === 'SETTLEMENT' && viewApp.settlement_data && (
               <div>
                 <p className="section-title mb-4">{t('approvals_settle_content')}</p>
-                <FormDataViewer formData={app.settlement_data} schema={app.settlement_schema ?? null} tFn={t} />
+                <FormDataViewer formData={viewApp.settlement_data} schema={viewApp.settlement_schema ?? null} tFn={t} />
               </div>
             )}
 
             {/* Original RINGI content */}
+            {!isDetailLoading && !isDetailError && viewApp.form_data && (
             <div>
               <p className="section-title mb-4">
                 {app.current_stage === 'SETTLEMENT' ? t('approvals_original') : t('approvals_content')}
               </p>
-              <FormDataViewer formData={app.form_data} schema={app.schema_definition} tFn={t} />
+              <FormDataViewer formData={viewApp.form_data} schema={viewApp.schema_definition ?? null} tFn={t} />
             </div>
+            )}
           </div>
         </div>
 
@@ -683,13 +701,16 @@ export default function Approvals() {
     isFetchingNextPage,
     isLoading,
     isError,
-  } = useInfiniteQuery<{ items: Application[]; hasMore: boolean; total: number; offset: number }>({
+  } = useInfiniteQuery<{ items: Application[]; hasMore: boolean; total: number; offset: number; nextCursor?: string | null }>({
     queryKey: ['pendingApprovals', systemView],
-    queryFn: async ({ pageParam = 0 }) => (await apiClient.get(
-      `/approvals/pending?limit=${PAGE}&offset=${pageParam}${systemView ? '&all=true' : ''}`
-    )).data,
-    initialPageParam: 0,
-    getNextPageParam: (last, all) => last.hasMore ? all.length * PAGE : undefined,
+    queryFn: async ({ pageParam = null }) => {
+      const cursor = pageParam ? `&cursor=${encodeURIComponent(String(pageParam))}` : '';
+      return (await apiClient.get(
+        `/approvals/pending?limit=${PAGE}${systemView ? '&all=true' : ''}${cursor}`
+      )).data;
+    },
+    initialPageParam: null,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: 30_000,
   });
 

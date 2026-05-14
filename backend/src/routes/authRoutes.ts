@@ -4,11 +4,19 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 import { query } from '../config/db';
-import type { JwtPayload } from '../middlewares/authMiddleware';
+import {
+  cacheUserState,
+  invalidateUserStateCache,
+  loadUserState,
+  type JwtPayload,
+} from '../middlewares/authMiddleware';
 import { authLimiter } from '../middlewares/rateLimit';
 import { env } from '../config/env';
+import { getJsonCache, setJsonCache } from '../services/cache';
 
 const router = Router();
+const AUTH_PROFILE_TTL_SEC = 5 * 60;
+const authProfileInflight = new Map<string, Promise<Record<string, unknown> | null>>();
 
 const COOKIE_OPTS = {
   httpOnly: true,
@@ -44,7 +52,37 @@ async function issueToken(
     department_id: user.department_id,
     tv,
   };
+  await cacheUserState(user.id, { is_active: true, token_version: tv, role: user.role });
   return jwt.sign(payload, process.env.JWT_SECRET as string, { expiresIn: '7d' });
+}
+
+async function loadAuthProfile(userId: string): Promise<Record<string, unknown> | null> {
+  const key = `auth_profile:${userId}`;
+  const cached = await getJsonCache<Record<string, unknown>>(key);
+  if (cached) return cached;
+
+  const inflight = authProfileInflight.get(userId);
+  if (inflight) return inflight;
+
+  const loadPromise = (async (): Promise<Record<string, unknown> | null> => {
+    const result = await query(
+      `SELECT u.id, u.full_name, u.email, u.role, u.department_id, u.avatar_url, d.name AS department_name
+       FROM users u LEFT JOIN departments d ON u.department_id = d.id
+       WHERE u.id = $1 AND u.is_active = TRUE`,
+      [userId],
+    );
+    const user = result.rows[0] as Record<string, unknown> | undefined;
+    if (!user) return null;
+    await setJsonCache(key, user, AUTH_PROFILE_TTL_SEC);
+    return user;
+  })();
+
+  authProfileInflight.set(userId, loadPromise);
+  try {
+    return await loadPromise;
+  } finally {
+    authProfileInflight.delete(userId);
+  }
 }
 
 function makeGoogleClient(): OAuth2Client {
@@ -61,14 +99,15 @@ router.get('/me', async (req: Request, res: Response): Promise<void> => {
   if (!token) { res.status(401).json({ error: 'Not authenticated' }); return; }
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as JwtPayload;
-    const result = await query(
-      `SELECT u.id, u.full_name, u.email, u.role, u.department_id, u.avatar_url, d.name AS department_name
-       FROM users u LEFT JOIN departments d ON u.department_id = d.id
-       WHERE u.id = $1 AND u.is_active = TRUE`,
-      [decoded.id],
-    );
-    if (result.rows.length === 0) { res.status(401).json({ error: 'User not found or disabled' }); return; }
-    res.json({ user: result.rows[0] });
+    const state = await loadUserState(decoded.id);
+    if (!state || !state.is_active) { res.status(401).json({ error: 'User not found or disabled' }); return; }
+    if ((decoded.tv ?? 0) !== state.token_version) {
+      res.status(401).json({ error: 'Session revoked - please log in again' });
+      return;
+    }
+    const user = await loadAuthProfile(decoded.id);
+    if (!user) { res.status(401).json({ error: 'User not found or disabled' }); return; }
+    res.json({ user });
   } catch {
     res.status(401).json({ error: 'Invalid token' });
   }
@@ -98,6 +137,7 @@ router.post('/login', authLimiter, async (req: Request, res: Response): Promise<
     if (!valid) { res.status(401).json({ error: 'メールまたはパスワードが正しくありません' }); return; }
 
     const token = await issueToken(user);
+    await loadAuthProfile(user.id);
     res.cookie('token', token, COOKIE_OPTS);
     res.json({ user: { id: user.id, full_name: user.full_name, email: user.email, role: user.role, department_id: user.department_id } });
   } catch (err) {
@@ -122,6 +162,7 @@ router.patch('/me', async (req: Request, res: Response): Promise<void> => {
       [full_name.trim(), decoded.id],
     );
     if (result.rows.length === 0) { res.status(404).json({ error: 'ユーザーが見つかりません' }); return; }
+    await invalidateUserStateCache(decoded.id);
     res.json({ user: result.rows[0] });
   } catch {
     res.status(500).json({ error: '更新に失敗しました' });
@@ -147,6 +188,7 @@ router.post('/me/avatar', async (req: Request, res: Response): Promise<void> => 
       `UPDATE users SET avatar_url = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
       [avatar_url, decoded.id],
     );
+    await invalidateUserStateCache(decoded.id);
     res.json({ avatar_url });
   } catch {
     res.status(500).json({ error: 'アバターの更新に失敗しました' });
@@ -171,6 +213,7 @@ router.delete('/me/avatar', async (req: Request, res: Response): Promise<void> =
       `UPDATE users SET avatar_url = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
       [decoded.id],
     );
+    await invalidateUserStateCache(decoded.id);
     res.json({ avatar_url: null, has_google: !!(user?.google_oauth_sub) });
   } catch {
     res.status(500).json({ error: 'アバターの削除に失敗しました' });
@@ -240,13 +283,18 @@ router.get('/google/callback', authLimiter, async (req: Request, res: Response):
     if (!payload) { res.redirect(`${FRONTEND}/login?error=oauth_failed`); return; }
 
     const { sub: google_sub, email, name, picture, hd } = payload;
+    const normalizedEmail = email?.toLowerCase().trim();
+    if (!normalizedEmail) {
+      res.redirect(`${FRONTEND}/login?error=oauth_failed`);
+      return;
+    }
 
     // ── Workspace domain enforcement: reject anyone whose ID token doesn't
     //    show the correct hosted-domain claim (or whose email isn't in it).
     if (env.GOOGLE_WORKSPACE_DOMAIN) {
       const allowed = env.GOOGLE_WORKSPACE_DOMAIN.toLowerCase();
       const tokenHd = (hd ?? '').toLowerCase();
-      const emailDomain = (email ?? '').split('@')[1]?.toLowerCase() ?? '';
+      const emailDomain = normalizedEmail.split('@')[1]?.toLowerCase() ?? '';
       if (tokenHd !== allowed || emailDomain !== allowed) {
         res.redirect(`${FRONTEND}/login?error=domain_not_allowed`);
         return;
@@ -255,16 +303,24 @@ router.get('/google/callback', authLimiter, async (req: Request, res: Response):
 
     let userRes = await query(
       `SELECT id, full_name, email, role, department_id, is_active, google_oauth_sub
-       FROM users WHERE google_oauth_sub = $1 OR email = $2 LIMIT 1`,
-      [google_sub, email],
+       FROM users WHERE google_oauth_sub = $1 LIMIT 1`,
+      [google_sub],
     );
+
+    if (userRes.rows.length === 0) {
+      userRes = await query(
+        `SELECT id, full_name, email, role, department_id, is_active, google_oauth_sub
+         FROM users WHERE lower(email) = $1 LIMIT 1`,
+        [normalizedEmail],
+      );
+    }
 
     if (userRes.rows.length === 0) {
       userRes = await query(
         `INSERT INTO users (full_name, email, google_oauth_sub, avatar_url, role, is_active)
          VALUES ($1, $2, $3, $4, 'EMPLOYEE', TRUE)
          RETURNING id, full_name, email, role, department_id, is_active`,
-        [name, email, google_sub, picture ?? null],
+        [name, normalizedEmail, google_sub, picture ?? null],
       );
     } else {
       // Always refresh avatar_url + link sub if needed
@@ -277,7 +333,9 @@ router.get('/google/callback', authLimiter, async (req: Request, res: Response):
     const user = userRes.rows[0] as UserRow;
     if (!user.is_active) { res.redirect(`${FRONTEND}/login?error=account_disabled`); return; }
 
+    await invalidateUserStateCache(user.id);
     const token = await issueToken(user);
+    await loadAuthProfile(user.id);
     res.cookie('token', token, COOKIE_OPTS);
     res.redirect(`${FRONTEND}/dashboard`);
   } catch (err) {

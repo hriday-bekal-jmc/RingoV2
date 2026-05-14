@@ -8,7 +8,7 @@ import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
 
-import { pool } from './config/db';
+import { pool, warmPgPool } from './config/db';
 import { redis } from './config/redis';
 import { errorHandler } from './middlewares/errorHandler';
 
@@ -28,6 +28,11 @@ import dashboardRoutes from './routes/dashboardRoutes';
 
 const app: Application = express();
 const PORT = env.PORT;
+
+// Authenticated JSON APIs are kept fresh by React Query + SSE, not by browser
+// conditional caching. Disabling Express ETags prevents misleading 304s where
+// the route and DB work already happened before the response was marked fresh.
+app.set('etag', false);
 
 // ── Trust proxy ───────────────────────────────────────────────────────────────
 // Behind AWS ALB / nginx, X-Forwarded-* headers carry the real client IP. Without
@@ -56,6 +61,11 @@ app.use(cookieParser());
 
 // Structured logging: 'combined' in prod (Apache format), 'dev' locally
 app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+
+app.use('/api', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/health', async (_req, res) => {
@@ -88,9 +98,20 @@ app.use('/api/dashboard',    dashboardRoutes);
 
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-  console.log(`[ringo] backend listening on port ${PORT}`);
-});
+async function start(): Promise<void> {
+  try {
+    await warmPgPool();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'unknown';
+    console.warn(`[ringo] PostgreSQL warmup failed: ${message}`);
+  }
+
+  app.listen(PORT, () => {
+    console.log(`[ringo] backend listening on port ${PORT}`);
+  });
+}
+
+void start();
 
 const shutdown = async (signal: string): Promise<void> => {
   console.log(`[ringo] ${signal} received, shutting down`);

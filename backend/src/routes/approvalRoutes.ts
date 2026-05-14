@@ -5,6 +5,7 @@ import { assertCanActOnStep, httpErr } from '../middlewares/authz';
 import { mutationLimiter } from '../middlewares/rateLimit';
 import { insertOutboxEvent } from '../services/eventOutbox';
 import { computeApplicationRecipients } from '../services/eventRecipients';
+import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
 import type pg from 'pg';
 
 const router = Router();
@@ -36,18 +37,16 @@ const APPROVAL_PAGE_SIZE = 25;
 router.get('/pending', async (req: Request, res: Response): Promise<void> => {
   const { id: userId, role } = req.user!;
   const systemView = role === 'ADMIN' && req.query.all === 'true';
-  const limit  = Math.min(Number(req.query.limit  ?? APPROVAL_PAGE_SIZE), 100);
+  const limit  = parsePageLimit(req.query.limit, APPROVAL_PAGE_SIZE, 100);
   const offset = Math.max(Number(req.query.offset ?? 0), 0);
+  const cursor = decodeCursor(req.query.cursor);
   try {
     const result = await query(
       `SELECT
-         a.id, a.application_number, a.status, a.form_data, a.settlement_data, a.created_at,
+         a.id, a.application_number, a.status, a.created_at,
          t.title_ja AS template_name,
-         -- Use locked version schema if present (immune to future form edits)
-         COALESCE(v.schema_definition, t.schema_definition) AS schema_definition,
-         COALESCE(v.settlement_schema, t.settlement_schema) AS settlement_schema,
          u.full_name AS applicant_name,
-         u.avatar_url AS applicant_avatar,
+         CASE WHEN u.avatar_url LIKE 'data:%' THEN NULL ELSE u.avatar_url END AS applicant_avatar,
          COALESCE(d.name, '—') AS department_name,
          s.id AS current_step_id,
          (s.step_order - (s.step_order / 100) * 100) AS current_step,
@@ -55,7 +54,7 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
          s.label AS current_step_label,
          s.action_type AS current_step_action,
          approver.full_name AS current_approver_name,
-         approver.avatar_url AS current_approver_avatar,
+         CASE WHEN approver.avatar_url LIKE 'data:%' THEN NULL ELSE approver.avatar_url END AS current_approver_avatar,
          (SELECT COUNT(*) FROM approval_steps
           WHERE application_id = a.id AND stage = s.stage
             AND step_order / 100 = s.step_order / 100) AS total_steps,
@@ -64,15 +63,18 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
        JOIN form_templates t ON a.template_id = t.id
        LEFT JOIN users u ON a.applicant_id = u.id
        LEFT JOIN departments d ON d.id = u.department_id
-       LEFT JOIN form_template_versions v ON v.id = a.template_version_id
        JOIN approval_steps s
          ON s.application_id = a.id AND s.status = 'PENDING'
        LEFT JOIN users approver ON s.approver_id = approver.id
        WHERE a.status IN ('PENDING_APPROVAL', 'PENDING_SETTLEMENT')
          AND ($1 OR s.approver_id = $2)
-       ORDER BY a.created_at DESC
-       LIMIT $3 OFFSET $4`,
-      [systemView, userId, limit + 1, offset],
+         AND (
+           $3::timestamptz IS NULL
+           OR (a.created_at, a.id) < ($3::timestamptz, $4::uuid)
+         )
+       ORDER BY a.created_at DESC, a.id DESC
+       LIMIT $5 OFFSET $6`,
+      [systemView, userId, cursor?.created_at ?? null, cursor?.id ?? null, limit + 1, cursor ? 0 : offset],
     );
     const rows    = result.rows;
     const total   = Number(rows[0]?.total_count ?? 0);
@@ -80,7 +82,13 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
     if (hasMore) rows.pop();
     // strip internal total_count from each row
     const items = rows.map(({ total_count: _, ...r }) => r);
-    res.json({ items, hasMore, total, offset });
+    res.json({
+      items,
+      hasMore,
+      total,
+      offset,
+      nextCursor: hasMore ? encodeCursor(rows[rows.length - 1]) : null,
+    });
   } catch (err) {
     console.error('[approvals] pending fetch failed:', err);
     res.status(500).json({ error: '承認待ち一覧の取得に失敗しました' });
@@ -375,6 +383,7 @@ router.post('/:id/reject', async (req: Request, res: Response): Promise<void> =>
 router.get('/history', async (req: Request, res: Response): Promise<void> => {
   const userId = req.user!.id;
   const { stage, status, template_id, date_from, date_to, applicant } = req.query as Record<string, string>;
+  const cursor = decodeCursor(req.query.cursor);
 
   // acted_by = who actually clicked approve — only source of truth
   // No approver_id fallback: assigned ≠ acted; showing unverified attribution would leak other users' approvals
@@ -409,12 +418,16 @@ router.get('/history', async (req: Request, res: Response): Promise<void> => {
     conditions.push(`u_app.full_name ILIKE $${idx++}`);
     params.push(`%${applicant}%`);
   }
+  if (cursor) {
+    conditions.push(`(s.acted_at, s.id) < ($${idx++}::timestamptz, $${idx++}::uuid)`);
+    params.push(cursor.created_at, cursor.id);
+  }
 
-  const limit  = Math.min(Number(req.query.limit  ?? APPROVAL_PAGE_SIZE), 100);
+  const limit  = parsePageLimit(req.query.limit, APPROVAL_PAGE_SIZE, 100);
   const offset = Math.max(Number(req.query.offset ?? 0), 0);
   params.push(limit + 1);
   const limitIdx = idx++;
-  params.push(offset);
+  params.push(cursor ? 0 : offset);
   const offsetIdx = idx++;
 
   try {
@@ -432,20 +445,27 @@ router.get('/history', async (req: Request, res: Response): Promise<void> => {
         s.comment,
         s.acted_at,
         u_app.full_name AS applicant_name,
-        u_app.avatar_url AS applicant_avatar,
+        CASE WHEN u_app.avatar_url LIKE 'data:%' THEN NULL ELSE u_app.avatar_url END AS applicant_avatar,
         a.status AS app_status
       FROM approval_steps s
       JOIN applications a ON s.application_id = a.id
       JOIN form_templates t ON a.template_id = t.id
       LEFT JOIN users u_app ON a.applicant_id = u_app.id
       WHERE ${conditions.join(' AND ')}
-      ORDER BY s.acted_at DESC NULLS LAST
+      ORDER BY s.acted_at DESC NULLS LAST, s.id DESC
       LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
     const result = await query(sql, params);
     const rows    = result.rows;
     const hasMore = rows.length > limit;
     if (hasMore) rows.pop();
-    res.json({ items: rows, hasMore, offset });
+    res.json({
+      items: rows,
+      hasMore,
+      offset,
+      nextCursor: hasMore
+        ? encodeCursor({ created_at: rows[rows.length - 1].acted_at, id: rows[rows.length - 1].step_id })
+        : null,
+    });
   } catch (err) {
     console.error('[approvals] history failed:', err);
     res.status(500).json({ error: `承認履歴の取得に失敗しました: ${(err as Error).message}` });

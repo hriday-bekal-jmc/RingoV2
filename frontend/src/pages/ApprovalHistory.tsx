@@ -308,13 +308,16 @@ export default function ApprovalHistory() {
     isFetchingNextPage,
     isLoading,
     error,
-  } = useInfiniteQuery<{ items: HistoryItem[]; hasMore: boolean; offset: number }>({
+  } = useInfiniteQuery<{ items: HistoryItem[]; hasMore: boolean; offset: number; nextCursor?: string | null }>({
     queryKey: ['approvalHistory', stage, action, templateId, dateFrom, dateTo, applicant],
-    queryFn: async ({ pageParam = 0 }) => (await apiClient.get(
-      `/approvals/history?${params}&limit=${PAGE}&offset=${pageParam}`
-    )).data,
-    initialPageParam: 0,
-    getNextPageParam: (last, all) => last.hasMore ? all.length * PAGE : undefined,
+    queryFn: async ({ pageParam = null }) => {
+      const cursor = pageParam ? `&cursor=${encodeURIComponent(String(pageParam))}` : '';
+      return (await apiClient.get(
+        `/approvals/history?${params}&limit=${PAGE}${cursor}`
+      )).data;
+    },
+    initialPageParam: null,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: 30_000,
     retry: 1,
   });

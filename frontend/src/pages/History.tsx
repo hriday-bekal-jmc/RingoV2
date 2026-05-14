@@ -86,13 +86,16 @@ export default function History() {
     hasNextPage,
     isFetchingNextPage,
     isLoading,
-  } = useInfiniteQuery<{ items: Application[]; hasMore: boolean; offset: number }>({
+  } = useInfiniteQuery<{ items: Application[]; hasMore: boolean; offset: number; nextCursor?: string | null }>({
     queryKey: ['myApplications'],                          // always ALL — filter is client-side
-    queryFn: async ({ pageParam = 0 }) => (await apiClient.get(
-      `/applications?limit=${PAGE}&offset=${pageParam}&status=ALL`
-    )).data,
-    initialPageParam: 0,
-    getNextPageParam: (last, all) => last.hasMore ? all.length * PAGE : undefined,
+    queryFn: async ({ pageParam = null }) => {
+      const cursor = pageParam ? `&cursor=${encodeURIComponent(String(pageParam))}` : '';
+      return (await apiClient.get(
+        `/applications?limit=${PAGE}&status=ALL${cursor}`
+      )).data;
+    },
+    initialPageParam: null,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: 30_000,
     gcTime:    60_000,
   });

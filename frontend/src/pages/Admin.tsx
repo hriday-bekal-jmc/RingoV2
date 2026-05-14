@@ -1035,13 +1035,16 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
     hasNextPage,
     isFetchingNextPage,
     isLoading,
-  } = useInfiniteQuery<{ items: AppRecord[]; hasMore: boolean; offset: number }>({
+  } = useInfiniteQuery<{ items: AppRecord[]; hasMore: boolean; offset: number; nextCursor?: string | null }>({
     queryKey: ['admin', 'applications', debouncedSearch, deptFilter, statusFilter],
-    queryFn: async ({ pageParam = 0 }) => (await apiClient.get(
-      `/admin/applications?search=${encodeURIComponent(debouncedSearch)}&dept=${encodeURIComponent(deptFilter)}&status=${encodeURIComponent(statusFilter)}&limit=${PAGE_APPS}&offset=${pageParam}`
-    )).data,
-    initialPageParam: 0,
-    getNextPageParam: (last, all) => last.hasMore ? all.length * PAGE_APPS : undefined,
+    queryFn: async ({ pageParam = null }) => {
+      const cursor = pageParam ? `&cursor=${encodeURIComponent(String(pageParam))}` : '';
+      return (await apiClient.get(
+        `/admin/applications?search=${encodeURIComponent(debouncedSearch)}&dept=${encodeURIComponent(deptFilter)}&status=${encodeURIComponent(statusFilter)}&limit=${PAGE_APPS}${cursor}`
+      )).data;
+    },
+    initialPageParam: null,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: 30_000,
     // Drop cached pages quickly when admin leaves the tab — large objects
     gcTime:    60_000,

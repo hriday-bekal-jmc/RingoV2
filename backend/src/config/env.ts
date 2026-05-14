@@ -52,6 +52,7 @@ const schema = z.object({
 
   // ── Misc ──
   SUPER_ADMIN_EMAIL: z.string().email().optional(),
+  SLOW_QUERY_MS: z.coerce.number().int().positive().default(50),
 });
 
 const parsed = schema.safeParse(process.env);

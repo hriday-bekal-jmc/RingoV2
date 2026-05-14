@@ -6,6 +6,7 @@ import { requireAuth } from '../middlewares/authMiddleware';
 import { insertOutboxEvent } from '../services/eventOutbox';
 import { computeApplicationRecipients } from '../services/eventRecipients';
 import { addCsvExportJob, getCsvExportMeta } from '../services/csvExportQueue';
+import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
 import type pg from 'pg';
 import multer from 'multer';
 
@@ -60,9 +61,9 @@ function safeProofName(original: string): string {
 const SETTLE_PAGE_SIZE = 25;
 router.get('/settlements', async (req: Request, res: Response): Promise<void> => {
   const filter = ((req.query.filter as string | undefined) ?? 'ALL').toUpperCase();
-  const limit  = Math.min(Number(req.query.limit  ?? SETTLE_PAGE_SIZE), 100);
+  const limit  = parsePageLimit(req.query.limit, SETTLE_PAGE_SIZE, 100);
   const offset = Math.max(Number(req.query.offset ?? 0), 0);
-  const userId = req.user!.id;
+  const cursor = decodeCursor(req.query.cursor);
   try {
     const result = await query(
       `SELECT
@@ -103,9 +104,13 @@ router.get('/settlements', async (req: Request, res: Response): Promise<void> =>
        WHERE ($1 = 'ALL'
           OR ($1 = 'PENDING' AND a.status = 'PENDING_SETTLEMENT')
           OR ($1 = 'DONE'    AND a.status IN ('COMPLETED', 'SETTLEMENT_APPROVED')))
-       ORDER BY s.created_at DESC
-       LIMIT $2 OFFSET $3`,
-      [filter, limit + 1, offset],
+         AND (
+           $2::timestamptz IS NULL
+           OR (s.created_at, s.id) < ($2::timestamptz, $3::uuid)
+         )
+       ORDER BY s.created_at DESC, s.id DESC
+       LIMIT $4 OFFSET $5`,
+      [filter, cursor?.created_at ?? null, cursor?.id ?? null, limit + 1, cursor ? 0 : offset],
     );
     const rows    = result.rows;
     const hasMore = rows.length > limit;
@@ -115,7 +120,14 @@ router.get('/settlements', async (req: Request, res: Response): Promise<void> =>
       can_close:   r.app_status === 'SETTLEMENT_APPROVED',
       can_approve: false,   // legacy — no longer used in UI
     }));
-    res.json({ items, hasMore, offset });
+    res.json({
+      items,
+      hasMore,
+      offset,
+      nextCursor: hasMore
+        ? encodeCursor({ created_at: rows[rows.length - 1].created_at, id: rows[rows.length - 1].settlement_id })
+        : null,
+    });
   } catch (err) {
     console.error('[accounting] settlements list failed:', err);
     res.status(500).json({ error: '精算一覧の取得に失敗しました' });

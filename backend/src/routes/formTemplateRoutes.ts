@@ -13,6 +13,7 @@ import { query, withTransaction } from '../config/db';
 import { requireAuth, requireRole } from '../middlewares/authMiddleware';
 import { mutationLimiter } from '../middlewares/rateLimit';
 import { invalidateTemplatesCache } from './templateRoutes';
+import { invalidateAdminReferenceCache } from '../services/adminReferenceCache';
 import type pg from 'pg';
 
 const router = Router();
@@ -146,7 +147,8 @@ router.post('/form-templates', async (req: Request, res: Response): Promise<void
       return { template: t.rows[0], version: v.rows[0] };
     });
 
-    invalidateTemplatesCache();
+    void invalidateTemplatesCache();
+    void invalidateAdminReferenceCache('templates', 'routes');
     res.status(201).json(result);
   } catch (err: unknown) {
     const e = err as { code?: string; message?: string };
@@ -193,7 +195,8 @@ router.patch('/form-templates/:id', async (req: Request, res: Response): Promise
       res.status(404).json({ error: 'テンプレートが見つかりません' });
       return;
     }
-    invalidateTemplatesCache();
+    void invalidateTemplatesCache();
+    void invalidateAdminReferenceCache('templates', 'routes');
     res.json(r.rows[0]);
   } catch (err) {
     console.error('[admin/forms] patch failed:', err);
@@ -263,7 +266,8 @@ router.post('/form-templates/:id/versions', async (req: Request, res: Response):
       return v.rows[0];
     });
 
-    invalidateTemplatesCache();
+    void invalidateTemplatesCache();
+    void invalidateAdminReferenceCache('templates', 'routes');
     res.status(201).json(result);
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
@@ -318,7 +322,8 @@ router.post('/form-templates/:id/versions/:vid/activate', async (req: Request, r
       );
     });
 
-    invalidateTemplatesCache();
+    void invalidateTemplatesCache();
+    void invalidateAdminReferenceCache('templates', 'routes');
     res.json({ message: 'バージョンを切り替えました' });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
@@ -348,7 +353,8 @@ router.put('/form-templates/:id/departments', async (req: Request, res: Response
         );
       }
     });
-    invalidateTemplatesCache();
+    void invalidateTemplatesCache();
+    void invalidateAdminReferenceCache('templates', 'routes');
     res.json({ message: '部署設定を更新しました' });
   } catch (err) {
     console.error('[admin/forms] dept permissions failed:', err);
@@ -409,7 +415,8 @@ router.delete('/form-templates/:id', async (req: Request, res: Response): Promis
         res.status(404).json({ error: 'テンプレートが見つかりません' });
         return;
       }
-      invalidateTemplatesCache();
+      void invalidateTemplatesCache();
+      void invalidateAdminReferenceCache('templates', 'routes');
       res.json({ message: 'テンプレートを無効化しました' });
       return;
     }
@@ -432,7 +439,8 @@ router.delete('/form-templates/:id', async (req: Request, res: Response): Promis
         throw Object.assign(new Error('テンプレートが見つかりません'), { status: 404 });
       }
     });
-    invalidateTemplatesCache();
+    void invalidateTemplatesCache();
+    void invalidateAdminReferenceCache('templates', 'routes');
     res.json({ message: 'テンプレートを完全削除しました' });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };

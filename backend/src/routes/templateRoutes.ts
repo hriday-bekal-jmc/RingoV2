@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/db';
-import { redis } from '../config/redis';
 import { requireAuth } from '../middlewares/authMiddleware';
+import { getJsonCache, invalidateCachePattern, setJsonCache } from '../services/cache';
 
 const router = Router();
 router.use(requireAuth);
@@ -14,10 +14,7 @@ const TPL_CACHE_TTL    = 300;
 
 // Wildcard delete pattern for invalidation
 export async function invalidateTemplatesCache(): Promise<void> {
-  try {
-    const keys = await redis.keys(`${TPL_CACHE_PREFIX}:*`);
-    if (keys.length > 0) await redis.del(...keys);
-  } catch { /* non-fatal */ }
+  await invalidateCachePattern(`${TPL_CACHE_PREFIX}:*`);
 }
 
 // GET /templates — list active templates filtered by caller's department
@@ -27,10 +24,8 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
   const cacheKey = `${TPL_CACHE_PREFIX}:${role}:${deptId ?? 'NULL'}`;
 
   try {
-    try {
-      const cached = await redis.get(cacheKey);
-      if (cached) { res.json(JSON.parse(cached)); return; }
-    } catch { /* fall through */ }
+    const cached = await getJsonCache<unknown[]>(cacheKey);
+    if (cached) { res.json(cached); return; }
 
     // ADMIN sees everything. Others see templates where either:
     //   (a) no row in template_permissions (= unrestricted), OR
@@ -49,7 +44,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
     const params = role === 'ADMIN' ? [] : [deptId];
 
     const result = await query(sql, params);
-    redis.setex(cacheKey, TPL_CACHE_TTL, JSON.stringify(result.rows)).catch(() => {});
+    setJsonCache(cacheKey, result.rows, TPL_CACHE_TTL);
     res.json(result.rows);
   } catch (err) {
     console.error('[templates] list failed:', err);

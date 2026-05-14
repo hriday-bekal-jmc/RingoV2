@@ -315,13 +315,16 @@ export default function Accounting() {
     hasNextPage,
     isFetchingNextPage,
     isLoading,
-  } = useInfiniteQuery<{ items: Settlement[]; hasMore: boolean; offset: number }>({
+  } = useInfiniteQuery<{ items: Settlement[]; hasMore: boolean; offset: number; nextCursor?: string | null }>({
     queryKey: ['accountingSettlements'],                   // always ALL — filter is client-side
-    queryFn: async ({ pageParam = 0 }) => (await apiClient.get(
-      `/accounting/settlements?filter=ALL&limit=${PAGE}&offset=${pageParam}`
-    )).data,
-    initialPageParam: 0,
-    getNextPageParam: (last, all) => last.hasMore ? all.length * PAGE : undefined,
+    queryFn: async ({ pageParam = null }) => {
+      const cursor = pageParam ? `&cursor=${encodeURIComponent(String(pageParam))}` : '';
+      return (await apiClient.get(
+        `/accounting/settlements?filter=ALL&limit=${PAGE}${cursor}`
+      )).data;
+    },
+    initialPageParam: null,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: 30_000,
   });
 
