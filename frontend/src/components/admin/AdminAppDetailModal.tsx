@@ -16,6 +16,7 @@ import { useQuery } from '@tanstack/react-query';
 import apiClient from '../../services/apiClient';
 import { templateLabel } from '../../config/templateLabels';
 import { useLang } from '../../context/LanguageContext';
+import RepeatGroupDisplay from '../forms/RepeatGroupDisplay';
 
 interface ApplicationDetail {
   id: string;
@@ -51,6 +52,7 @@ interface FormField {
   label:    string;
   label_en?: string;
   type:     string;
+  fields?:  FormField[];
 }
 
 interface StepRow {
@@ -361,7 +363,7 @@ function FormDataCard({ title, accent, data, schema, files, lang }: {
 }) {
   const fields = schema?.fields ?? [];
   const entries = fields.length > 0
-    ? fields.map(f => ({ name: f.name, label: (lang === 'en' && f.label_en) ? f.label_en : f.label, type: f.type, value: data[f.name] }))
+    ? fields.map(f => ({ ...f, label: (lang === 'en' && f.label_en) ? f.label_en : f.label, value: data[f.name] }))
     : Object.entries(data).map(([k, v]) => ({ name: k, label: k, type: 'text', value: v }));
 
   if (entries.length === 0) {
@@ -381,7 +383,19 @@ function FormDataCard({ title, accent, data, schema, files, lang }: {
       <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-3">
         {entries.map((f) => {
           const isFile = f.type === 'file';
-          const isLong = !isFile && typeof f.value === 'string' && (f.type === 'textarea' || f.value.length > 50);
+          const isRepeat = f.type === 'repeat_group';
+          const isLong = isRepeat || (!isFile && typeof f.value === 'string' && (f.type === 'textarea' || f.value.length > 50));
+
+          if (isRepeat) {
+            return (
+              <div key={f.name} className="md:col-span-2">
+                <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{f.label}</dt>
+                <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3 py-2 rounded-xl break-words min-h-[36px]">
+                  <RepeatGroupDisplay field={f} value={f.value} compact />
+                </dd>
+              </div>
+            );
+          }
 
           // File-type rendering: tiles instead of raw URL string.
           if (isFile) {

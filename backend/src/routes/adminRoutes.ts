@@ -1,11 +1,12 @@
 import { Router, Request, Response } from 'express';
 import argon2 from 'argon2';
 import { query, withTransaction } from '../config/db';
-import { requireAuth, requireRole, invalidateUserStateCache } from '../middlewares/authMiddleware';
+import { requireAuth, requireAdmin, invalidateUserStateCache } from '../middlewares/authMiddleware';
 import { mutationLimiter } from '../middlewares/rateLimit';
 import { insertOutboxEvent } from '../services/eventOutbox';
 import { computeApplicationRecipients } from '../services/eventRecipients';
 import { redis } from '../config/redis';
+import { SUPER_ADMIN_EMAILS } from '../config/env';
 import { getJsonCache, setJsonCache } from '../services/cache';
 import {
   ADMIN_REF_CACHE_TTL_SEC,
@@ -17,21 +18,40 @@ import type pg from 'pg';
 
 const router = Router();
 router.use(requireAuth);
-router.use(requireRole('ADMIN'));
+router.use(requireAdmin);
 router.use(mutationLimiter);
+
+const USER_ROLES = new Set(['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ACCOUNTING']);
+const isValidBusinessRole = (role: unknown): role is string =>
+  typeof role === 'string' && USER_ROLES.has(role);
+
+async function hasOtherActiveAdmin(userId: string): Promise<boolean> {
+  const r = await query(
+    `SELECT EXISTS (
+       SELECT 1 FROM users
+       WHERE id <> $1
+         AND is_active = TRUE
+         AND (is_admin = TRUE OR lower(email) = ANY($2::text[]))
+     ) AS ok`,
+    [userId, [...SUPER_ADMIN_EMAILS]],
+  );
+  return Boolean(r.rows[0]?.ok);
+}
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 
 router.get('/users', async (_req: Request, res: Response): Promise<void> => {
   try {
     const result = await query(`
-      SELECT u.id, u.full_name, u.email, u.role, u.is_active, u.department_id,
+      SELECT u.id, u.full_name, u.email, u.role,
+             (u.is_admin OR lower(u.email) = ANY($1::text[])) AS is_admin,
+             u.is_active, u.department_id,
              CASE WHEN u.avatar_url LIKE 'data:%' THEN NULL ELSE u.avatar_url END AS avatar_url,
              d.name AS department_name
       FROM users u
       LEFT JOIN departments d ON u.department_id = d.id
       ORDER BY u.created_at DESC
-    `);
+    `, [[...SUPER_ADMIN_EMAILS]]);
     res.json(result.rows);
   } catch (err) {
     console.error('[admin] users list failed:', err);
@@ -40,16 +60,20 @@ router.get('/users', async (_req: Request, res: Response): Promise<void> => {
 });
 
 router.post('/users', async (req: Request, res: Response): Promise<void> => {
-  const { full_name, email, role, department_id, password, is_active } = req.body as {
+  const { full_name, email, role, is_admin, department_id, password, is_active } = req.body as {
     full_name: string; email: string; role: string;
-    department_id?: string; password?: string; is_active?: boolean;
+    is_admin?: boolean; department_id?: string; password?: string; is_active?: boolean;
   };
+  if (!isValidBusinessRole(role)) {
+    res.status(400).json({ error: 'Invalid business role' });
+    return;
+  }
   try {
     const hash = password ? await argon2.hash(password) : null;
     await query(
-      `INSERT INTO users (full_name, email, role, department_id, password_hash, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [full_name, email.toLowerCase().trim(), role, department_id ?? null, hash, is_active ?? true],
+      `INSERT INTO users (full_name, email, role, is_admin, department_id, password_hash, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [full_name, email.toLowerCase().trim(), role, is_admin ?? false, department_id ?? null, hash, is_active ?? true],
     );
     void invalidateAdminReferenceCache('routes');
     res.status(201).json({ message: 'ユーザーを作成しました' });
@@ -63,24 +87,26 @@ router.post('/users', async (req: Request, res: Response): Promise<void> => {
 
 router.patch('/users/:id', async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
-  const { full_name, email, role, department_id, password, is_active } = req.body as {
+  const { full_name, email, role, is_admin, department_id, password, is_active } = req.body as {
     full_name?: string; email?: string; role?: string;
-    department_id?: string | null; password?: string; is_active?: boolean;
+    is_admin?: boolean; department_id?: string | null; password?: string; is_active?: boolean;
   };
+  if (role !== undefined && !isValidBusinessRole(role)) {
+    res.status(400).json({ error: 'Invalid business role' });
+    return;
+  }
 
   try {
     // ─── SUPER ADMIN SAFEGUARD (スーパー管理者の保護) ───
     const targetRes = await query(`SELECT email FROM users WHERE id = $1`, [id]);
     if (targetRes.rows.length > 0) {
       const targetEmail = targetRes.rows[0].email;
-      const superAdminEmail = process.env.SUPER_ADMIN_EMAIL?.toLowerCase().trim();
-
-      if (superAdminEmail && targetEmail === superAdminEmail) {
+      if (SUPER_ADMIN_EMAILS.has(String(targetEmail).toLowerCase())) {
         if (is_active === false) {
           res.status(403).json({ error: 'システム管理者のアカウントは無効化できません。' });
           return;
         }
-        if (role && role !== 'ADMIN') {
+        if (is_admin === false) {
           res.status(403).json({ error: 'システム管理者の権限（ロール）は変更できません。' });
           return;
         }
@@ -90,17 +116,40 @@ router.patch('/users/:id', async (req: Request, res: Response): Promise<void> =>
 
     // Detect privilege-relevant change → bump token_version to revoke old JWTs
     const beforeRes = await query(
-      `SELECT role, is_active FROM users WHERE id = $1`,
+      `SELECT full_name, email, role, is_admin, department_id, is_active FROM users WHERE id = $1`,
       [id],
     );
-    const before = beforeRes.rows[0] as { role: string; is_active: boolean } | undefined;
+    const before = beforeRes.rows[0] as {
+      full_name: string; email: string; role: string; is_admin: boolean;
+      department_id: string | null; is_active: boolean;
+    } | undefined;
+    if (!before) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
     const roleChanged     = before && role !== undefined && before.role !== role;
+    const adminChanged    = before && is_admin !== undefined && before.is_admin !== is_admin;
     const activationChanged = before && is_active !== undefined && before.is_active !== is_active;
     const passwordChanged = !!password;
-    const bumpTokenVersion = roleChanged || activationChanged || passwordChanged;
+    const bumpTokenVersion = roleChanged || adminChanged || activationChanged || passwordChanged;
 
-    const params: unknown[] = [full_name, email?.toLowerCase().trim(), role, department_id ?? null, is_active];
-    let q = `UPDATE users SET full_name=$1, email=$2, role=$3, department_id=$4, is_active=$5`;
+    if (before.is_admin && (is_admin === false || is_active === false)) {
+      const otherAdminExists = await hasOtherActiveAdmin(String(id));
+      if (!otherAdminExists) {
+        res.status(409).json({ error: 'At least one active admin is required' });
+        return;
+      }
+    }
+
+    const params: unknown[] = [
+      full_name ?? before.full_name,
+      email?.toLowerCase().trim() ?? before.email,
+      role ?? before.role,
+      is_admin ?? before.is_admin,
+      department_id === undefined ? before.department_id : department_id ?? null,
+      is_active ?? before.is_active,
+    ];
+    let q = `UPDATE users SET full_name=$1, email=$2, role=$3, is_admin=$4, department_id=$5, is_active=$6`;
 
     if (password) {
       params.push(await argon2.hash(password));
@@ -141,14 +190,20 @@ router.patch('/users/:id', async (req: Request, res: Response): Promise<void> =>
 router.delete('/users/:id', async (req: Request, res: Response): Promise<void> => {
   try {
     // ─── SUPER ADMIN SAFEGUARD (スーパー管理者の保護) ───
-    const targetRes = await query(`SELECT email FROM users WHERE id = $1`, [req.params.id]);
+    const targetRes = await query(`SELECT email, is_admin, is_active FROM users WHERE id = $1`, [req.params.id]);
     if (targetRes.rows.length > 0) {
       const targetEmail = targetRes.rows[0].email;
-      const superAdminEmail = process.env.SUPER_ADMIN_EMAIL?.toLowerCase().trim();
-
-      if (superAdminEmail && targetEmail === superAdminEmail) {
+      const targetIsActiveAdmin = Boolean(targetRes.rows[0].is_admin) && Boolean(targetRes.rows[0].is_active);
+      if (SUPER_ADMIN_EMAILS.has(String(targetEmail).toLowerCase())) {
         res.status(403).json({ error: 'システム管理者のアカウントは削除できません。' });
         return;
+      }
+      if (targetIsActiveAdmin) {
+        const otherAdminExists = await hasOtherActiveAdmin(String(req.params.id));
+        if (!otherAdminExists) {
+          res.status(409).json({ error: 'At least one active admin is required' });
+          return;
+        }
       }
     }
     // ────────────────────────────────────────────────
@@ -367,6 +422,7 @@ router.get('/applications', async (req: Request, res: Response): Promise<void> =
       `SELECT a.id, a.application_number, a.status, a.created_at,
               a.archived_at, a.archive_reason,
               t.title_ja AS template_name,
+              t.settlement_schema IS NOT NULL AS has_settlement,
               u.full_name AS applicant_name,
               u.email AS applicant_email,
               d.name AS department_name
@@ -633,6 +689,7 @@ router.post('/applications/:id/unarchive', async (req: Request, res: Response): 
 });
 
 router.delete('/applications/:id', async (req: Request, res: Response): Promise<void> => {
+  const id = String(req.params.id);
   try {
     if (req.query.hard !== 'true') {
       res.status(405).json({ error: '物理削除は無効です。/archive を使用してください。' });
@@ -644,25 +701,59 @@ router.delete('/applications/:id', async (req: Request, res: Response): Promise<
       `SELECT id, application_number, archived_at
        FROM applications
        WHERE id = $1`,
-      [req.params.id],
+      [id],
     );
     if (appRes.rows.length === 0) {
       res.status(404).json({ error: '申請が見つかりません' });
       return;
     }
     const app = appRes.rows[0] as { id: string; application_number: string | null; archived_at: Date | null };
-    if (!app.archived_at) {
-      res.status(409).json({ error: '物理削除はアーカイブ済み申請のみ可能です' });
-      return;
-    }
     if (confirm !== app.id && confirm !== app.application_number) {
       res.status(400).json({ error: 'confirm に申請IDまたは申請番号を指定してください' });
       return;
     }
 
-    await query(`DELETE FROM applications WHERE id = $1 AND archived_at IS NOT NULL`, [req.params.id]);
+    const result = await withTransaction(async (client: pg.PoolClient) => {
+      const lockedRes = await client.query(
+        `SELECT id, application_number, archived_at
+         FROM applications
+         WHERE id = $1
+         FOR UPDATE`,
+        [id],
+      );
+      if (lockedRes.rows.length === 0) {
+        throw Object.assign(new Error('Application not found'), { status: 404 });
+      }
+      const lockedApp = lockedRes.rows[0] as { id: string; application_number: string | null; archived_at: Date | null };
+      if (confirm !== lockedApp.id && confirm !== lockedApp.application_number) {
+        throw Object.assign(new Error('confirm must match application id or application number'), { status: 400 });
+      }
+
+      const recipients = await computeApplicationRecipients(client, id, { includeAccounting: true });
+      await client.query(
+        `INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, metadata)
+         VALUES ($1, 'APPLICATION_HARD_DELETE', 'application', $2, $3::jsonb)`,
+        [req.user!.id, id, JSON.stringify({ application_number: lockedApp.application_number })],
+      );
+      await client.query(`DELETE FROM applications WHERE id = $1`, [id]);
+      await insertOutboxEvent(client, {
+        event_type:         'APPLICATION_CHANGED',
+        entity_type:        'application',
+        entity_id:          id,
+        recipient_user_ids: recipients,
+        payload:            { type: 'hard_delete', applicationId: id },
+      });
+      return { recipients };
+    });
+    const dashboardKeys = [
+      'dashboard:admin-overview',
+      ...result.recipients.map((uid) => `dashboard:summary:${uid}`),
+    ];
+    await redis.del(...dashboardKeys).catch(() => {});
     res.json({ message: 'アーカイブ済み申請データを物理削除しました' });
-  } catch (err) {
+  } catch (err: unknown) {
+    const e = err as { status?: number; message?: string };
+    if (e.status) { res.status(e.status).json({ error: e.message }); return; }
     console.error('[admin] application delete failed:', err);
     res.status(500).json({ error: '申請の削除に失敗しました' });
   }

@@ -18,6 +18,12 @@ export interface ResolvedStep {
   action_type: string;
 }
 
+export interface ApplicantRouteTrimResult {
+  steps:                      ResolvedStep[];
+  skipped_steps:              number;
+  skipped_through_step_order: number | null;
+}
+
 interface RawStep {
   step_order:    number;
   approver_id:   string | null;
@@ -118,4 +124,24 @@ export async function resolveApprovalSteps(
   }
 
   return resolved;
+}
+
+/**
+ * If applicant appears in route, start from the step after their first match.
+ * Example: manager submits on [manager, section head, GM] -> [section head, GM].
+ */
+export function skipStepsThroughApplicant(
+  steps: ResolvedStep[],
+  applicantId: string,
+): ApplicantRouteTrimResult {
+  const ownStepIndex = steps.findIndex((step) => step.approver_id === applicantId);
+  if (ownStepIndex < 0) {
+    return { steps, skipped_steps: 0, skipped_through_step_order: null };
+  }
+
+  return {
+    steps:                      steps.slice(ownStepIndex + 1),
+    skipped_steps:              ownStepIndex + 1,
+    skipped_through_step_order: steps[ownStepIndex].step_order,
+  };
 }

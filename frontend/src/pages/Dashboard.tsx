@@ -5,7 +5,7 @@ import Layout from '../components/common/Layout';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
 import { getPermissions } from '../config/permissions';
-import { TEMPLATE_LABELS, templateLabel, templateDesc } from '../config/templateLabels';
+import { TEMPLATE_LABELS, templateLabel } from '../config/templateLabels';
 import apiClient from '../services/apiClient';
 
 // Template tiles are now data-driven — fetched from `/templates` so any admin
@@ -77,11 +77,10 @@ function StatCard({ label, value, icon, color, to }: {
 
 
 export default function Dashboard() {
-  const { user, loading, role } = useAuth();
+  const { user, loading, isAdmin } = useAuth();
   const { t, lang } = useLang();
   const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
-  const perms = getPermissions(user?.role);
-  const isAdmin = role === 'ADMIN';
+  const perms = getPermissions(user?.role, user?.is_admin);
   const [adminView, setAdminView] = useState(false);
 
   // ── Personal summary ───────────────────────────────────────────────────────

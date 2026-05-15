@@ -8,11 +8,19 @@ import Toast, { useToast } from '../components/common/Toast';
 import { useLang } from '../context/LanguageContext';
 import { useAuth } from '../context/AuthContext';
 import RingoLoader from '../components/common/RingoLoader';
+import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
 
 // File URLs are same-origin (vite proxy /api in dev, reverse proxy in prod)
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-interface FormField { name: string; label: string; type: string; required?: boolean }
+interface FormField {
+  name: string;
+  label: string;
+  label_en?: string | null;
+  type: string;
+  required?: boolean;
+  fields?: FormField[];
+}
 
 interface Application {
   id: string;
@@ -111,13 +119,16 @@ function FormDataViewer({ formData, schema, tFn }: {
       {fields.map((f) => {
         const val = formData[f.name];
         const isFile = f.type === 'file';
-        const isLong = f.type === 'textarea' || (typeof val === 'string' && val.length > 60);
+        const isRepeat = f.type === 'repeat_group';
+        const isLong = isRepeat || f.type === 'textarea' || (typeof val === 'string' && val.length > 60);
 
         return (
           <div key={f.name} className={isLong ? 'col-span-full' : ''}>
             <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-0.5">{f.label}</dt>
             <dd className="text-sm text-warmgray-800 break-words">
-              {isFile && val ? (
+              {isRepeat ? (
+                <RepeatGroupDisplay field={f} value={val} compact />
+              ) : isFile && val ? (
                 <div className="flex flex-wrap gap-2 mt-1">
                   {String(val).split(',').filter(Boolean).map((url, i) => {
                     // Same-origin (vite proxy /api in dev, reverse proxy in prod) — cookie auto-sent
@@ -254,13 +265,16 @@ function AppDetailPanel({ appId, onClose, tFn, lang }: {
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
         {fields.map((f) => {
           const val = formData[f.name];
-          const isLong = f.type === 'textarea' || (typeof val === 'string' && val.length > 50);
+          const isRepeat = f.type === 'repeat_group';
+          const isLong = isRepeat || f.type === 'textarea' || (typeof val === 'string' && val.length > 50);
           const isFile = f.type === 'file';
           return (
             <div key={f.name} className={isLong ? 'col-span-full' : ''}>
               <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{f.label}</dt>
               <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3 py-2.5 rounded-xl break-words min-h-[38px]">
-                {isFile && val ? (
+                {isRepeat ? (
+                  <RepeatGroupDisplay field={f} value={val} compact />
+                ) : isFile && val ? (
                   <div className="flex flex-wrap gap-1.5">
                     {String(val).split(',').filter(Boolean).map((url, i) => {
                       const full = url.startsWith('http') ? url : url;
@@ -689,8 +703,7 @@ export default function Approvals() {
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
   const [systemView, setSystemView] = useState(false);
   const { t, lang } = useLang();
-  const { role } = useAuth();
-  const isAdmin = role === 'ADMIN';
+  const { isAdmin } = useAuth();
   const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
 
   const PAGE = 25;

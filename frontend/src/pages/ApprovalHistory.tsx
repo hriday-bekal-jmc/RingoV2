@@ -7,6 +7,7 @@ import apiClient from '../services/apiClient';
 import { useLang } from '../context/LanguageContext';
 import CalendarPicker from '../components/forms/CalendarPicker';
 import CustomSelect from '../components/forms/CustomSelect';
+import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -156,12 +157,19 @@ function DetailPanel({ applicationId, onClose, lang }: { applicationId: string; 
                 <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
                   {(app.schema_definition?.fields ?? []).map((f: any) => {
                     const val = app.form_data[f.name];
-                    const isLong = f.type === 'textarea' || (typeof val === 'string' && val.length > 40);
+                    const isRepeat = f.type === 'repeat_group';
+                    const isLong = isRepeat || f.type === 'textarea' || (typeof val === 'string' && val.length > 40);
                     return (
                       <div key={f.name} className={isLong ? 'col-span-full' : ''}>
                         <dt className="text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{f.label}</dt>
                         <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3.5 py-2.5 rounded-xl break-words min-h-[42px]">
-                          {val != null && val !== '' ? String(val) : <span className="text-warmgray-300">—</span>}
+                          {isRepeat ? (
+                            <RepeatGroupDisplay field={f} value={val} compact />
+                          ) : val != null && val !== '' ? (
+                            String(val)
+                          ) : (
+                            <span className="text-warmgray-300">—</span>
+                          )}
                         </dd>
                       </div>
                     );
@@ -176,12 +184,19 @@ function DetailPanel({ applicationId, onClose, lang }: { applicationId: string; 
                   <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
                     {(app.settlement_schema.fields ?? []).map((f: any) => {
                       const val = app.settlement_data![f.name];
-                      const isLong = f.type === 'textarea' || (typeof val === 'string' && val.length > 40);
+                      const isRepeat = f.type === 'repeat_group';
+                      const isLong = isRepeat || f.type === 'textarea' || (typeof val === 'string' && val.length > 40);
                       return (
                         <div key={f.name} className={isLong ? 'col-span-full' : ''}>
                           <dt className="text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{f.label}</dt>
                           <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3.5 py-2.5 rounded-xl break-words min-h-[42px]">
-                            {val != null && val !== '' ? String(val) : <span className="text-warmgray-300">—</span>}
+                            {isRepeat ? (
+                              <RepeatGroupDisplay field={f} value={val} compact />
+                            ) : val != null && val !== '' ? (
+                              String(val)
+                            ) : (
+                              <span className="text-warmgray-300">—</span>
+                            )}
                           </dd>
                         </div>
                       );

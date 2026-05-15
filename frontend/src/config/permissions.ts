@@ -158,6 +158,7 @@ const ROLE_MAP: Record<Role, RolePermissions> = {
     canApprove: true,
     canSettle: true,
     canAdmin: true,
+    legacy: true,
     approverRoles: ['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ACCOUNTING', 'ADMIN'],
     navItems: [
       { to: '/dashboard',        label: 'ダッシュボード', icon: '▦' },
@@ -170,8 +171,48 @@ const ROLE_MAP: Record<Role, RolePermissions> = {
   },
 };
 
-export function getPermissions(role?: string): RolePermissions {
-  return ROLE_MAP[(role as Role) ?? 'EMPLOYEE'] ?? ROLE_MAP.EMPLOYEE;
+/*
+const ADMIN_NAV: NavPermission[] = [
+  { to: '/approvals',        label: '謇ｿ隱榊ｾ・■',       icon: '粕' },
+  { to: '/approval-history', label: '謇ｿ隱榊ｱ･豁ｴ',       icon: '搭' },
+  { to: '/accounting',       label: '邨檎炊',           icon: '笆､' },
+  { to: '/admin',            label: '邂｡逅・判髱｢',       icon: '笞・ },
+];
+
+*/
+const ADMIN_NAV: NavPermission[] = [
+  { to: '/approvals',        label: 'Approvals',        icon: 'A' },
+  { to: '/approval-history', label: 'Approval History', icon: 'H' },
+  { to: '/accounting',       label: 'Accounting',       icon: '$' },
+  { to: '/admin',            label: 'Admin',            icon: '*' },
+];
+
+function mergeNav(base: NavPermission[], extra: NavPermission[]): NavPermission[] {
+  const seen = new Set<string>();
+  const merged: NavPermission[] = [];
+  for (const item of [...base, ...extra]) {
+    if (seen.has(item.to)) continue;
+    seen.add(item.to);
+    merged.push(item);
+  }
+  return merged;
+}
+
+export function getPermissions(role?: string, isAdmin = false): RolePermissions {
+  const base = ROLE_MAP[(role as Role) ?? 'EMPLOYEE'] ?? ROLE_MAP.EMPLOYEE;
+  if (!isAdmin && role !== 'ADMIN') return base;
+
+  return {
+    ...base,
+    canApprove: true,
+    canSettle:  true,
+    canAdmin:   true,
+    approverRoles: Array.from(new Set([
+      ...base.approverRoles,
+      'EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ACCOUNTING',
+    ])),
+    navItems: mergeNav(base.navItems, ADMIN_NAV),
+  };
 }
 
 export { ROLE_MAP };

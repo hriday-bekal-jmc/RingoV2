@@ -17,7 +17,7 @@ function nameToColor(name: string): string {
 export default function Profile() {
   const { user, setUser } = useAuth();
   const { lang, setLang, t } = useLang();
-  const perms = getPermissions(user?.role);
+  const perms = getPermissions(user?.role, user?.is_admin);
 
   const [name, setName] = useState(user?.full_name ?? '');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');

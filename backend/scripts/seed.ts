@@ -28,6 +28,7 @@ interface UserSeed {
   email: string;
   name: string;
   role: string;
+  is_admin?: boolean;
   dept: string;
   pw: boolean;
 }
@@ -72,21 +73,22 @@ async function seed(): Promise<void> {
       { email: 'shacho@jmc-ltd.co.jp',      name: '渡辺 社長', role: 'PRESIDENT',  dept: 'SOUMU', pw: false },
       { email: 'keiri1@jmc-ltd.co.jp',      name: '中村 経理', role: 'ACCOUNTING', dept: 'KEIRI', pw: false },
       // ── Admin ── login: h-bekal@jmc-ltd.co.jp / Ringo2026!
-      { email: 'h-bekal@jmc-ltd.co.jp',    name: 'H. Bekal',  role: 'ADMIN',      dept: 'SOUMU', pw: true  },
+      { email: 'h-bekal@jmc-ltd.co.jp',    name: 'H. Bekal',  role: 'SOUMU',      dept: 'SOUMU', is_admin: true, pw: true  },
     ];
 
     const userIdByEmail: Record<string, string> = {};
     for (const u of usersData) {
       const r = await client.query(
-        `INSERT INTO users (full_name, email, role, department_id, password_hash, is_active)
-         VALUES ($1, $2, $3, $4, $5, TRUE)
+        `INSERT INTO users (full_name, email, role, is_admin, department_id, password_hash, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, TRUE)
          ON CONFLICT (email) DO UPDATE SET
            full_name     = EXCLUDED.full_name,
            role          = EXCLUDED.role,
+           is_admin      = EXCLUDED.is_admin,
            department_id = EXCLUDED.department_id,
            password_hash = COALESCE(users.password_hash, EXCLUDED.password_hash)
          RETURNING id`,
-        [u.name, u.email, u.role, deptByCode[u.dept], u.pw ? DEV_PASSWORD_HASH : null],
+        [u.name, u.email, u.role, u.is_admin ?? false, deptByCode[u.dept], u.pw ? DEV_PASSWORD_HASH : null],
       );
       userIdByEmail[u.email] = r.rows[0].id as string;
     }

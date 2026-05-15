@@ -7,6 +7,7 @@ export interface User {
   full_name: string;
   email: string;
   role: string;
+  is_admin: boolean;
   department_id?: string;
   department_name?: string;
   avatar_url?: string | null;
@@ -19,6 +20,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   isAuthenticated: boolean;
   role?: string;
+  isAdmin: boolean;
   departmentId?: string;
 }
 
@@ -45,7 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const res = await apiClient.get('/auth/me');
       const fresh: User | null = res.data.user ?? null;
-      const fp = `${fresh?.role ?? ''}|${fresh?.department_id ?? ''}`;
+      const fp = `${fresh?.role ?? ''}|${fresh?.is_admin ? '1' : '0'}|${fresh?.department_id ?? ''}`;
 
       if (!isFirstLoad && fingerprintRef.current && fingerprintRef.current !== fp) {
         // Role or department changed while user was logged in.
@@ -107,6 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       isAuthenticated: !!user,
       role: user?.role,
+      isAdmin: !!user?.is_admin,
       departmentId: user?.department_id,
     }}>
       {children}

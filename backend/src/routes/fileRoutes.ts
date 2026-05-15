@@ -6,7 +6,7 @@ import { Router, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import { query } from '../config/db';
-import { requireAuth } from '../middlewares/authMiddleware';
+import { isAdminUser, requireAuth } from '../middlewares/authMiddleware';
 import { assertCanReadApp } from '../middlewares/authz';
 
 const router = Router();
@@ -31,10 +31,10 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
     // ── Authorization: if the file is attached to an application, the
     //    caller must have read access to that application. Files with no
     //    application_id (drafts mid-upload) are restricted to uploader.
-    const actor = { id: req.user!.id, role: req.user!.role };
+    const actor = { id: req.user!.id, role: req.user!.role, is_admin: req.user!.is_admin };
     if (f.application_id) {
       await assertCanReadApp(actor, f.application_id);
-    } else if (f.uploader_id !== actor.id && actor.role !== 'ADMIN') {
+    } else if (f.uploader_id !== actor.id && !isAdminUser(req.user)) {
       res.status(403).json({ error: 'このファイルにアクセスする権限がありません' });
       return;
     }

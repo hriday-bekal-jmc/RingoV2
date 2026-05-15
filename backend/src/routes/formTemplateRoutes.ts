@@ -10,7 +10,7 @@
 
 import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../config/db';
-import { requireAuth, requireRole } from '../middlewares/authMiddleware';
+import { requireAdmin, requireAuth } from '../middlewares/authMiddleware';
 import { mutationLimiter } from '../middlewares/rateLimit';
 import { invalidateTemplatesCache } from './templateRoutes';
 import { invalidateAdminReferenceCache } from '../services/adminReferenceCache';
@@ -18,7 +18,7 @@ import type pg from 'pg';
 
 const router = Router();
 router.use(requireAuth);
-router.use(requireRole('ADMIN'));
+router.use(requireAdmin);
 router.use(mutationLimiter);
 
 // ── GET /admin/form-templates ── list all w/ active version summary ──────────

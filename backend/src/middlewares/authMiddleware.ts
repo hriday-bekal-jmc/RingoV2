@@ -2,11 +2,13 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { query } from '../config/db';
 import { redis } from '../config/redis';
+import { SUPER_ADMIN_EMAILS } from '../config/env';
 
 export interface JwtPayload {
   id: string;
   email: string;
   role: string;
+  is_admin: boolean;
   department_id: string | null;
   tv?: number;
   iat?: number;
@@ -17,6 +19,7 @@ export interface UserState {
   is_active: boolean;
   token_version: number;
   role: string;
+  is_admin: boolean;
 }
 
 const USER_STATE_TTL_SEC = 60;
@@ -48,7 +51,7 @@ export async function loadUserState(userId: string): Promise<UserState | null> {
 
   const loadPromise = (async (): Promise<UserState | null> => {
     const r = await query(
-      `SELECT is_active, token_version, role FROM users WHERE id = $1`,
+      `SELECT is_active, token_version, role, is_admin, email FROM users WHERE id = $1`,
       [userId],
     );
     if (r.rows.length === 0) return null;
@@ -57,6 +60,7 @@ export async function loadUserState(userId: string): Promise<UserState | null> {
       is_active:     r.rows[0].is_active,
       token_version: r.rows[0].token_version ?? 0,
       role:          r.rows[0].role,
+      is_admin:      Boolean(r.rows[0].is_admin) || SUPER_ADMIN_EMAILS.has(String(r.rows[0].email).toLowerCase()),
     };
     await cacheUserState(userId, state);
     return state;
@@ -99,7 +103,24 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   }
 
   decoded.role = state.role;
+  decoded.is_admin = state.is_admin || SUPER_ADMIN_EMAILS.has(decoded.email.toLowerCase());
   req.user = decoded;
+  next();
+}
+
+export function isAdminUser(user?: { role?: string; is_admin?: boolean | null } | null): boolean {
+  return Boolean(user?.is_admin);
+}
+
+export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
+  if (!req.user) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+  if (!isAdminUser(req.user)) {
+    res.status(403).json({ error: 'Admin permissions required' });
+    return;
+  }
   next();
 }
 

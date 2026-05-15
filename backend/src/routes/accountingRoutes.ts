@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { query, withTransaction } from '../config/db';
-import { requireAuth } from '../middlewares/authMiddleware';
+import { isAdminUser, requireAuth } from '../middlewares/authMiddleware';
 import { insertOutboxEvent } from '../services/eventOutbox';
 import { computeApplicationRecipients } from '../services/eventRecipients';
 import { addCsvExportJob, getCsvExportMeta } from '../services/csvExportQueue';
@@ -16,7 +16,7 @@ router.use(requireAuth);
 // Only ACCOUNTING, SOUMU, ADMIN can access
 function requireAccounting(req: Request, res: Response, next: NextFunction): void {
   const role = req.user?.role ?? '';
-  if (!['ACCOUNTING', 'SOUMU', 'ADMIN'].includes(role)) {
+  if (!isAdminUser(req.user) && !['ACCOUNTING', 'SOUMU'].includes(role)) {
     res.status(403).json({ error: 'この機能は経理・総務・管理者のみ利用できます' });
     return;
   }
@@ -405,7 +405,7 @@ router.get('/settlements/csv/:jobId', async (req: Request, res: Response): Promi
   try {
     const meta = await getCsvExportMeta(String(jobId));
     if (!meta) { res.status(404).json({ error: 'ジョブが見つかりません' }); return; }
-    if (meta.userId !== req.user!.id && req.user!.role !== 'ADMIN') {
+    if (meta.userId !== req.user!.id && !isAdminUser(req.user)) {
       res.status(403).json({ error: 'このジョブにアクセスする権限がありません' });
       return;
     }
@@ -429,7 +429,7 @@ router.get('/settlements/csv/:jobId/download', async (req: Request, res: Respons
   try {
     const meta = await getCsvExportMeta(String(jobId));
     if (!meta) { res.status(404).json({ error: 'ジョブが見つかりません' }); return; }
-    if (meta.userId !== req.user!.id && req.user!.role !== 'ADMIN') {
+    if (meta.userId !== req.user!.id && !isAdminUser(req.user)) {
       res.status(403).json({ error: 'このジョブにアクセスする権限がありません' });
       return;
     }

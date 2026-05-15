@@ -3,8 +3,8 @@ import { query, withTransaction } from '../config/db';
 import { requireAuth } from '../middlewares/authMiddleware';
 import { assertCanReadApp, assertValidRouteForTemplate } from '../middlewares/authz';
 import { mutationLimiter } from '../middlewares/rateLimit';
-import { resolveApprovalSteps } from '../services/approvalStepService';
-import { validateFormData } from '../services/formValidation';
+import { resolveApprovalSteps, skipStepsThroughApplicant, type ResolvedStep } from '../services/approvalStepService';
+import { applyComputedFormData, validateFormData } from '../services/formValidation';
 import { insertOutboxEvent } from '../services/eventOutbox';
 import { computeApplicationRecipients } from '../services/eventRecipients';
 import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
@@ -14,6 +14,50 @@ const router = Router();
 router.use(requireAuth);
 // Per-IP cap of 300 req/min — protects DB from runaway clients
 router.use(mutationLimiter);
+
+type ApprovalStage = 'RINGI' | 'SETTLEMENT';
+
+async function nextApplicationNumber(client: pg.PoolClient): Promise<string> {
+  const seqRow = await client.query(`SELECT nextval('application_number_seq') AS n`);
+  const year = new Date().getFullYear();
+  return `RNG-${year}-${String(seqRow.rows[0].n).padStart(6, '0')}`;
+}
+
+async function finalizeStageWithoutApprovalSteps(
+  client: pg.PoolClient,
+  appId: string,
+  stage: ApprovalStage,
+): Promise<{ id: string; status: string; application_number: string | null }> {
+  const appNumber = await nextApplicationNumber(client);
+  const status = stage === 'SETTLEMENT' ? 'SETTLEMENT_APPROVED' : 'APPROVED';
+  const appRes = await client.query(
+    `UPDATE applications
+     SET status = $2,
+         application_number = COALESCE(application_number, $3),
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $1
+     RETURNING id, status, application_number`,
+    [appId, status, appNumber],
+  );
+  return appRes.rows[0] as { id: string; status: string; application_number: string | null };
+}
+
+async function insertApprovalSteps(
+  client: pg.PoolClient,
+  appId: string,
+  stage: ApprovalStage,
+  steps: ResolvedStep[],
+  offset = 0,
+): Promise<void> {
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    await client.query(
+      `INSERT INTO approval_steps (application_id, step_order, stage, approver_id, label, action_type, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [appId, offset + s.step_order, stage, s.approver_id, s.label, s.action_type, i === 0 ? 'PENDING' : 'WAITING'],
+    );
+  }
+}
 
 // GET /applications/route-preview?template_id=X&stage=RINGI|SETTLEMENT
 router.get('/route-preview', async (req: Request, res: Response): Promise<void> => {
@@ -42,7 +86,7 @@ router.get('/route-preview', async (req: Request, res: Response): Promise<void> 
     }
 
     const steps = await query(
-      `SELECT s.route_id, s.step_order, s.label, s.action_type,
+      `SELECT s.route_id, s.step_order, s.approver_id, s.label, s.action_type,
               u.full_name AS approver_name, u.role AS approver_role
        FROM approval_route_steps s
        LEFT JOIN users u ON s.approver_id = u.id
@@ -58,10 +102,16 @@ router.get('/route-preview', async (req: Request, res: Response): Promise<void> 
       return acc;
     }, {});
 
-    const result = routes.rows.map((r: { id: string }) => ({
-      ...r,
-      steps: stepsByRoute[r.id] || [],
-    }));
+    const applicantId = req.user!.id;
+    const result = routes.rows.map((r: { id: string }) => {
+      const routeSteps = (stepsByRoute[r.id] || []) as Array<{ approver_id?: string | null }>;
+      const ownStepIndex = routeSteps.findIndex((s) => s.approver_id === applicantId);
+      return {
+        ...r,
+        steps: ownStepIndex >= 0 ? routeSteps.slice(ownStepIndex + 1) : routeSteps,
+        skipped_steps: ownStepIndex >= 0 ? ownStepIndex + 1 : 0,
+      };
+    });
 
     res.json({ routes: result, department_has_route: true });
   } catch (err) {
@@ -81,15 +131,16 @@ router.post('/draft', async (req: Request, res: Response): Promise<void> => {
     const result = await withTransaction(async (client: pg.PoolClient) => {
       // Capture active version at draft creation — locks schema to what user is editing
       const verRes = await client.query(
-        `SELECT id FROM form_template_versions WHERE template_id = $1 AND is_active = TRUE LIMIT 1`,
+        `SELECT id, schema_definition FROM form_template_versions WHERE template_id = $1 AND is_active = TRUE LIMIT 1`,
         [template_id],
       );
       const versionId = verRes.rows[0]?.id ?? null;
+      const normalizedFormData = applyComputedFormData(verRes.rows[0]?.schema_definition, form_data);
       const appRes = await client.query(
         `INSERT INTO applications (applicant_id, template_id, template_version_id, form_data, status)
          VALUES ($1, $2, $3, $4::jsonb, 'DRAFT')
          RETURNING id, status`,
-        [applicant_id, template_id, versionId, JSON.stringify(form_data)],
+        [applicant_id, template_id, versionId, JSON.stringify(normalizedFormData)],
       );
       const app = appRes.rows[0] as { id: string; status: string };
       await insertOutboxEvent(client, {
@@ -114,12 +165,26 @@ router.patch('/:id', async (req: Request, res: Response): Promise<void> => {
   const applicant_id = req.user!.id;
   try {
     const result = await withTransaction(async (client: pg.PoolClient) => {
+      const schemaRes = await client.query(
+        `SELECT COALESCE(v.schema_definition, active_v.schema_definition) AS schema_definition
+         FROM applications a
+         LEFT JOIN form_template_versions v ON v.id = a.template_version_id
+         LEFT JOIN LATERAL (
+           SELECT schema_definition
+           FROM form_template_versions
+           WHERE template_id = a.template_id AND is_active = TRUE
+           LIMIT 1
+         ) active_v ON TRUE
+         WHERE a.id = $1 AND a.applicant_id = $2 AND a.status IN ('DRAFT', 'RETURNED')`,
+        [req.params.id, applicant_id],
+      );
+      const normalizedFormData = applyComputedFormData(schemaRes.rows[0]?.schema_definition, form_data);
       const appRes = await client.query(
         `UPDATE applications
          SET form_data = $1::jsonb, updated_at = CURRENT_TIMESTAMP
          WHERE id = $2 AND applicant_id = $3 AND status IN ('DRAFT', 'RETURNED')
          RETURNING id, status`,
-        [JSON.stringify(form_data), req.params.id, applicant_id],
+        [JSON.stringify(normalizedFormData), req.params.id, applicant_id],
       );
       if (appRes.rows.length === 0) {
         throw Object.assign(new Error('申請が見つかりません（または編集権限がありません）'), { status: 404 });
@@ -170,6 +235,28 @@ router.post('/:id/resubmit', async (req: Request, res: Response): Promise<void> 
         template_id: string;
         route_id: string | null;
       };
+      const schemaRes = await client.query(
+        `SELECT COALESCE(v.schema_definition, active_v.schema_definition) AS schema_definition
+         FROM applications a
+         LEFT JOIN form_template_versions v ON v.id = a.template_version_id
+         LEFT JOIN LATERAL (
+           SELECT schema_definition
+           FROM form_template_versions
+           WHERE template_id = a.template_id AND is_active = TRUE
+           LIMIT 1
+         ) active_v ON TRUE
+         WHERE a.id = $1`,
+        [req.params.id],
+      );
+      const normalizedFormData = form_data
+        ? applyComputedFormData(schemaRes.rows[0]?.schema_definition, form_data)
+        : undefined;
+      if (normalizedFormData && schemaRes.rows[0]?.schema_definition) {
+        const errors = validateFormData(schemaRes.rows[0].schema_definition, normalizedFormData);
+        if (errors.length > 0) {
+          throw Object.assign(new Error(errors.map(e => e.message).join(' / ')), { status: 400 });
+        }
+      }
 
       // Resolve route (prefer caller-supplied, then previous, then default)
       let route_id: string = chosen_route_id || prev_route_id || '';
@@ -191,7 +278,11 @@ router.post('/:id/resubmit', async (req: Request, res: Response): Promise<void> 
       }
 
       // Resolve route → concrete steps (single batched role lookup)
-      const resolvedSteps = await resolveApprovalSteps(client, route_id);
+      const routePolicy = skipStepsThroughApplicant(
+        await resolveApprovalSteps(client, route_id),
+        applicant_id,
+      );
+      const resolvedSteps = routePolicy.steps;
 
       // Determine step_order offset (100 per round, so history is preserved in order)
       const maxRes = await client.query(
@@ -211,14 +302,14 @@ router.post('/:id/resubmit', async (req: Request, res: Response): Promise<void> 
       );
 
       // Update application (optionally save updated form_data)
-      if (form_data) {
+      if (normalizedFormData) {
         await client.query(
           `UPDATE applications
            SET status = 'PENDING_APPROVAL', route_id = $1,
                submitted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
                form_data = $2::jsonb
            WHERE id = $3`,
-          [route_id, JSON.stringify(form_data), req.params.id],
+          [route_id, JSON.stringify(normalizedFormData), req.params.id],
         );
       } else {
         await client.query(
@@ -230,20 +321,24 @@ router.post('/:id/resubmit', async (req: Request, res: Response): Promise<void> 
         );
       }
 
-      // Insert fresh RINGI steps with offset step_orders
-      for (let i = 0; i < resolvedSteps.length; i++) {
-        const s = resolvedSteps[i];
-        await client.query(
-          `INSERT INTO approval_steps (application_id, step_order, stage, approver_id, label, action_type, status)
-           VALUES ($1, $2, 'RINGI', $3, $4, $5, $6)`,
-          [req.params.id, offset + s.step_order, s.approver_id, s.label, s.action_type, i === 0 ? 'PENDING' : 'WAITING'],
-        );
+      let finalApp: { id: string; status: string; application_number: string | null } | null = null;
+      if (resolvedSteps.length > 0) {
+        await insertApprovalSteps(client, String(req.params.id), 'RINGI', resolvedSteps, offset);
+      } else {
+        finalApp = await finalizeStageWithoutApprovalSteps(client, String(req.params.id), 'RINGI');
       }
 
       await client.query(
         `INSERT INTO audit_logs (action, entity_type, entity_id, metadata)
          VALUES ('RESUBMIT', 'application', $1, $2::jsonb)`,
-        [req.params.id, JSON.stringify({ route_id, offset, steps: resolvedSteps.length })],
+        [req.params.id, JSON.stringify({
+          route_id,
+          offset,
+          steps: resolvedSteps.length,
+          skipped_steps: routePolicy.skipped_steps,
+          skipped_through_step_order: routePolicy.skipped_through_step_order,
+          auto_approved: resolvedSteps.length === 0,
+        })],
       );
 
       const appId = String(req.params.id);
@@ -256,7 +351,14 @@ router.post('/:id/resubmit', async (req: Request, res: Response): Promise<void> 
         payload:            { type: 'resubmit', applicationId: appId },
       });
 
-      return { id: req.params.id, status: 'PENDING_APPROVAL', round_offset: offset };
+      return {
+        id: req.params.id,
+        status: finalApp?.status ?? 'PENDING_APPROVAL',
+        application_number: finalApp?.application_number ?? null,
+        round_offset: offset,
+        total_steps: resolvedSteps.length,
+        skipped_steps: routePolicy.skipped_steps,
+      };
     });
 
     res.json({ message: '再提出しました', application: result });
@@ -306,7 +408,11 @@ router.post('/:id/submit', async (req: Request, res: Response): Promise<void> =>
       }
 
       // Resolve route → concrete steps (single batched role lookup)
-      const resolvedSubmitSteps = await resolveApprovalSteps(client, route_id);
+      const submitRoutePolicy = skipStepsThroughApplicant(
+        await resolveApprovalSteps(client, route_id),
+        applicant_id,
+      );
+      const resolvedSubmitSteps = submitRoutePolicy.steps;
 
       // Update application to PENDING_APPROVAL
       await client.query(
@@ -315,19 +421,23 @@ router.post('/:id/submit', async (req: Request, res: Response): Promise<void> =>
         [req.params.id, route_id],
       );
 
-      // Create approval steps
-      for (let i = 0; i < resolvedSubmitSteps.length; i++) {
-        const s = resolvedSubmitSteps[i];
-        await client.query(
-          `INSERT INTO approval_steps (application_id, step_order, stage, approver_id, label, action_type, status)
-           VALUES ($1, $2, 'RINGI', $3, $4, $5, $6)`,
-          [req.params.id, s.step_order, s.approver_id, s.label, s.action_type, i === 0 ? 'PENDING' : 'WAITING'],
-        );
+      let finalApp: { id: string; status: string; application_number: string | null } | null = null;
+      if (resolvedSubmitSteps.length > 0) {
+        await insertApprovalSteps(client, String(req.params.id), 'RINGI', resolvedSubmitSteps);
+      } else {
+        finalApp = await finalizeStageWithoutApprovalSteps(client, String(req.params.id), 'RINGI');
       }
 
       await client.query(
-        `INSERT INTO audit_logs (action, entity_type, entity_id) VALUES ('DRAFT_SUBMIT', 'application', $1)`,
-        [req.params.id],
+        `INSERT INTO audit_logs (action, entity_type, entity_id, metadata)
+         VALUES ('DRAFT_SUBMIT', 'application', $1, $2::jsonb)`,
+        [req.params.id, JSON.stringify({
+          route_id,
+          steps: resolvedSubmitSteps.length,
+          skipped_steps: submitRoutePolicy.skipped_steps,
+          skipped_through_step_order: submitRoutePolicy.skipped_through_step_order,
+          auto_approved: resolvedSubmitSteps.length === 0,
+        })],
       );
 
       const appId = String(req.params.id);
@@ -340,7 +450,13 @@ router.post('/:id/submit', async (req: Request, res: Response): Promise<void> =>
         payload:            { type: 'submit', applicationId: appId },
       });
 
-      return { id: req.params.id, status: 'PENDING_APPROVAL', total_steps: resolvedSubmitSteps.length };
+      return {
+        id: req.params.id,
+        status: finalApp?.status ?? 'PENDING_APPROVAL',
+        application_number: finalApp?.application_number ?? null,
+        total_steps: resolvedSubmitSteps.length,
+        skipped_steps: submitRoutePolicy.skipped_steps,
+      };
     });
     res.json({ message: '申請を提出しました', application: result });
   } catch (err: unknown) {
@@ -366,7 +482,7 @@ router.post('/:id/start-settlement', async (req: Request, res: Response): Promis
     const result = await withTransaction(async (client: pg.PoolClient) => {
       // Load and lock — must be APPROVED and owned by applicant
       const appRes = await client.query(
-        `SELECT a.id, a.template_id, a.form_data
+        `SELECT a.id, a.template_id, a.template_version_id, a.form_data
          FROM applications a
          WHERE a.id = $1 AND a.applicant_id = $2 AND a.status = 'APPROVED'
          FOR UPDATE`,
@@ -375,15 +491,36 @@ router.post('/:id/start-settlement', async (req: Request, res: Response): Promis
       if (appRes.rows.length === 0) {
         throw Object.assign(new Error('対象の申請が見つかりません（申請者本人かつ承認済みのみ精算可能）'), { status: 404 });
       }
-      const { template_id, form_data: originalFormData } = appRes.rows[0] as { template_id: string; form_data: Record<string, unknown> };
+      const { template_id, template_version_id, form_data: originalFormData } = appRes.rows[0] as {
+        template_id: string;
+        template_version_id: string | null;
+        form_data: Record<string, unknown>;
+      };
 
       // Confirm template has settlement_schema
       const tmplRes = await client.query(
-        `SELECT id FROM form_templates WHERE id = $1 AND settlement_schema IS NOT NULL`,
-        [template_id],
+        `SELECT COALESCE(v.settlement_schema, active_v.settlement_schema) AS settlement_schema
+         FROM form_templates t
+         LEFT JOIN form_template_versions v ON v.id = $2
+         LEFT JOIN LATERAL (
+           SELECT settlement_schema
+           FROM form_template_versions
+           WHERE template_id = t.id AND is_active = TRUE
+           LIMIT 1
+         ) active_v ON TRUE
+         WHERE t.id = $1 AND COALESCE(v.settlement_schema, active_v.settlement_schema) IS NOT NULL`,
+        [template_id, template_version_id],
       );
       if (tmplRes.rows.length === 0) {
         throw Object.assign(new Error('このテンプレートは精算に対応していません'), { status: 422 });
+      }
+      const settlementSchema = tmplRes.rows[0]?.settlement_schema;
+      const normalizedSettlementData = applyComputedFormData(settlementSchema, settlement_data);
+      if (settlementSchema) {
+        const errors = validateFormData(settlementSchema, normalizedSettlementData);
+        if (errors.length > 0) {
+          throw Object.assign(new Error(errors.map(e => e.message).join(' / ')), { status: 400 });
+        }
       }
 
       // Resolve SETTLEMENT route
@@ -409,7 +546,11 @@ router.post('/:id/start-settlement', async (req: Request, res: Response): Promis
       }
 
       // Resolve settlement route → concrete steps (single batched role lookup)
-      const resolvedSteps = await resolveApprovalSteps(client, route_id, '精算ルート');
+      const settleRoutePolicy = skipStepsThroughApplicant(
+        await resolveApprovalSteps(client, route_id, '精算ルート'),
+        applicant_id,
+      );
+      const resolvedSteps = settleRoutePolicy.steps;
 
       // Update application
       await client.query(
@@ -417,13 +558,13 @@ router.post('/:id/start-settlement', async (req: Request, res: Response): Promis
          SET settlement_data = $2::jsonb, status = 'PENDING_SETTLEMENT',
              settlement_submitted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
          WHERE id = $1`,
-        [req.params.id, JSON.stringify(settlement_data)],
+        [req.params.id, JSON.stringify(normalizedSettlementData)],
       );
 
       // Create / update settlements table row for accounting dashboard
       const expectedAmount = parseFloat(String(originalFormData?.expected_amount ?? 0)) || 0;
       // actual_amount may be computed from line_items; fall back to direct field
-      const rawActual = settlement_data?.actual_amount;
+      const rawActual = normalizedSettlementData?.actual_amount;
       const actualAmount = typeof rawActual === 'number' ? rawActual : parseFloat(String(rawActual ?? 0)) || 0;
       await client.query(
         `INSERT INTO settlements (application_id, expected_amount, actual_amount, settlement_data, status)
@@ -432,7 +573,7 @@ router.post('/:id/start-settlement', async (req: Request, res: Response): Promis
            actual_amount    = EXCLUDED.actual_amount,
            settlement_data  = EXCLUDED.settlement_data,
            updated_at       = CURRENT_TIMESTAMP`,
-        [req.params.id, expectedAmount, actualAmount, JSON.stringify(settlement_data)],
+        [req.params.id, expectedAmount, actualAmount, JSON.stringify(normalizedSettlementData)],
       );
 
       // Clear any stale settlement steps (idempotent — safe to resubmit settlement)
@@ -442,20 +583,23 @@ router.post('/:id/start-settlement', async (req: Request, res: Response): Promis
         [req.params.id],
       );
 
-      // Create SETTLEMENT approval steps
-      for (let i = 0; i < resolvedSteps.length; i++) {
-        const s = resolvedSteps[i];
-        await client.query(
-          `INSERT INTO approval_steps (application_id, step_order, stage, approver_id, label, action_type, status)
-           VALUES ($1, $2, 'SETTLEMENT', $3, $4, $5, $6)`,
-          [req.params.id, s.step_order, s.approver_id, s.label, s.action_type, i === 0 ? 'PENDING' : 'WAITING'],
-        );
+      let finalApp: { id: string; status: string; application_number: string | null } | null = null;
+      if (resolvedSteps.length > 0) {
+        await insertApprovalSteps(client, String(req.params.id), 'SETTLEMENT', resolvedSteps);
+      } else {
+        finalApp = await finalizeStageWithoutApprovalSteps(client, String(req.params.id), 'SETTLEMENT');
       }
 
       await client.query(
-        `INSERT INTO audit_logs (action, entity_type, entity_id)
-         VALUES ('SETTLEMENT_START', 'application', $1)`,
-        [req.params.id],
+        `INSERT INTO audit_logs (action, entity_type, entity_id, metadata)
+         VALUES ('SETTLEMENT_START', 'application', $1, $2::jsonb)`,
+        [req.params.id, JSON.stringify({
+          route_id,
+          steps: resolvedSteps.length,
+          skipped_steps: settleRoutePolicy.skipped_steps,
+          skipped_through_step_order: settleRoutePolicy.skipped_through_step_order,
+          auto_approved: resolvedSteps.length === 0,
+        })],
       );
 
       const appId = String(req.params.id);
@@ -468,7 +612,13 @@ router.post('/:id/start-settlement', async (req: Request, res: Response): Promis
         payload:            { type: 'settlement_start', applicationId: appId },
       });
 
-      return { id: req.params.id, status: 'PENDING_SETTLEMENT', total_settlement_steps: resolvedSteps.length };
+      return {
+        id: req.params.id,
+        status: finalApp?.status ?? 'PENDING_SETTLEMENT',
+        application_number: finalApp?.application_number ?? null,
+        total_settlement_steps: resolvedSteps.length,
+        skipped_steps: settleRoutePolicy.skipped_steps,
+      };
     });
 
     res.json({ message: '精算申請を提出しました', application: result });
@@ -496,7 +646,7 @@ router.post('/:id/resubmit-settlement', async (req: Request, res: Response): Pro
     const result = await withTransaction(async (client: pg.PoolClient) => {
       // Lock app — must be RETURNED with a settlement step that was returned
       const appRes = await client.query(
-        `SELECT a.id, a.template_id, a.route_id
+        `SELECT a.id, a.template_id, a.template_version_id, a.route_id
          FROM applications a
          WHERE a.id = $1 AND a.applicant_id = $2 AND a.status = 'RETURNED'
          FOR UPDATE`,
@@ -517,7 +667,32 @@ router.post('/:id/resubmit-settlement', async (req: Request, res: Response): Pro
         throw Object.assign(new Error('精算フェーズの差し戻しステップが見つかりません'), { status: 409 });
       }
 
-      const { template_id } = appRes.rows[0] as { template_id: string; route_id: string | null };
+      const { template_id, template_version_id } = appRes.rows[0] as {
+        template_id: string;
+        template_version_id: string | null;
+        route_id: string | null;
+      };
+      const schemaRes = await client.query(
+        `SELECT COALESCE(v.settlement_schema, active_v.settlement_schema) AS settlement_schema
+         FROM form_templates t
+         LEFT JOIN form_template_versions v ON v.id = $2
+         LEFT JOIN LATERAL (
+           SELECT settlement_schema
+           FROM form_template_versions
+           WHERE template_id = t.id AND is_active = TRUE
+           LIMIT 1
+         ) active_v ON TRUE
+         WHERE t.id = $1`,
+        [template_id, template_version_id],
+      );
+      const settlementSchema = schemaRes.rows[0]?.settlement_schema;
+      const normalizedSettlementData = applyComputedFormData(settlementSchema, settlement_data);
+      if (settlementSchema) {
+        const errors = validateFormData(settlementSchema, normalizedSettlementData);
+        if (errors.length > 0) {
+          throw Object.assign(new Error(errors.map(e => e.message).join(' / ')), { status: 400 });
+        }
+      }
 
       // Resolve SETTLEMENT route
       let route_id: string = chosen_route_id || '';
@@ -539,7 +714,11 @@ router.post('/:id/resubmit-settlement', async (req: Request, res: Response): Pro
       }
 
       // Resolve SETTLEMENT route → concrete steps (single batched role lookup)
-      const resolvedSteps = await resolveApprovalSteps(client, route_id, '精算ルート');
+      const settleRoutePolicy = skipStepsThroughApplicant(
+        await resolveApprovalSteps(client, route_id, '精算ルート'),
+        applicant_id,
+      );
+      const resolvedSteps = settleRoutePolicy.steps;
 
       // Determine round offset for settlement (same logic as RINGI resubmit — preserves history)
       const maxSettleRes = await client.query(
@@ -564,33 +743,37 @@ router.post('/:id/resubmit-settlement', async (req: Request, res: Response): Pro
          SET status = 'PENDING_SETTLEMENT', settlement_data = $2::jsonb,
              settlement_submitted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
          WHERE id = $1`,
-        [req.params.id, JSON.stringify(settlement_data)],
+        [req.params.id, JSON.stringify(normalizedSettlementData)],
       );
 
       // Update settlements table row
-      const rawActual = settlement_data?.actual_amount;
+      const rawActual = normalizedSettlementData?.actual_amount;
       const actualAmount = typeof rawActual === 'number' ? rawActual : parseFloat(String(rawActual ?? 0)) || 0;
       await client.query(
         `UPDATE settlements
          SET actual_amount = $2, settlement_data = $3::jsonb, updated_at = CURRENT_TIMESTAMP
          WHERE application_id = $1`,
-        [req.params.id, actualAmount, JSON.stringify(settlement_data)],
+        [req.params.id, actualAmount, JSON.stringify(normalizedSettlementData)],
       );
 
-      // Insert fresh SETTLEMENT steps with round offset (avoids step_order collision with prior rounds)
-      for (let i = 0; i < resolvedSteps.length; i++) {
-        const s = resolvedSteps[i];
-        await client.query(
-          `INSERT INTO approval_steps (application_id, step_order, stage, approver_id, label, action_type, status)
-           VALUES ($1, $2, 'SETTLEMENT', $3, $4, $5, $6)`,
-          [req.params.id, settleOffset + s.step_order, s.approver_id, s.label, s.action_type, i === 0 ? 'PENDING' : 'WAITING'],
-        );
+      let finalApp: { id: string; status: string; application_number: string | null } | null = null;
+      if (resolvedSteps.length > 0) {
+        await insertApprovalSteps(client, String(req.params.id), 'SETTLEMENT', resolvedSteps, settleOffset);
+      } else {
+        finalApp = await finalizeStageWithoutApprovalSteps(client, String(req.params.id), 'SETTLEMENT');
       }
 
       await client.query(
-        `INSERT INTO audit_logs (action, entity_type, entity_id)
-         VALUES ('SETTLEMENT_RESUBMIT', 'application', $1)`,
-        [req.params.id],
+        `INSERT INTO audit_logs (action, entity_type, entity_id, metadata)
+         VALUES ('SETTLEMENT_RESUBMIT', 'application', $1, $2::jsonb)`,
+        [req.params.id, JSON.stringify({
+          route_id,
+          offset: settleOffset,
+          steps: resolvedSteps.length,
+          skipped_steps: settleRoutePolicy.skipped_steps,
+          skipped_through_step_order: settleRoutePolicy.skipped_through_step_order,
+          auto_approved: resolvedSteps.length === 0,
+        })],
       );
 
       const appId = String(req.params.id);
@@ -603,7 +786,13 @@ router.post('/:id/resubmit-settlement', async (req: Request, res: Response): Pro
         payload:            { type: 'settlement_resubmit', applicationId: appId },
       });
 
-      return { id: req.params.id, status: 'PENDING_SETTLEMENT' };
+      return {
+        id: req.params.id,
+        status: finalApp?.status ?? 'PENDING_SETTLEMENT',
+        application_number: finalApp?.application_number ?? null,
+        total_settlement_steps: resolvedSteps.length,
+        skipped_steps: settleRoutePolicy.skipped_steps,
+      };
     });
 
     res.json({ message: '精算を再提出しました', application: result });
@@ -666,7 +855,11 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       }
 
       // Resolve route → concrete steps (single batched role lookup)
-      const ringiResolvedSteps = await resolveApprovalSteps(client, route_id, '承認ルート');
+      const ringiRoutePolicy = skipStepsThroughApplicant(
+        await resolveApprovalSteps(client, route_id, '承認ルート'),
+        applicant_id,
+      );
+      const ringiResolvedSteps = ringiRoutePolicy.steps;
 
       // Capture active form template version — locks schema to what user submitted
       const verRes = await client.query(
@@ -675,10 +868,11 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       );
       const versionId = verRes.rows[0]?.id ?? null;
       const versionSchema = verRes.rows[0]?.schema_definition;
+      const normalizedFormData = applyComputedFormData(versionSchema, form_data);
 
       // Server-side schema validation — honours conditional_on (hidden fields exempt)
       if (versionSchema) {
-        const errors = validateFormData(versionSchema, form_data);
+        const errors = validateFormData(versionSchema, normalizedFormData);
         if (errors.length > 0) {
           throw Object.assign(new Error(errors.map(e => e.message).join(' / ')), { status: 400 });
         }
@@ -688,23 +882,27 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         `INSERT INTO applications (applicant_id, template_id, template_version_id, route_id, form_data, status, submitted_at)
          VALUES ($1, $2, $3, $4, $5::jsonb, 'PENDING_APPROVAL', CURRENT_TIMESTAMP)
          RETURNING id, status`,
-        [applicant_id, template_id, versionId, route_id, JSON.stringify(form_data)],
+        [applicant_id, template_id, versionId, route_id, JSON.stringify(normalizedFormData)],
       );
-      const app = appRes.rows[0] as { id: string; status: string };
+      let app = appRes.rows[0] as { id: string; status: string; application_number?: string | null };
 
-      for (let i = 0; i < ringiResolvedSteps.length; i++) {
-        const s = ringiResolvedSteps[i];
-        await client.query(
-          `INSERT INTO approval_steps (application_id, step_order, stage, approver_id, label, action_type, status)
-           VALUES ($1, $2, 'RINGI', $3, $4, $5, $6)`,
-          [app.id, s.step_order, s.approver_id, s.label, s.action_type, i === 0 ? 'PENDING' : 'WAITING'],
-        );
+      if (ringiResolvedSteps.length > 0) {
+        await insertApprovalSteps(client, app.id, 'RINGI', ringiResolvedSteps);
+      } else {
+        app = await finalizeStageWithoutApprovalSteps(client, app.id, 'RINGI');
       }
 
       await client.query(
         `INSERT INTO audit_logs (action, entity_type, entity_id, metadata)
          VALUES ('APPLICATION_SUBMIT', 'application', $1, $2::jsonb)`,
-        [app.id, JSON.stringify({ template_id, stage, steps: ringiResolvedSteps.length })],
+        [app.id, JSON.stringify({
+          template_id,
+          stage,
+          steps: ringiResolvedSteps.length,
+          skipped_steps: ringiRoutePolicy.skipped_steps,
+          skipped_through_step_order: ringiRoutePolicy.skipped_through_step_order,
+          auto_approved: ringiResolvedSteps.length === 0,
+        })],
       );
 
       const recipients = await computeApplicationRecipients(client, app.id);
@@ -716,7 +914,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         payload:            { type: 'submit', applicationId: app.id },
       });
 
-      return { ...app, total_steps: ringiResolvedSteps.length };
+      return { ...app, total_steps: ringiResolvedSteps.length, skipped_steps: ringiRoutePolicy.skipped_steps };
     });
 
     res.status(201).json({ message: '申請が完了しました！', application: result });
@@ -788,7 +986,7 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
   try {
     // ── Authorization: must be applicant, assigned approver, prior actor,
     //    same-dept manager+, ACCOUNTING, or ADMIN
-    await assertCanReadApp({ id: req.user!.id, role: req.user!.role }, String(req.params.id));
+    await assertCanReadApp({ id: req.user!.id, role: req.user!.role, is_admin: req.user!.is_admin }, String(req.params.id));
 
     // Schema resolution: prefer the locked version (form_template_versions row
     // captured at submit time). Falls back to current form_templates schema

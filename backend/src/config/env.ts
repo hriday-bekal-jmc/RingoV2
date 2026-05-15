@@ -52,6 +52,7 @@ const schema = z.object({
 
   // ── Misc ──
   SUPER_ADMIN_EMAIL: z.string().email().optional(),
+  SUPER_ADMIN_EMAILS: z.string().optional(),
   SLOW_QUERY_MS: z.coerce.number().int().positive().default(50),
 });
 
@@ -65,6 +66,21 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+const superAdminEmails = [
+  env.SUPER_ADMIN_EMAIL,
+  ...(env.SUPER_ADMIN_EMAILS ?? '').split(','),
+]
+  .map((email) => email?.trim().toLowerCase())
+  .filter((email): email is string => Boolean(email));
+
+const invalidSuperAdminEmails = superAdminEmails.filter((email) => !z.string().email().safeParse(email).success);
+if (invalidSuperAdminEmails.length > 0) {
+  console.error(`[env] Invalid SUPER_ADMIN_EMAILS: ${invalidSuperAdminEmails.join(', ')}`);
+  process.exit(1);
+}
+
+export const SUPER_ADMIN_EMAILS = new Set(superAdminEmails);
 
 // Production hardening assertions
 if (env.NODE_ENV === 'production') {

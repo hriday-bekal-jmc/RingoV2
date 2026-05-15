@@ -68,7 +68,7 @@ export default function Sidebar() {
   const { t } = useLang();
   const navigate = useNavigate();
   const location = useLocation();
-  const perms = getPermissions(user?.role);
+  const perms = getPermissions(user?.role, user?.is_admin);
 
   // Auto-close mobile drawer when route changes
   useEffect(() => { closeMobile(); }, [location.pathname, closeMobile]);
@@ -225,7 +225,10 @@ export default function Sidebar() {
           {!collapsed && (
             <div className="min-w-0 flex-1">
               <div className="text-xs font-semibold text-white/90 truncate">{user?.full_name ?? '—'}</div>
-              <div className="text-[10px] text-white/40">{getPermissions(user?.role).label}</div>
+              <div className="text-[10px] text-white/40">
+                {getPermissions(user?.role, user?.is_admin).label}
+                {user?.is_admin ? ' / Admin' : ''}
+              </div>
             </div>
           )}
         </NavLink>

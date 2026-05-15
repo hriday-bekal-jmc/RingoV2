@@ -39,7 +39,9 @@ export interface HttpErr extends Error { status: number }
 export const httpErr = (status: number, message: string): HttpErr =>
   Object.assign(new Error(message), { status }) as HttpErr;
 
-interface Actor { id: string; role: string }
+interface Actor { id: string; role: string; is_admin?: boolean | null }
+
+const actorIsAdmin = (actor: Actor): boolean => Boolean(actor.is_admin);
 
 /**
  * Can the actor READ this application?
@@ -56,7 +58,7 @@ export async function assertCanReadApp(
   appId: string,
   client?: pg.PoolClient,
 ): Promise<void> {
-  if (actor.role === 'ADMIN' || actor.role === 'ACCOUNTING' || actor.role === 'SOUMU') return;
+  if (actorIsAdmin(actor) || actor.role === 'ACCOUNTING' || actor.role === 'SOUMU') return;
 
   const q = client ? client.query.bind(client) : query;
   const r = await q(
@@ -73,7 +75,7 @@ export async function assertCanReadApp(
          OR (
            applicant.department_id IS NOT NULL
            AND applicant.department_id = actor_u.department_id
-           AND actor_u.role IN ('MANAGER','GM','ADMIN')
+           AND (actor_u.is_admin = TRUE OR actor_u.role IN ('MANAGER','GM'))
          )
        )
      LIMIT 1`,
@@ -125,7 +127,7 @@ export async function assertCanActOnStep(
     id: string; step_order: number; approver_id: string | null; stage: string; action_type: string;
   };
 
-  if (actor.role === 'ADMIN') return step;
+  if (actorIsAdmin(actor)) return step;
 
   // Explicit approver assigned → must be actor
   if (step.approver_id) {

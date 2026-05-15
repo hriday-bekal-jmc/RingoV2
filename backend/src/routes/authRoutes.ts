@@ -11,7 +11,7 @@ import {
   type JwtPayload,
 } from '../middlewares/authMiddleware';
 import { authLimiter } from '../middlewares/rateLimit';
-import { env } from '../config/env';
+import { env, SUPER_ADMIN_EMAILS } from '../config/env';
 import { getJsonCache, setJsonCache } from '../services/cache';
 
 const router = Router();
@@ -30,6 +30,7 @@ interface UserRow {
   full_name: string;
   email: string;
   role: string;
+  is_admin: boolean;
   department_id: string | null;
   password_hash: string | null;
   google_oauth_sub: string | null;
@@ -37,22 +38,24 @@ interface UserRow {
 }
 
 async function issueToken(
-  user: Pick<UserRow, 'id' | 'email' | 'role' | 'department_id'>,
+  user: Pick<UserRow, 'id' | 'email' | 'role' | 'is_admin' | 'department_id'>,
 ): Promise<string> {
   // Embed current token_version so future bumps revoke this token live.
   const tvRow = await query(
-    `SELECT token_version FROM users WHERE id = $1`,
+    `SELECT token_version, is_admin FROM users WHERE id = $1`,
     [user.id],
   );
   const tv = (tvRow.rows[0]?.token_version as number | undefined) ?? 0;
+  const isAdmin = Boolean(tvRow.rows[0]?.is_admin) || user.is_admin || SUPER_ADMIN_EMAILS.has(user.email.toLowerCase());
   const payload: JwtPayload = {
     id:            user.id,
     email:         user.email,
     role:          user.role,
+    is_admin:      isAdmin,
     department_id: user.department_id,
     tv,
   };
-  await cacheUserState(user.id, { is_active: true, token_version: tv, role: user.role });
+  await cacheUserState(user.id, { is_active: true, token_version: tv, role: user.role, is_admin: isAdmin });
   return jwt.sign(payload, process.env.JWT_SECRET as string, { expiresIn: '7d' });
 }
 
@@ -66,7 +69,7 @@ async function loadAuthProfile(userId: string): Promise<Record<string, unknown> 
 
   const loadPromise = (async (): Promise<Record<string, unknown> | null> => {
     const result = await query(
-      `SELECT u.id, u.full_name, u.email, u.role, u.department_id, u.avatar_url, d.name AS department_name
+      `SELECT u.id, u.full_name, u.email, u.role, u.is_admin, u.department_id, u.avatar_url, d.name AS department_name
        FROM users u LEFT JOIN departments d ON u.department_id = d.id
        WHERE u.id = $1 AND u.is_active = TRUE`,
       [userId],
@@ -107,6 +110,7 @@ router.get('/me', async (req: Request, res: Response): Promise<void> => {
     }
     const user = await loadAuthProfile(decoded.id);
     if (!user) { res.status(401).json({ error: 'User not found or disabled' }); return; }
+    user.is_admin = Boolean(user.is_admin) || SUPER_ADMIN_EMAILS.has(String(user.email).toLowerCase());
     res.json({ user });
   } catch {
     res.status(401).json({ error: 'Invalid token' });
@@ -120,7 +124,7 @@ router.post('/login', authLimiter, async (req: Request, res: Response): Promise<
 
   try {
     const result = await query(
-      `SELECT u.id, u.full_name, u.email, u.role, u.department_id, u.password_hash
+      `SELECT u.id, u.full_name, u.email, u.role, u.is_admin, u.department_id, u.password_hash
        FROM users u WHERE u.email = $1 AND u.is_active = TRUE`,
       [email.toLowerCase().trim()],
     );
@@ -139,7 +143,16 @@ router.post('/login', authLimiter, async (req: Request, res: Response): Promise<
     const token = await issueToken(user);
     await loadAuthProfile(user.id);
     res.cookie('token', token, COOKIE_OPTS);
-    res.json({ user: { id: user.id, full_name: user.full_name, email: user.email, role: user.role, department_id: user.department_id } });
+    res.json({
+      user: {
+        id: user.id,
+        full_name: user.full_name,
+        email: user.email,
+        role: user.role,
+        is_admin: Boolean(user.is_admin) || SUPER_ADMIN_EMAILS.has(user.email.toLowerCase()),
+        department_id: user.department_id,
+      },
+    });
   } catch (err) {
     console.error('[auth] login failed:', err);
     res.status(500).json({ error: 'ログインに失敗しました' });
@@ -158,7 +171,7 @@ router.patch('/me', async (req: Request, res: Response): Promise<void> => {
     const result = await query(
       `UPDATE users SET full_name = $1, updated_at = CURRENT_TIMESTAMP
        WHERE id = $2 AND is_active = TRUE
-       RETURNING id, full_name, email, role, department_id`,
+       RETURNING id, full_name, email, role, is_admin, department_id`,
       [full_name.trim(), decoded.id],
     );
     if (result.rows.length === 0) { res.status(404).json({ error: 'ユーザーが見つかりません' }); return; }
@@ -302,14 +315,14 @@ router.get('/google/callback', authLimiter, async (req: Request, res: Response):
     }
 
     let userRes = await query(
-      `SELECT id, full_name, email, role, department_id, is_active, google_oauth_sub
+      `SELECT id, full_name, email, role, is_admin, department_id, is_active, google_oauth_sub
        FROM users WHERE google_oauth_sub = $1 LIMIT 1`,
       [google_sub],
     );
 
     if (userRes.rows.length === 0) {
       userRes = await query(
-        `SELECT id, full_name, email, role, department_id, is_active, google_oauth_sub
+        `SELECT id, full_name, email, role, is_admin, department_id, is_active, google_oauth_sub
          FROM users WHERE lower(email) = $1 LIMIT 1`,
         [normalizedEmail],
       );
@@ -319,7 +332,7 @@ router.get('/google/callback', authLimiter, async (req: Request, res: Response):
       userRes = await query(
         `INSERT INTO users (full_name, email, google_oauth_sub, avatar_url, role, is_active)
          VALUES ($1, $2, $3, $4, 'EMPLOYEE', TRUE)
-         RETURNING id, full_name, email, role, department_id, is_active`,
+         RETURNING id, full_name, email, role, is_admin, department_id, is_active`,
         [name, normalizedEmail, google_sub, picture ?? null],
       );
     } else {

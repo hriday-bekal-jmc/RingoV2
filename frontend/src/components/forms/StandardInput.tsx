@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import {
   UseFormRegister,
   FieldError,
@@ -20,9 +20,15 @@ interface FormField {
   label_en?: string;      // English (admin-set)
   helper_text?: string;
   placeholder?: string;
+  default_value?: string | number | boolean | null;
   type: string;
   required?: boolean;
   multiple?: boolean;
+  fields?: FormField[];
+  min_rows?: number;
+  max_rows?: number;
+  add_label?: string;
+  add_label_en?: string;
   computed?: boolean;
   sum_target?: string;
   options?: string[] | { value: string; label?: string; label_ja?: string; label_en?: string }[];
@@ -54,6 +60,77 @@ function parseFileUrl(url: string, index: number): UploadedFile {
   const filename = url.split('/').pop() ?? `file_${index + 1}`;
   const original_name = decodeURIComponent(filename.replace(/^\d+_/, ''));
   return { id: url, url, original_name };
+}
+
+type RepeatRow = Record<string, unknown>;
+
+const MAX_REPEAT_ROWS = 50;
+
+function isEmptyValue(value: unknown): boolean {
+  if (value == null || value === '') return true;
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
+}
+
+function isMeaningfulValue(value: unknown): boolean {
+  if (typeof value === 'boolean') return value;
+  return !isEmptyValue(value);
+}
+
+function rowHasValue(row: RepeatRow, fields: FormField[]): boolean {
+  return fields.some((f) => f.type !== 'header' && isMeaningfulValue(row[f.name]));
+}
+
+function cleanRepeatRows(rows: RepeatRow[], fields: FormField[]): RepeatRow[] {
+  return rows
+    .filter((row) => rowHasValue(row, fields))
+    .map((row) => {
+      const clean: RepeatRow = {};
+      fields.forEach((f) => {
+        if (f.type !== 'header' && !isEmptyValue(row[f.name])) clean[f.name] = row[f.name];
+      });
+      return clean;
+    });
+}
+
+function blankRepeatRow(fields: FormField[]): RepeatRow {
+  const row: RepeatRow = {};
+  fields.forEach((f) => {
+    if (f.default_value !== undefined) row[f.name] = f.default_value;
+    else if (f.type === 'checkbox' && (!f.options || f.options.length === 0)) row[f.name] = false;
+    else row[f.name] = '';
+  });
+  return row;
+}
+
+function normalizeRepeatRows(value: unknown, fields: FormField[], visibleRows: number): RepeatRow[] {
+  if (Array.isArray(value) && value.length > 0) {
+    return value
+      .slice(0, MAX_REPEAT_ROWS)
+      .filter((row): row is RepeatRow => typeof row === 'object' && row !== null && !Array.isArray(row))
+      .map((row) => ({ ...row }));
+  }
+  return Array.from({ length: Math.max(1, visibleRows) }, () => blankRepeatRow(fields));
+}
+
+function localizedLabel(field: FormField, lang: 'ja' | 'en'): string {
+  return lang === 'en' && field.label_en ? field.label_en : field.label;
+}
+
+function normalizeOptions(
+  options: FormField['options'],
+  lang: 'ja' | 'en',
+): Array<{ value: string; label: string }> {
+  return (options ?? []).map((o) => {
+    if (typeof o === 'string') return { value: o, label: o };
+    const obj = o as { value: string; label?: string; label_ja?: string; label_en?: string };
+    return {
+      value: obj.value,
+      label: lang === 'en'
+        ? (obj.label_en || obj.label_ja || obj.label || obj.value)
+        : (obj.label_ja || obj.label || obj.label_en || obj.value),
+    };
+  });
 }
 
 export default function StandardInput({
@@ -149,6 +226,16 @@ export default function StandardInput({
       </label>
       {field.helper_text && (
         <p className="text-[11px] text-warmgray-400 -mt-0.5">{field.helper_text}</p>
+      )}
+
+      {field.type === 'repeat_group' && (
+        <RepeatGroupInput
+          field={field}
+          register={register}
+          setValue={setValue}
+          watch={watch}
+          isDraft={isDraft}
+        />
       )}
 
       {field.type === 'text' && (
@@ -367,8 +454,362 @@ export default function StandardInput({
 
       {error && !isDraft && (
         <p className="text-xs text-ringo-500 flex items-center gap-1">
-          <span>⚠</span> この項目は必須です
+          <span>⚠</span> {typeof error.message === 'string' && error.message ? error.message : 'この項目は必須です'}
         </p>
+      )}
+    </div>
+  );
+}
+
+function RepeatGroupInput({
+  field,
+  register,
+  setValue,
+  watch,
+  isDraft,
+}: {
+  field: FormField;
+  register: UseFormRegister<Record<string, unknown>>;
+  setValue?: UseFormSetValue<Record<string, unknown>>;
+  watch?: UseFormWatch<Record<string, unknown>>;
+  isDraft?: boolean;
+}) {
+  const { lang } = useLang();
+  const childFields = useMemo(
+    () => (field.fields ?? []).filter((f) => f.type !== 'repeat_group' && f.type !== 'header'),
+    [field.fields],
+  );
+  const minRows = Math.max(0, Number(field.min_rows ?? ((field.required && !isDraft) ? 1 : 0)) || 0);
+  const maxRows = Math.max(1, Math.min(MAX_REPEAT_ROWS, Number(field.max_rows ?? MAX_REPEAT_ROWS) || MAX_REPEAT_ROWS));
+  const initialVisibleRows = Math.min(maxRows, Math.max(1, minRows));
+
+  const [rows, setRows] = useState<RepeatRow[]>(() =>
+    normalizeRepeatRows(watch?.(field.name), childFields, initialVisibleRows),
+  );
+
+  const storedRows = useMemo(() => cleanRepeatRows(rows, childFields), [rows, childFields]);
+
+  useEffect(() => {
+    setValue?.(field.name, storedRows, {
+      shouldDirty: true,
+      shouldTouch: false,
+      shouldValidate: false,
+    });
+  }, [field.name, setValue, storedRows]);
+
+  const updateCell = (rowIndex: number, childName: string, value: unknown) => {
+    setRows((prev) => prev.map((row, i) => i === rowIndex ? { ...row, [childName]: value } : row));
+  };
+
+  const addRow = () => {
+    setRows((prev) => prev.length >= maxRows ? prev : [...prev, blankRepeatRow(childFields)]);
+  };
+
+  const removeRow = (rowIndex: number) => {
+    setRows((prev) => {
+      if (prev.length <= Math.max(1, minRows)) return prev;
+      return prev.filter((_, i) => i !== rowIndex);
+    });
+  };
+
+  const validateRows = () => {
+    if (minRows > 0 && storedRows.length < minRows) {
+      return lang === 'en' ? `Add at least ${minRows} row(s).` : `${minRows}行以上追加してください。`;
+    }
+    for (const [rowIndex, row] of storedRows.entries()) {
+      for (const child of childFields) {
+        if (!child.required) continue;
+        if (isEmptyValue(row[child.name])) {
+          return `${localizedLabel(child, lang)} ${lang === 'en' ? `is required in row ${rowIndex + 1}.` : `は${rowIndex + 1}行目で必須です。`}`;
+        }
+      }
+    }
+    return true;
+  };
+
+  const addLabel = lang === 'en'
+    ? (field.add_label_en || field.add_label || 'Add row')
+    : (field.add_label || field.add_label_en || '行を追加');
+
+  if (childFields.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-warmgray-200 bg-white/50 px-4 py-6 text-center text-sm text-warmgray-400">
+        {lang === 'en' ? 'No row fields are configured yet.' : '行項目が設定されていません。'}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <input type="hidden" {...register(field.name, { validate: validateRows })} />
+      <div className="rounded-2xl border border-white/80 bg-white/40 p-3 space-y-3">
+        {rows.map((row, rowIndex) => (
+          <div key={rowIndex} className="rounded-xl border border-surface-200/80 bg-white/80 p-3 shadow-sm space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-widest text-warmgray-400">
+                {lang === 'en' ? `Row ${rowIndex + 1}` : `${rowIndex + 1}行目`}
+              </span>
+              <button
+                type="button"
+                onClick={() => removeRow(rowIndex)}
+                disabled={rows.length <= Math.max(1, minRows)}
+                className="text-xs font-semibold text-warmgray-400 hover:text-red-500 disabled:opacity-30 disabled:hover:text-warmgray-400"
+              >
+                {lang === 'en' ? 'Remove' : '削除'}
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {childFields.map((child) => (
+                <div
+                  key={child.name}
+                  className={`min-w-0 ${child.type === 'textarea' || child.type === 'file' ? 'md:col-span-2' : ''}`}
+                >
+                  <RepeatCell
+                    groupName={field.name}
+                    rowIndex={rowIndex}
+                    field={child}
+                    value={row[child.name]}
+                    onChange={(value) => updateCell(rowIndex, child.name, value)}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+
+        <button
+          type="button"
+          onClick={addRow}
+          disabled={rows.length >= maxRows}
+          className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-dashed border-ringo-200 bg-ringo-50/30 px-4 py-3 text-sm font-semibold text-ringo-600 hover:bg-ringo-50 disabled:opacity-40 disabled:hover:bg-ringo-50/30 transition-colors"
+        >
+          <span className="text-base leading-none">+</span>
+          {addLabel}
+          <span className="text-[11px] text-ringo-400">({rows.length}/{maxRows})</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RepeatCell({
+  groupName,
+  rowIndex,
+  field,
+  value,
+  onChange,
+}: {
+  groupName: string;
+  rowIndex: number;
+  field: FormField;
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const { lang } = useLang();
+  const label = localizedLabel(field, lang);
+  const requiredMark = field.required ? <span className="text-ringo-500 ml-0.5">*</span> : null;
+
+  return (
+    <div className="flex flex-col gap-1.5 min-w-0">
+      <label className="text-xs font-bold text-warmgray-500 break-words [overflow-wrap:anywhere]">
+        {label}{requiredMark}
+      </label>
+
+      {field.type === 'text' && (
+        <input
+          type="text"
+          value={String(value ?? '')}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={field.placeholder}
+          className="input"
+        />
+      )}
+
+      {field.type === 'textarea' && (
+        <textarea
+          value={String(value ?? '')}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={field.placeholder}
+          className="input min-h-[90px] resize-y whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+          rows={3}
+        />
+      )}
+
+      {field.type === 'number' && (
+        <input
+          type="number"
+          value={value === 0 ? 0 : String(value ?? '')}
+          onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
+          placeholder={field.placeholder}
+          className="input"
+        />
+      )}
+
+      {field.type === 'date' && (
+        <input
+          type="date"
+          value={String(value ?? '')}
+          onChange={(e) => onChange(e.target.value)}
+          className="input"
+        />
+      )}
+
+      {field.type === 'select' && (
+        <select value={String(value ?? '')} onChange={(e) => onChange(e.target.value)} className="input">
+          <option value="">-</option>
+          {normalizeOptions(field.options, lang).map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      )}
+
+      {field.type === 'checkbox' && (() => {
+        const opts = normalizeOptions(field.options, lang);
+        if (opts.length === 0) {
+          return (
+            <label className="inline-flex items-center gap-2 text-sm text-warmgray-700">
+              <input
+                type="checkbox"
+                checked={Boolean(value)}
+                onChange={(e) => onChange(e.target.checked)}
+                className="w-4 h-4 accent-ringo-500"
+              />
+              {field.placeholder ?? label}
+            </label>
+          );
+        }
+        const current = new Set(Array.isArray(value) ? value.map(String) : (value ? [String(value)] : []));
+        return (
+          <div className="flex flex-wrap gap-2 rounded-xl bg-white/50 border border-white/80 px-3 py-2">
+            {opts.map((o) => {
+              const checked = current.has(o.value);
+              return (
+                <label key={o.value} className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold cursor-pointer ${
+                  checked ? 'border-ringo-200 bg-ringo-50 text-ringo-700' : 'border-surface-200 bg-white/70 text-warmgray-600'
+                }`}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => {
+                      const next = new Set(current);
+                      if (next.has(o.value)) next.delete(o.value); else next.add(o.value);
+                      onChange(Array.from(next));
+                    }}
+                    className="w-3.5 h-3.5 accent-ringo-500"
+                  />
+                  {o.label}
+                </label>
+              );
+            })}
+          </div>
+        );
+      })()}
+
+      {field.type === 'file' && (
+        <RepeatFileInput
+          groupName={groupName}
+          rowIndex={rowIndex}
+          field={field}
+          value={String(value ?? '')}
+          onChange={onChange}
+        />
+      )}
+    </div>
+  );
+}
+
+function RepeatFileInput({
+  groupName,
+  rowIndex,
+  field,
+  value,
+  onChange,
+}: {
+  groupName: string;
+  rowIndex: number;
+  field: FormField;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const { lang } = useLang();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [files, setFiles] = useState<UploadedFile[]>(() =>
+    value
+      .split(',')
+      .filter(Boolean)
+      .map((url, i) => parseFileUrl(url.trim(), i)),
+  );
+
+  useEffect(() => {
+    if (files.length > 0 || !value) return;
+    setFiles(value.split(',').filter(Boolean).map((url, i) => parseFileUrl(url.trim(), i)));
+  }, [value, files.length]);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files;
+    if (!selected || selected.length === 0) return;
+
+    setUploading(true);
+    setUploadError(null);
+    const formData = new FormData();
+    Array.from(selected).forEach((f) => formData.append('files', f));
+    formData.append('field_name', `${groupName}.${rowIndex}.${field.name}`);
+    formData.append('folder', 'receipts');
+
+    try {
+      const res = await apiClient.post('/uploads', formData);
+      const uploaded = (res.data.files as UploadedFile[]).map((f) => ({ ...f, url: f.url }));
+      const next = field.multiple ? [...files, ...uploaded] : uploaded.slice(-1);
+      setFiles(next);
+      onChange(next.map((f) => f.url).join(','));
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setUploadError(msg ?? (lang === 'en' ? 'Upload failed' : 'アップロードに失敗しました'));
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const removeFile = (id: string) => {
+    const next = files.filter((f) => f.id !== id);
+    setFiles(next);
+    onChange(next.map((f) => f.url).join(','));
+  };
+
+  return (
+    <div className="space-y-2">
+      <label className={`flex items-center justify-center gap-2 rounded-xl border border-dashed px-3 py-4 cursor-pointer transition-colors ${
+        uploading ? 'border-ringo-300 bg-ringo-50/40 opacity-70' : 'border-surface-300 bg-white/50 hover:border-ringo-300 hover:bg-ringo-50/20'
+      }`}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple={field.multiple}
+          className="sr-only"
+          onChange={handleFileChange}
+          disabled={uploading}
+        />
+        <span className="text-sm font-semibold text-warmgray-600">
+          {uploading ? (lang === 'en' ? 'Uploading...' : 'アップロード中...') : (lang === 'en' ? 'Upload file' : 'ファイルを追加')}
+        </span>
+      </label>
+
+      {uploadError && <p className="text-xs text-ringo-500">{uploadError}</p>}
+
+      {files.length > 0 && (
+        <ul className="space-y-1.5">
+          {files.map((file) => (
+            <li key={file.id} className="flex items-center gap-2 rounded-lg border border-white/80 bg-white/70 px-3 py-2 min-w-0">
+              <a href={file.url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 truncate text-xs font-semibold text-ringo-600 hover:text-ringo-700">
+                {file.original_name}
+              </a>
+              <button type="button" onClick={() => removeFile(file.id)} className="text-warmgray-400 hover:text-red-500 text-sm">×</button>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

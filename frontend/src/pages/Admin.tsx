@@ -21,6 +21,7 @@ interface User {
   full_name: string;
   email: string;
   role: string;
+  is_admin: boolean;
   is_active: boolean;
   department_name?: string;
   department_id?: string;
@@ -55,7 +56,7 @@ interface ApprovalRoute {
 interface Template { id: string; code: string; title_ja: string }
 
 // ACCOUNTING is kept in DB for backward compat but 総務部 handles financial tasks now
-const ROLES = ['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ADMIN'];
+const ROLES = ['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ACCOUNTING'];
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -126,6 +127,7 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
     email:         user?.email ?? '',
     password:      '',
     role:          user?.role ?? 'EMPLOYEE',
+    is_admin:      user?.is_admin ?? false,
     department_id: user?.department_id ?? '',
     is_active:     user?.is_active ?? true,
   });
@@ -186,6 +188,23 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
               value={form.department_id}
               onChange={(v) => set('department_id', v)}
             />
+          </div>
+          <div className="col-span-2 flex items-center justify-between gap-4 bg-white/60 border border-white/70 rounded-xl px-4 py-3">
+            <div>
+              <p className="text-sm font-semibold text-warmgray-800">Admin access</p>
+              <p className="text-xs text-warmgray-400">Keeps normal role, adds admin panel permissions.</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={form.is_admin}
+              onClick={() => set('is_admin', !form.is_admin)}
+              className={`relative h-6 w-11 rounded-full transition-colors ${form.is_admin ? 'bg-ringo-500' : 'bg-warmgray-300'}`}
+            >
+              <span
+                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${form.is_admin ? 'translate-x-5' : 'translate-x-0.5'}`}
+              />
+            </button>
           </div>
           {!isNew && (
             <div className="col-span-2 flex items-center gap-3 bg-surface-100/50 rounded-xl px-4 py-3">
@@ -280,7 +299,8 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
   const filtered = users.filter((u) => {
     if (search && !u.full_name.toLowerCase().includes(search.toLowerCase()) &&
         !u.email.toLowerCase().includes(search.toLowerCase()) &&
-        !u.role.includes(search.toUpperCase())) return false;
+        !u.role.includes(search.toUpperCase()) &&
+        !(u.is_admin && 'ADMIN'.includes(search.toUpperCase()))) return false;
     if (deptFilter && u.department_id !== deptFilter) return false;
     if (roleFilter && u.role !== roleFilter) return false;
     if (activeFilter === 'active' && !u.is_active) return false;
@@ -388,7 +408,16 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
                       </div>
                     </div>
                   </td>
-                  <td data-label={t('admin_field_role')}><RoleBadge role={u.role} /></td>
+                  <td data-label={t('admin_field_role')}>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <RoleBadge role={u.role} />
+                      {u.is_admin && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-ringo-50 text-ringo-700 border border-ringo-200">
+                          Admin
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td data-label={t('admin_field_dept')} className="text-warmgray-500 text-xs">{u.department_name ?? '—'}</td>
                   <td data-label={t('admin_col_status')}>
                     <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${
@@ -1024,6 +1053,7 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
   const [statusFilter, setStatusFilter] = useState('');
   const [archiveFilter, setArchiveFilter] = useState<'active' | 'archived' | 'all'>('active');
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   // Clicked-row → opens AdminAppDetailModal with full audit + flow
   const [openAppId, setOpenAppId] = useState<string | null>(null);
 
@@ -1086,6 +1116,20 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
       showToast('アーカイブを解除しました');
     },
     onError: (err: any) => showToast(`解除失敗: ${err.message}`, 'error'),
+  });
+
+  const deleteApp = useMutation({
+    mutationFn: async (app: AppRecord) => {
+      const confirm = encodeURIComponent(app.application_number ?? app.id);
+      return (await apiClient.delete(`/admin/applications/${app.id}?hard=true&confirm=${confirm}`)).data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'applications'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      setConfirmingDeleteId(null);
+      showToast('アーカイブ済み申請を削除しました');
+    },
+    onError: (err: any) => showToast(`削除失敗: ${err.message}`, 'error'),
   });
 
   // Language-aware status labels (reuses status_* keys already in i18n)
@@ -1204,29 +1248,77 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
                   </td>
                   <td data-label={t('admin_col_submitted')} className="text-[11px] text-warmgray-400">{new Date(a.created_at).toLocaleDateString('ja-JP')}</td>
                   <td onClick={(e) => e.stopPropagation()}>
-                    {a.archived_at ? (
-                      <button
-                        type="button"
-                        onClick={() => unarchiveApp.mutate(a.id)}
-                        disabled={unarchiveApp.isPending}
-                        className="text-xs text-teal-600 hover:text-teal-700 disabled:opacity-50 transition-colors font-medium"
-                      >
-                        解除
-                      </button>
-                    ) : ARCHIVABLE_STATUSES.has(a.status) ? (
-                      <InlineConfirm
-                        isActive={confirmingId === a.id}
-                        onTrigger={() => setConfirmingId(a.id)}
-                        onConfirm={() => archiveApp.mutate(a.id)}
-                        onCancel={() => setConfirmingId(null)}
-                        message="アーカイブしますか？"
-                        confirmLabel="アーカイブ"
-                        triggerClass="text-xs text-warmgray-400 hover:text-ringo-500 transition-colors font-medium"
-                        disabled={archiveApp.isPending}
-                      />
-                    ) : (
-                      <span className="text-[11px] text-warmgray-300">保持中</span>
-                    )}
+                    <div className="flex items-center justify-end gap-1.5 min-w-[148px]">
+                      {confirmingId === a.id ? (
+                        <div className="inline-flex items-center gap-1.5 rounded-md border border-ringo-200 bg-ringo-50 px-2 py-1">
+                          <span className="text-[10px] font-semibold text-ringo-700 whitespace-nowrap">実行?</span>
+                          <button
+                            type="button"
+                            onClick={() => archiveApp.mutate(a.id)}
+                            disabled={archiveApp.isPending}
+                            className="text-[11px] font-bold text-ringo-700 hover:text-ringo-900 disabled:opacity-50"
+                          >
+                            はい
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmingId(null)}
+                            disabled={archiveApp.isPending}
+                            className="text-[11px] text-warmgray-400 hover:text-warmgray-600 disabled:opacity-50"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ) : a.archived_at ? (
+                        <button
+                          type="button"
+                          onClick={() => unarchiveApp.mutate(a.id)}
+                          disabled={unarchiveApp.isPending || deleteApp.isPending}
+                          className="inline-flex h-8 items-center rounded-md border border-teal-200 bg-teal-50 px-2.5 text-xs font-semibold text-teal-700 hover:bg-teal-100 disabled:opacity-50 transition-colors"
+                        >
+                          解除
+                        </button>
+                      ) : ARCHIVABLE_STATUSES.has(a.status) ? (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmingId(a.id)}
+                          disabled={archiveApp.isPending || deleteApp.isPending}
+                          className="inline-flex h-8 items-center rounded-md border border-warmgray-200 bg-white/70 px-2.5 text-xs font-semibold text-warmgray-600 hover:border-ringo-200 hover:bg-ringo-50 hover:text-ringo-700 disabled:opacity-50 transition-colors"
+                        >
+                          アーカイブ
+                        </button>
+                      ) : null}
+                      {confirmingDeleteId === a.id ? (
+                        <div className="inline-flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2 py-1">
+                          <span className="text-[10px] font-semibold text-red-700 whitespace-nowrap">削除?</span>
+                          <button
+                            type="button"
+                            onClick={() => deleteApp.mutate(a)}
+                            disabled={deleteApp.isPending}
+                            className="text-[11px] font-bold text-red-700 hover:text-red-900 disabled:opacity-50"
+                          >
+                            はい
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmingDeleteId(null)}
+                            disabled={deleteApp.isPending}
+                            className="text-[11px] text-warmgray-400 hover:text-warmgray-600 disabled:opacity-50"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmingDeleteId(a.id)}
+                          disabled={archiveApp.isPending || deleteApp.isPending}
+                          className="inline-flex h-8 items-center rounded-md border border-red-100 bg-white/70 px-2.5 text-xs font-semibold text-red-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 transition-colors"
+                        >
+                          削除
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -7,6 +7,24 @@ import DynamicForm from '../components/forms/DynamicForm';
 import { useLang } from '../context/LanguageContext';
 import CustomSelect from '../components/forms/CustomSelect';
 import RouteTimeline from '../components/common/RouteTimeline';
+import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
+
+interface FormField {
+  name: string;
+  label: string;
+  label_en?: string | null;
+  type: string;
+  required?: boolean;
+  multiple?: boolean;
+  computed?: boolean;
+  computes?: string;
+  sum_target?: string;
+  fields?: FormField[];
+  min_rows?: number;
+  max_rows?: number;
+  add_label?: string;
+  add_label_en?: string;
+}
 
 interface AppDetail {
   id: string;
@@ -17,8 +35,8 @@ interface AppDetail {
   template_name: string;
   template_code: string;
   has_settlement: boolean;
-  settlement_schema: { fields: Array<{ name: string; label: string; type: string; required?: boolean; multiple?: boolean; computed?: boolean; computes?: string; sum_target?: string }> } | null;
-  schema_definition: { fields: Array<{ name: string; label: string; type: string; required?: boolean }> };
+  settlement_schema: { fields: FormField[] } | null;
+  schema_definition: { fields: FormField[] };
   steps: Array<{ step_order: number; stage: string; status: string; label: string; approver_name?: string; acted_at?: string; comment?: string }>;
 }
 
@@ -31,7 +49,7 @@ function formatReadValue(value: unknown): string {
 
 function shouldSpanSummary(value: unknown, type?: string): boolean {
   const text = value == null ? '' : formatReadValue(value);
-  return type === 'textarea' || type === 'file' || text.length > 80 || text.includes('\n');
+  return type === 'repeat_group' || type === 'textarea' || type === 'file' || text.length > 80 || text.includes('\n');
 }
 
 function ReadField({
@@ -74,14 +92,28 @@ function RingiSummary({ app, badge }: { app: AppDetail; badge: string }) {
       </div>
       <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
         {fields.length > 0
-          ? fields.map((f) => (
-              <ReadField
-                key={f.name}
-                label={f.label}
-                value={data[f.name]}
-                fullWidth={shouldSpanSummary(data[f.name], f.type)}
-              />
-            ))
+          ? fields.map((f) => {
+              if (f.type === 'repeat_group') {
+                return (
+                  <div key={f.name} className="min-w-0 md:col-span-2">
+                    <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1 break-words [overflow-wrap:anywhere]">
+                      {f.label}
+                    </dt>
+                    <dd className="text-sm leading-relaxed text-warmgray-800">
+                      <RepeatGroupDisplay field={f} value={data[f.name]} compact />
+                    </dd>
+                  </div>
+                );
+              }
+              return (
+                <ReadField
+                  key={f.name}
+                  label={f.label}
+                  value={data[f.name]}
+                  fullWidth={shouldSpanSummary(data[f.name], f.type)}
+                />
+              );
+            })
           : Object.entries(data).map(([k, v]) => (
               <ReadField key={k} label={k} value={v} fullWidth={shouldSpanSummary(v)} />
             ))

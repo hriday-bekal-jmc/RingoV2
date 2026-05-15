@@ -42,8 +42,8 @@ function RequirePermission({
   check: (perms: ReturnType<typeof getPermissions>) => boolean;
   children: ReactNode;
 }) {
-  const { role } = useAuth();
-  const perms = getPermissions(role);
+  const { role, isAdmin } = useAuth();
+  const perms = getPermissions(role, isAdmin);
   if (!check(perms)) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }

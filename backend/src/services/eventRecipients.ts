@@ -29,7 +29,7 @@ import type pg from 'pg';
  *     (last actor, so they see what happened next)
  *
  * For settlement-stage events, additionally:
- *   - all active users with role SOUMU or ACCOUNTING or ADMIN
+ *   - all active users with role SOUMU/ACCOUNTING or admin flag enabled
  *     (accounting dashboards rely on real-time updates)
  */
 export async function computeApplicationRecipients(
@@ -60,7 +60,8 @@ export async function computeApplicationRecipients(
   if (options.includeAccounting) {
     const acctRes = await client.query(
       `SELECT id FROM users
-       WHERE is_active = TRUE AND role IN ('SOUMU', 'ACCOUNTING', 'ADMIN')`,
+       WHERE is_active = TRUE
+         AND (is_admin = TRUE OR role IN ('SOUMU', 'ACCOUNTING'))`,
     );
     for (const r of acctRes.rows as Array<{ id: string }>) {
       recipients.add(r.id);

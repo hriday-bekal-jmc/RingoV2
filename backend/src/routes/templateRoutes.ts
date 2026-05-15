@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/db';
-import { requireAuth } from '../middlewares/authMiddleware';
+import { isAdminUser, requireAuth } from '../middlewares/authMiddleware';
 import { getJsonCache, invalidateCachePattern, setJsonCache } from '../services/cache';
 
 const router = Router();
@@ -21,16 +21,17 @@ export async function invalidateTemplatesCache(): Promise<void> {
 router.get('/', async (req: Request, res: Response): Promise<void> => {
   const role   = req.user!.role;
   const deptId = req.user!.department_id ?? null;
-  const cacheKey = `${TPL_CACHE_PREFIX}:${role}:${deptId ?? 'NULL'}`;
+  const isAdmin = isAdminUser(req.user);
+  const cacheKey = `${TPL_CACHE_PREFIX}:${role}:${isAdmin ? 'admin' : 'user'}:${deptId ?? 'NULL'}`;
 
   try {
     const cached = await getJsonCache<unknown[]>(cacheKey);
     if (cached) { res.json(cached); return; }
 
-    // ADMIN sees everything. Others see templates where either:
+    // Admin users see everything. Others see templates where either:
     //   (a) no row in template_permissions (= unrestricted), OR
     //   (b) template_permissions has a row matching user's department_id
-    const sql = role === 'ADMIN'
+    const sql = isAdmin
       ? `SELECT id, code, title, title_ja, pattern_id, icon, gradient, description_ja, description_en
          FROM form_templates WHERE is_active = TRUE ORDER BY title_ja`
       : `SELECT t.id, t.code, t.title, t.title_ja, t.pattern_id, t.icon, t.gradient, t.description_ja, t.description_en
@@ -41,7 +42,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
              OR EXISTS (SELECT 1 FROM template_permissions tp WHERE tp.template_id = t.id AND tp.department_id = $1)
            )
          ORDER BY t.title_ja`;
-    const params = role === 'ADMIN' ? [] : [deptId];
+    const params = isAdmin ? [] : [deptId];
 
     const result = await query(sql, params);
     setJsonCache(cacheKey, result.rows, TPL_CACHE_TTL);

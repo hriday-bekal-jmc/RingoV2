@@ -39,6 +39,12 @@ interface FormField {
   computed?:     boolean;
   // Multiple values (repeating row group)
   multiple?:     boolean;
+  // Repeatable group fields. Stored as one JSON array under this field name.
+  fields?:       FormField[];
+  min_rows?:     number;
+  max_rows?:     number;
+  add_label?:    string;
+  add_label_en?: string;
   validation?: {
     regex?:     string;
     min?:       number;
@@ -129,8 +135,12 @@ const FIELD_TYPES = [
   { value: 'select',   label_ja: 'プルダウン',       label_en: 'Select' },
   { value: 'checkbox', label_ja: 'チェックボックス', label_en: 'Checkbox' },
   { value: 'file',     label_ja: 'ファイル',         label_en: 'File upload' },
+  { value: 'repeat_group', label_ja: '繰り返しグループ', label_en: 'Repeatable group' },
   { value: 'header',   label_ja: 'セクション見出し', label_en: 'Section header' },
 ];
+
+const REPEAT_CHILD_FIELD_TYPES = FIELD_TYPES.filter((ft) => !['repeat_group', 'header'].includes(ft.value));
+const DEFAULT_REPEAT_MAX_ROWS = 50;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main tab — list of templates
@@ -159,16 +169,6 @@ export default function FormsTab({ showToast }: { showToast: (m: string, t?: 'su
       showToast(vars.is_active
         ? (lang === 'en' ? 'Form activated' : 'フォームを有効化しました')
         : (lang === 'en' ? 'Form deactivated' : 'フォームを無効化しました'));
-    },
-  });
-
-  const saveDepts = useMutation({
-    mutationFn: async () => (await apiClient.put(`/admin/form-templates/${templateId}/departments`, {
-      department_ids: allowedDepts,
-    })).data,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['form-templates', templateId] });
-      queryClient.invalidateQueries({ queryKey: ['templates', 'active'] });
     },
   });
 
@@ -421,6 +421,16 @@ function FormBuilder({
     },
   });
 
+  const saveDepts = useMutation({
+    mutationFn: async () => (await apiClient.put(`/admin/form-templates/${templateId}/departments`, {
+      department_ids: allowedDepts,
+    })).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['form-templates', templateId] });
+      queryClient.invalidateQueries({ queryKey: ['templates', 'active'] });
+    },
+  });
+
   const activate = useMutation({
     mutationFn: async (vid: string) => (await apiClient.post(`/admin/form-templates/${templateId}/versions/${vid}/activate`, {})).data,
     onSuccess: () => {
@@ -461,16 +471,61 @@ function FormBuilder({
     [next[idx], next[target]] = [next[target], next[idx]];
     setCurrentFields(next);
   };
+  const createRepeatGroupTotal = (groupIndex: number, childIndex: number) => {
+    setCurrentFields((prev) => {
+      const group = prev[groupIndex];
+      const child = group?.fields?.[childIndex];
+      if (!group || !child || child.type !== 'number') return prev;
+
+      const base = `${group.name}_${child.name}_total`
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '') || `total_${prev.length + 1}`;
+      const usedNames = new Set(prev.map((f) => f.name));
+      let totalName = base;
+      let n = 2;
+      while (usedNames.has(totalName)) {
+        totalName = `${base}_${n}`;
+        n += 1;
+      }
+
+      const totalField: FormField = {
+        name: totalName,
+        label: `${child.label || group.label} 合計`,
+        label_en: `${child.label_en || child.label || group.label_en || group.label || 'Amount'} total`,
+        type: 'number',
+        required: false,
+        computed: true,
+      };
+
+      const next = prev.map((field, i) => {
+        if (i !== groupIndex) return field;
+        return {
+          ...field,
+          fields: (field.fields ?? []).map((rowField, j) =>
+            j === childIndex ? { ...rowField, sum_target: totalName } : rowField,
+          ),
+        };
+      });
+      return [...next, totalField];
+    });
+  };
 
   const checkUniqueNames = (flds: FormField[], schemaLabel: string): boolean => {
     const names = flds.map(f => f.name.trim()).filter(Boolean);
     const dupes = names.filter((n, i) => names.indexOf(n) !== i);
     if (dupes.length) {
       showToast(
-        `${schemaLabel}: ${lang === 'en' ? 'Duplicate field names' : '重複フィールド名'} — ${[...new Set(dupes)].join(', ')}`,
+        `${schemaLabel}: ${lang === 'en' ? 'Duplicate field names' : '重複フィールド名'} – ${[...new Set(dupes)].join(', ')}`,
         'error',
       );
       return false;
+    }
+    for (const f of flds) {
+      if (f.type === 'repeat_group' && f.fields?.length) {
+        if (!checkUniqueNames(f.fields, `${schemaLabel}/${f.name}`)) return false;
+      }
     }
     return true;
   };
@@ -767,6 +822,7 @@ function FormBuilder({
                         // Numeric fields in same schema that could receive sum totals
                         computedFieldNames={currentFields.filter(x => x.computed && x.type === 'number').map(x => x.name)}
                         onUpdate={(p) => updateField(i, p)}
+                        onCreateRepeatGroupTotal={(childIdx) => createRepeatGroupTotal(i, childIdx)}
                         onRemove={() => removeField(i)}
                         onMove={(d) => moveField(i, d)}
                       />
@@ -820,7 +876,7 @@ function FormBuilder({
 // Single field editor card
 // ─────────────────────────────────────────────────────────────────────────────
 function FieldEditor({
-  field, index, total, siblingNames, computedFieldNames, onUpdate, onRemove, onMove,
+  field, index, total, siblingNames, computedFieldNames, onUpdate, onCreateRepeatGroupTotal, onRemove, onMove,
 }: {
   field: FormField;
   index: number;
@@ -828,6 +884,7 @@ function FieldEditor({
   siblingNames: string[];
   computedFieldNames: string[];
   onUpdate: (patch: Partial<FormField>) => void;
+  onCreateRepeatGroupTotal: (childIndex: number) => void;
   onRemove: () => void;
   onMove:   (dir: -1 | 1) => void;
 }) {
@@ -838,6 +895,30 @@ function FieldEditor({
   const isSelect = field.type === 'select';
   const isText = ['text', 'textarea'].includes(field.type);
   const isNumber = field.type === 'number';
+  const isRepeatGroup = field.type === 'repeat_group';
+
+  const updateType = (type: string) => {
+    if (type === 'repeat_group') {
+      onUpdate({
+        type,
+        fields: field.fields ?? [],
+        min_rows: field.min_rows ?? 0,
+        max_rows: field.max_rows ?? DEFAULT_REPEAT_MAX_ROWS,
+        multiple: undefined,
+        computed: undefined,
+        sum_target: undefined,
+      });
+      return;
+    }
+    onUpdate({
+      type,
+      fields: undefined,
+      min_rows: undefined,
+      max_rows: undefined,
+      add_label: undefined,
+      add_label_en: undefined,
+    });
+  };
 
   return (
     <div className="card !p-4 space-y-3 border border-white/60">
@@ -860,7 +941,7 @@ function FieldEditor({
         </div>
         <select
           value={field.type}
-          onChange={(e) => onUpdate({ type: e.target.value })}
+          onChange={(e) => updateType(e.target.value)}
           className="input text-xs w-40"
         >
           {FIELD_TYPES.map(ft => (
@@ -918,14 +999,16 @@ function FieldEditor({
               />
               {lang === 'en' ? 'Required' : '必須'}
             </label>
-            <label className="flex items-center gap-1.5 text-xs font-semibold text-warmgray-600">
-              <input
-                type="checkbox"
-                checked={field.multiple ?? false}
-                onChange={(e) => onUpdate({ multiple: e.target.checked })}
-              />
-              {lang === 'en' ? 'Multiple (repeating row)' : '複数行（繰り返し）'}
-            </label>
+            {field.type === 'file' && (
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-warmgray-600">
+                <input
+                  type="checkbox"
+                  checked={field.multiple ?? false}
+                  onChange={(e) => onUpdate({ multiple: e.target.checked })}
+                />
+                {lang === 'en' ? 'Allow multiple files' : '複数ファイルを許可'}
+              </label>
+            )}
             {field.type === 'number' && (
               <label className="flex items-center gap-1.5 text-xs font-semibold text-warmgray-600">
                 <input
@@ -938,7 +1021,16 @@ function FieldEditor({
             )}
           </div>
 
-          {/* Sum source — pick which "total" this numeric field contributes to */}
+          {isRepeatGroup && (
+            <RepeatGroupFieldsEditor
+              field={field}
+              computedFieldNames={computedFieldNames}
+              onCreateTotal={onCreateRepeatGroupTotal}
+              onUpdate={onUpdate}
+            />
+          )}
+
+          {/* Sum source – pick which "total" this numeric field contributes to */}
           {field.type === 'number' && !field.computed && computedFieldNames.length > 0 && (
             <div className="bg-teal-50/40 border border-teal-200/40 rounded-xl p-3 space-y-1.5">
               <label className="text-[10px] font-bold uppercase tracking-widest text-teal-700">
@@ -1046,6 +1138,237 @@ function FieldEditor({
               />
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function newRepeatChildField(index: number): FormField {
+  return {
+    name: `item_${index + 1}`,
+    label: '明細項目',
+    label_en: 'Line item',
+    type: 'text',
+    required: false,
+  };
+}
+
+function RepeatGroupFieldsEditor({
+  field,
+  computedFieldNames,
+  onCreateTotal,
+  onUpdate,
+}: {
+  field: FormField;
+  computedFieldNames: string[];
+  onCreateTotal: (childIndex: number) => void;
+  onUpdate: (patch: Partial<FormField>) => void;
+}) {
+  const { lang } = useLang();
+  const childFields = field.fields ?? [];
+
+  const updateChild = (idx: number, patch: Partial<FormField>) => {
+    onUpdate({ fields: childFields.map((f, i) => i === idx ? { ...f, ...patch } : f) });
+  };
+  const removeChild = (idx: number) => onUpdate({ fields: childFields.filter((_, i) => i !== idx) });
+  const moveChild = (idx: number, dir: -1 | 1) => {
+    const target = idx + dir;
+    if (target < 0 || target >= childFields.length) return;
+    const next = [...childFields];
+    [next[idx], next[target]] = [next[target], next[idx]];
+    onUpdate({ fields: next });
+  };
+  const addChild = () => onUpdate({ fields: [...childFields, newRepeatChildField(childFields.length)] });
+
+  const setChildType = (idx: number, type: string) => {
+    const child = childFields[idx];
+    updateChild(idx, {
+      type,
+      options: ['select', 'checkbox'].includes(type) ? (child.options ?? []) : undefined,
+      multiple: type === 'file' ? (child.multiple ?? false) : undefined,
+      computed: undefined,
+      sum_target: type === 'number' ? child.sum_target : undefined,
+      fields: undefined,
+    });
+  };
+
+  const setMaxRows = (raw: string) => {
+    const next = Math.max(1, Math.min(DEFAULT_REPEAT_MAX_ROWS, Number(raw) || DEFAULT_REPEAT_MAX_ROWS));
+    onUpdate({ max_rows: next });
+  };
+
+  return (
+    <div className="bg-white/50 border border-teal-200/50 rounded-xl p-3 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-teal-700">
+            {lang === 'en' ? 'Repeatable row fields' : '繰り返し行の項目'}
+          </p>
+          <p className="text-[10px] text-warmgray-500 mt-0.5">
+            {lang === 'en'
+              ? 'Each submitted row is stored as one object inside this JSON field.'
+              : '各行はこのフィールド内のJSON配列として保存されます。'}
+          </p>
+        </div>
+        <button type="button" onClick={addChild} className="btn-outline text-xs shrink-0">
+          + {lang === 'en' ? 'Add row field' : '行項目追加'}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+        <input
+          type="number"
+          min={0}
+          max={DEFAULT_REPEAT_MAX_ROWS}
+          value={field.min_rows ?? 0}
+          onChange={(e) => onUpdate({ min_rows: Math.max(0, Number(e.target.value) || 0) })}
+          className="input text-xs"
+          placeholder={lang === 'en' ? 'Min rows' : '最小行数'}
+        />
+        <input
+          type="number"
+          min={1}
+          max={DEFAULT_REPEAT_MAX_ROWS}
+          value={field.max_rows ?? DEFAULT_REPEAT_MAX_ROWS}
+          onChange={(e) => setMaxRows(e.target.value)}
+          className="input text-xs"
+          placeholder={lang === 'en' ? 'Max rows' : '最大行数'}
+        />
+        <input
+          type="text"
+          value={field.add_label ?? ''}
+          onChange={(e) => onUpdate({ add_label: e.target.value || undefined })}
+          className="input text-xs"
+          placeholder={lang === 'en' ? 'JA add button label' : '追加ボタン名'}
+        />
+        <input
+          type="text"
+          value={field.add_label_en ?? ''}
+          onChange={(e) => onUpdate({ add_label_en: e.target.value || undefined })}
+          className="input text-xs"
+          placeholder="EN add button label"
+        />
+      </div>
+
+      {childFields.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-warmgray-200 bg-white/50 py-6 text-center text-xs text-warmgray-400">
+          {lang === 'en' ? 'No row fields yet' : '行項目がありません'}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {childFields.map((child, idx) => {
+            const duplicate = childFields.some((f, i) => i !== idx && f.name === child.name);
+            return (
+              <div key={idx} className="rounded-xl border border-white/80 bg-white/70 p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-warmgray-400 w-6">{idx + 1}</span>
+                  <input
+                    type="text"
+                    value={child.name}
+                    onChange={(e) => updateChild(idx, { name: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') })}
+                    className={`input text-xs font-mono flex-1 ${duplicate ? 'border-red-400 ring-1 ring-red-300' : ''}`}
+                    placeholder="field_name"
+                  />
+                  <select value={child.type} onChange={(e) => setChildType(idx, e.target.value)} className="input text-xs w-36">
+                    {REPEAT_CHILD_FIELD_TYPES.map((ft) => (
+                      <option key={ft.value} value={ft.value}>
+                        {lang === 'en' ? ft.label_en : ft.label_ja}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" onClick={() => moveChild(idx, -1)} disabled={idx === 0} className="btn-ghost text-xs px-2 disabled:opacity-30">▲</button>
+                  <button type="button" onClick={() => moveChild(idx, 1)} disabled={idx === childFields.length - 1} className="btn-ghost text-xs px-2 disabled:opacity-30">▼</button>
+                  <button type="button" onClick={() => removeChild(idx)} className="text-red-400 hover:text-red-600 text-sm">×</button>
+                </div>
+                {duplicate && (
+                  <p className="text-[10px] text-red-500 pl-8">{lang === 'en' ? 'Duplicate row field name' : '行項目名が重複しています'}</p>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={child.label}
+                    onChange={(e) => updateChild(idx, { label: e.target.value })}
+                    className="input text-xs"
+                    placeholder={lang === 'en' ? 'Japanese label' : '日本語ラベル'}
+                  />
+                  <input
+                    type="text"
+                    value={child.label_en ?? ''}
+                    onChange={(e) => updateChild(idx, { label_en: e.target.value })}
+                    className="input text-xs"
+                    placeholder="English label"
+                  />
+                </div>
+                <div className="flex items-center gap-4 flex-wrap">
+                  <label className="flex items-center gap-1.5 text-xs font-semibold text-warmgray-600">
+                    <input
+                      type="checkbox"
+                      checked={child.required ?? false}
+                      onChange={(e) => updateChild(idx, { required: e.target.checked })}
+                    />
+                    {lang === 'en' ? 'Required' : '必須'}
+                  </label>
+                  {child.type === 'file' && (
+                    <label className="flex items-center gap-1.5 text-xs font-semibold text-warmgray-600">
+                      <input
+                        type="checkbox"
+                        checked={child.multiple ?? false}
+                        onChange={(e) => updateChild(idx, { multiple: e.target.checked })}
+                      />
+                      {lang === 'en' ? 'Multiple files' : '複数ファイル'}
+                    </label>
+                  )}
+                </div>
+                {child.type === 'number' && (
+                  <div className="bg-teal-50/40 border border-teal-200/40 rounded-xl p-3 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-teal-700">
+                        {lang === 'en' ? 'Repeat-row auto sum' : '繰り返し行の自動合計'}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => onCreateTotal(idx)}
+                        className="text-[11px] font-semibold text-teal-700 hover:text-teal-900"
+                      >
+                        + {lang === 'en' ? 'Create total field' : '合計フィールド作成'}
+                      </button>
+                    </div>
+                    {computedFieldNames.length > 0 ? (
+                      <select
+                        value={child.sum_target ?? ''}
+                        onChange={(e) => updateChild(idx, { sum_target: e.target.value || undefined })}
+                        className="input text-xs"
+                      >
+                        <option value="">- {lang === 'en' ? 'Not a sum source' : '加算しない'} -</option>
+                        {computedFieldNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-teal-200 bg-white/60 px-3 py-2 text-xs text-warmgray-500">
+                        {lang === 'en'
+                          ? 'No auto-sum total field exists yet. Create one here, or add a top-level number field and mark it Auto-sum total.'
+                          : '自動合計フィールドがまだありません。ここで作成するか、上位に数値フィールドを追加して自動合計にしてください。'}
+                      </div>
+                    )}
+                    <p className="text-[10px] text-warmgray-500">
+                      {lang === 'en'
+                        ? 'This number field is summed across every repeated row and written into the selected total field.'
+                        : 'この数値項目は、繰り返し行すべての値を合計して選択した合計フィールドに反映されます。'}
+                    </p>
+                  </div>
+                )}
+                {(child.type === 'select' || child.type === 'checkbox') && (
+                  <OptionsEditor
+                    options={child.options ?? []}
+                    onChange={(opts) => updateChild(idx, { options: opts })}
+                    hint={child.type === 'checkbox'
+                      ? (lang === 'en' ? 'Empty = single boolean checkbox. Add options for multi-select.' : '空の場合は単一チェック、選択肢ありの場合は複数選択です。')
+                      : undefined}
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

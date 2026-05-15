@@ -9,6 +9,7 @@ import { useLang } from '../context/LanguageContext';
 import { fieldLabel } from '../i18n';
 import CustomSelect from '../components/forms/CustomSelect';
 import RouteTimeline from '../components/common/RouteTimeline';
+import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -84,12 +85,18 @@ function FormDataViewer({ app }: { app: ApplicationDetail }) {
     <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
       {fields.map((f) => {
         const val = app.form_data[f.name];
-        const isLong = f.type === 'textarea' || (typeof val === 'string' && val.length > 40);
+        const isLong = f.type === 'repeat_group' || f.type === 'textarea' || (typeof val === 'string' && val.length > 40);
         return (
           <div key={f.name} className={isLong ? 'col-span-full' : ''}>
             <dt className="text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{fieldLabel(f, lang)}</dt>
             <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3.5 py-2.5 rounded-xl break-words min-h-[42px]">
-              {val != null && val !== '' ? String(val) : <span className="text-warmgray-300">—</span>}
+              {f.type === 'repeat_group' ? (
+                <RepeatGroupDisplay field={f} value={val} />
+              ) : val != null && val !== '' ? (
+                String(val)
+              ) : (
+                <span className="text-warmgray-300">—</span>
+              )}
             </dd>
           </div>
         );
@@ -124,14 +131,18 @@ function SettlementDataViewer({ app, t }: { app: ApplicationDetail; t: (k: any) 
           .map((f) => {
             const val = data[f.name];
             const displayVal = fmt(f.name, val);
-            const isLong = f.type === 'textarea';
+            const isLong = f.type === 'repeat_group' || f.type === 'textarea';
             return (
               <div key={f.name} className={isLong ? 'col-span-full' : ''}>
                 <dt className="text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{fieldLabel(f, lang)}</dt>
                 <dd className={`text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3.5 py-2.5 rounded-xl break-words min-h-[42px] ${
                   f.computed ? 'border-teal-200/60 bg-teal-50/40 text-teal-800 font-bold' : ''
                 }`}>
-                  {displayVal || <span className="text-warmgray-300">—</span>}
+                  {f.type === 'repeat_group' ? (
+                    <RepeatGroupDisplay field={f} value={val} />
+                  ) : (
+                    displayVal || <span className="text-warmgray-300">—</span>
+                  )}
                 </dd>
               </div>
             );

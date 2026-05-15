@@ -10,22 +10,23 @@ interface FormField {
   type: string;
   required?: boolean;
   multiple?: boolean;
+  fields?: FormField[];
+  min_rows?: number;
+  max_rows?: number;
+  add_label?: string;
+  add_label_en?: string;
   sum_target?: string;
   computed?: boolean;
   placeholder?: string;
   helper_text?: string;
   default_value?: string | number | boolean | null;
   options?: Array<{ value: string; label_ja: string; label_en: string }>;
-  // Admin-configurable validation (admin form builder)
   validation?: {
     regex?: string;
     min?: number;
     max?: number;
     maxlength?: number;
   };
-  // Admin-configurable conditional visibility: only render this field when
-  // another field equals a given value. Backend validation should also gate
-  // required-ness so hidden fields aren't required.
   conditional_on?: {
     field: string;
     equals: string | number | boolean;
@@ -39,44 +40,56 @@ interface Template {
   settlement_schema: { fields: FormField[] };
 }
 
-// ─── Sum watcher (isolated re-renders) ──────────────────────────────────────
-//
-// Why this exists:
-//   Previously DynamicForm called `watch(sumSourceNames)` at the parent level.
-//   react-hook-form's `watch()` makes the calling component re-render on
-//   ANY watched value change, which meant every keystroke in a sum-source
-//   field re-rendered the entire form (all StandardInputs + the layout grid).
-//
-//   `useWatch` from react-hook-form scopes the subscription to ONLY the
-//   component that uses it — so we extract a tiny null-rendering child
-//   that subscribes to just the sum-source fields and writes totals back
-//   via setValue. The parent DynamicForm stays stable; only the
-//   SumWatcher re-renders per keystroke.
-interface SumWatcherProps {
-  control:        Control<Record<string, unknown>>;
-  setValue:       UseFormSetValue<Record<string, unknown>>;
-  sumFieldNames:  string[];
-  targetGroups:   Map<string, number[]>;   // target name → indices into sumFieldNames
+interface SumSource {
+  watchName: string;
+  targetName: string;
+  kind: 'field' | 'repeat_group';
+  childName?: string;
 }
 
-function SumWatcher({ control, setValue, sumFieldNames, targetGroups }: SumWatcherProps): null {
-  // Subscribe to just these field values. No parent re-render.
-  const values = useWatch({ control, name: sumFieldNames });
+interface SumWatcherProps {
+  control: Control<Record<string, unknown>>;
+  setValue: UseFormSetValue<Record<string, unknown>>;
+  sources: SumSource[];
+}
+
+function SumWatcher({ control, setValue, sources }: SumWatcherProps): null {
+  const watchedNames = useMemo(
+    () => Array.from(new Set(sources.map((source) => source.watchName))),
+    [sources],
+  );
+  const values = useWatch({ control, name: watchedNames });
 
   useEffect(() => {
-    targetGroups.forEach((indices, targetName) => {
-      const total = indices.reduce(
-        (sum, i) => sum + (Number((values as unknown[])[i]) || 0),
-        0,
-      );
-      // shouldDirty/shouldTouch/shouldValidate all false → no extra re-render churn
+    const valueMap = new Map<string, unknown>();
+    watchedNames.forEach((name, index) => valueMap.set(name, (values as unknown[])[index]));
+
+    const totals = new Map<string, number>();
+    sources.forEach((source) => {
+      const watchedValue = valueMap.get(source.watchName);
+      let subtotal = 0;
+
+      if (source.kind === 'repeat_group') {
+        const rows = Array.isArray(watchedValue) ? watchedValue : [];
+        subtotal = rows.reduce((sum, row) => {
+          if (!row || typeof row !== 'object' || Array.isArray(row) || !source.childName) return sum;
+          return sum + (Number((row as Record<string, unknown>)[source.childName]) || 0);
+        }, 0);
+      } else {
+        subtotal = Number(watchedValue) || 0;
+      }
+
+      totals.set(source.targetName, (totals.get(source.targetName) ?? 0) + subtotal);
+    });
+
+    totals.forEach((total, targetName) => {
       setValue(targetName, total, {
-        shouldDirty:    false,
-        shouldTouch:    false,
+        shouldDirty: false,
+        shouldTouch: false,
         shouldValidate: false,
       });
     });
-  }, [values, targetGroups, setValue]);
+  }, [values, watchedNames, sources, setValue]);
 
   return null;
 }
@@ -115,17 +128,12 @@ export default function DynamicForm({
   const activeSchema = isSettlementPhase ? template.settlement_schema : template.schema_definition;
   const allFields: FormField[] = useMemo(() => activeSchema?.fields ?? [], [activeSchema]);
 
-  // Watch all fields that drive conditional visibility. Subscription
-  // narrowed to just those source names so we don't re-render on every key.
   const conditionalSources = useMemo(
     () => Array.from(new Set(allFields.map((f) => f.conditional_on?.field).filter(Boolean))) as string[],
     [allFields],
   );
   const watchedConds = useWatch({ control, name: conditionalSources.length ? conditionalSources : ['__noop__'] });
 
-  // Filtered field list — hide fields whose condition is unmet.
-  // String/number/boolean comparison loose (== rather than ===) since form
-  // values come back as strings even for numeric/boolean inputs.
   const activeFields: FormField[] = useMemo(() => {
     if (conditionalSources.length === 0) return allFields;
     const sourceMap: Record<string, unknown> = {};
@@ -135,29 +143,36 @@ export default function DynamicForm({
     return allFields.filter((f) => {
       if (!f.conditional_on) return true;
       const got = sourceMap[f.conditional_on.field];
-      // eslint-disable-next-line eqeqeq
-      return got != null && String(got) == String(f.conditional_on.equals);
+      return got != null && String(got) === String(f.conditional_on.equals);
     });
   }, [allFields, watchedConds, conditionalSources]);
 
-  // Build sum-source field names once per schema change. Stable across renders.
-  const sumSourceNames = useMemo(
-    () => activeFields.filter((f) => f.sum_target).map((f) => f.name),
-    [activeFields],
-  );
+  const sumSources = useMemo<SumSource[]>(() => {
+    const computedTargets = new Set(
+      activeFields.filter((f) => f.type === 'number' && f.computed).map((f) => f.name),
+    );
+    const sources: SumSource[] = [];
 
-  // Pre-build target → source-index map once per schema change.
-  // Passed to <SumWatcher> as a stable ref so its useEffect dep stays stable.
-  const targetGroups = useMemo(() => {
-    const map = new Map<string, number[]>();
-    activeFields
-      .filter((f) => f.sum_target)
-      .forEach((f, i) => {
-        const target = f.sum_target as string;
-        if (!map.has(target)) map.set(target, []);
-        map.get(target)!.push(i);
-      });
-    return map;
+    activeFields.forEach((field) => {
+      if (field.sum_target && computedTargets.has(field.sum_target)) {
+        sources.push({ watchName: field.name, targetName: field.sum_target, kind: 'field' });
+      }
+
+      if (field.type === 'repeat_group') {
+        (field.fields ?? []).forEach((child) => {
+          if (child.type === 'number' && child.sum_target && computedTargets.has(child.sum_target)) {
+            sources.push({
+              watchName: field.name,
+              targetName: child.sum_target,
+              kind: 'repeat_group',
+              childName: child.name,
+            });
+          }
+        });
+      }
+    });
+
+    return sources;
   }, [activeFields]);
 
   const handleFormSubmit = async (data: Record<string, unknown>) => {
@@ -185,25 +200,23 @@ export default function DynamicForm({
   if (!activeSchema?.fields) {
     return (
       <div className="card text-center text-warmgray-400 py-12">
-        フォームテンプレートを読み込めませんでした
+        Form template could not be loaded.
       </div>
     );
   }
 
-  const isFullWidth = (f: FormField) =>
-    f.type === 'textarea' || f.type === 'file' || f.type === 'computed';
+  const isFullWidth = (field: FormField) =>
+    field.type === 'textarea' || field.type === 'file' || field.type === 'repeat_group' || field.type === 'computed';
 
   return (
     <form onSubmit={handleSubmit(handleFormSubmit)} className="card space-y-6">
-      {/* Header */}
       <div className="border-b border-white/30 pb-5">
         <h2 className="text-xl font-bold text-warmgray-800">{template.title_ja}</h2>
         <p className="text-xs text-warmgray-400 mt-1 uppercase tracking-wide font-medium">
-          {isSettlementPhase ? '精算書 — Settlement Phase' : '稟議書 — Ringi Phase'}
+          {isSettlementPhase ? 'Settlement Phase' : 'Ringi Phase'}
         </p>
       </div>
 
-      {/* Fields */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
         {activeFields.map((field) => (
           <div key={field.name} className={isFullWidth(field) ? 'md:col-span-2' : ''}>
@@ -223,17 +236,14 @@ export default function DynamicForm({
         ))}
       </div>
 
-      {/* Sum auto-totaling — isolated re-renders, doesn't re-render parent */}
-      {sumSourceNames.length > 0 && (
+      {sumSources.length > 0 && (
         <SumWatcher
           control={control}
           setValue={setValue}
-          sumFieldNames={sumSourceNames}
-          targetGroups={targetGroups}
+          sources={sumSources}
         />
       )}
 
-      {/* Footer */}
       <div className="pt-4 border-t border-white/30 flex items-center justify-between">
         {onDraft ? (
           <button

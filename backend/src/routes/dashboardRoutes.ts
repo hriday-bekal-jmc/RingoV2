@@ -14,11 +14,11 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/db';
 import { redis } from '../config/redis';
-import { requireAuth } from '../middlewares/authMiddleware';
+import { isAdminUser, requireAuth } from '../middlewares/authMiddleware';
 
 // Roles that may have pending approvals assigned. Backend role-gates the
 // pending query so non-approver users don't pay for an empty join.
-const APPROVER_ROLES = new Set(['MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ACCOUNTING', 'ADMIN']);
+const APPROVER_ROLES = new Set(['MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ACCOUNTING']);
 
 const router = Router();
 router.use(requireAuth);
@@ -72,7 +72,7 @@ const ZERO_COUNTS: StatusCounts = {
 router.get('/summary', async (req: Request, res: Response): Promise<void> => {
   const userId = req.user!.id;
   const role   = req.user!.role;
-  const canApprove = APPROVER_ROLES.has(role);
+  const canApprove = isAdminUser(req.user) || APPROVER_ROLES.has(role);
 
   // ── Redis cache check ──────────────────────────────────────────────────
   try {
@@ -210,7 +210,7 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
 
 // ── GET /dashboard/admin-overview — ADMIN only, company-wide stats ────────────
 router.get('/admin-overview', async (req: Request, res: Response): Promise<void> => {
-  if (req.user!.role !== 'ADMIN') {
+  if (!isAdminUser(req.user)) {
     res.status(403).json({ error: 'ADMIN only' });
     return;
   }

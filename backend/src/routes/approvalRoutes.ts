@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../config/db';
-import { requireAuth } from '../middlewares/authMiddleware';
+import { isAdminUser, requireAuth } from '../middlewares/authMiddleware';
 import { assertCanActOnStep, httpErr } from '../middlewares/authz';
 import { mutationLimiter } from '../middlewares/rateLimit';
 import { insertOutboxEvent } from '../services/eventOutbox';
@@ -15,13 +15,14 @@ router.use(mutationLimiter);
 // GET /approvals/pending/count — just total, no rows. For sidebar badge.
 // Sub-millisecond: single indexed COUNT on approval_steps.
 router.get('/pending/count', async (req: Request, res: Response): Promise<void> => {
-  const { id: userId, role } = req.user!;
+  const { id: userId } = req.user!;
+  const systemView = isAdminUser(req.user) && req.query.all === 'true';
   try {
     const r = await query(
-      role === 'ADMIN' && req.query.all === 'true'
+      systemView
         ? `SELECT COUNT(*)::int AS total FROM approval_steps WHERE status = 'PENDING'`
         : `SELECT COUNT(*)::int AS total FROM approval_steps WHERE status = 'PENDING' AND approver_id = $1`,
-      role === 'ADMIN' && req.query.all === 'true' ? [] : [userId],
+      systemView ? [] : [userId],
     );
     res.json({ total: r.rows[0]?.total ?? 0 });
   } catch (err) {
@@ -35,8 +36,8 @@ router.get('/pending/count', async (req: Request, res: Response): Promise<void> 
 // ?limit=25&offset=0
 const APPROVAL_PAGE_SIZE = 25;
 router.get('/pending', async (req: Request, res: Response): Promise<void> => {
-  const { id: userId, role } = req.user!;
-  const systemView = role === 'ADMIN' && req.query.all === 'true';
+  const { id: userId } = req.user!;
+  const systemView = isAdminUser(req.user) && req.query.all === 'true';
   const limit  = parsePageLimit(req.query.limit, APPROVAL_PAGE_SIZE, 100);
   const offset = Math.max(Number(req.query.offset ?? 0), 0);
   const cursor = decodeCursor(req.query.cursor);
@@ -100,7 +101,8 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
 router.post('/:id/approve', async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
   const { comment } = (req.body ?? {}) as { comment?: string };
-  const { id: userId, role } = req.user!;
+  const { id: userId } = req.user!;
+  const isAdmin = isAdminUser(req.user);
 
   try {
     const result = await withTransaction(async (client: pg.PoolClient) => {
@@ -131,7 +133,7 @@ router.post('/:id/approve', async (req: Request, res: Response): Promise<void> =
       // ── Authorization checks ──────────────────────────────────────────────
 
       // 1. If step has explicit approver and it's not the current user → reject
-      if (role !== 'ADMIN' && currentStep.approver_id && currentStep.approver_id !== userId) {
+      if (!isAdmin && currentStep.approver_id && currentStep.approver_id !== userId) {
         throw Object.assign(
           new Error('この承認ステップはあなたに割り当てられていません。別の承認者が担当しています。'),
           { status: 403 },
@@ -140,7 +142,7 @@ router.post('/:id/approve', async (req: Request, res: Response): Promise<void> =
 
       // 2. For unassigned steps: prevent the SAME user from approving consecutive steps
       //    (stops one person from self-approving the entire chain)
-      if (role !== 'ADMIN' && !currentStep.approver_id) {
+      if (!isAdmin && !currentStep.approver_id) {
         const prevActorRes = await client.query(
           `SELECT acted_by FROM approval_steps
            WHERE application_id = $1 AND stage = 'RINGI' AND status = 'APPROVED'
@@ -266,7 +268,7 @@ router.post('/:id/return', async (req: Request, res: Response): Promise<void> =>
       //    unassigned step / ADMIN. Locks app row + verifies status.
       const currentStep = await assertCanActOnStep(
         client,
-        { id: userId, role },
+        { id: userId, role, is_admin: req.user!.is_admin },
         String(id),
         ['PENDING_APPROVAL', 'PENDING_SETTLEMENT'],
       );
@@ -334,7 +336,7 @@ router.post('/:id/reject', async (req: Request, res: Response): Promise<void> =>
       // ── Authorization: only assigned approver / role-gated / ADMIN
       const currentStep = await assertCanActOnStep(
         client,
-        { id: userId, role },
+        { id: userId, role, is_admin: req.user!.is_admin },
         String(id),
         ['PENDING_APPROVAL', 'PENDING_SETTLEMENT'],
       );
