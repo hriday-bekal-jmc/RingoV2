@@ -9,6 +9,7 @@ import { useLang } from '../context/LanguageContext';
 import { useAuth } from '../context/AuthContext';
 import RingoLoader from '../components/common/RingoLoader';
 import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
+import CollapsibleComment from '../components/common/CollapsibleComment';
 
 // File URLs are same-origin (vite proxy /api in dev, reverse proxy in prod)
 
@@ -232,12 +233,13 @@ function AppDetailPanel({ appId, onClose, tFn, lang }: {
           </p>
         )}
         {step.comment && (
-          <div className={`mt-2 text-xs px-2.5 py-2 rounded-lg ${
+          <div className={`mt-2 text-xs px-2.5 py-2 rounded-lg min-w-0 overflow-hidden ${
             step.status === 'RETURNED'
               ? 'bg-amber-50 border border-amber-200 text-amber-800'
               : 'bg-white/60 border border-white/80 text-warmgray-700'
           }`}>
-            <span className="font-bold mr-1">{tFn('detail_comment')}:</span>{step.comment}
+            <span className="font-bold">{tFn('detail_comment')}:</span>
+            <CollapsibleComment text={step.comment} className="mt-0.5" />
           </div>
         )}
       </div>

@@ -31,6 +31,7 @@ interface FormField {
   add_label_en?: string;
   computed?: boolean;
   sum_target?: string;
+  col_span?: 'half' | 'full';
   options?: string[] | { value: string; label?: string; label_ja?: string; label_en?: string }[];
 }
 

@@ -102,7 +102,9 @@ export default function CalendarPicker({
   while (cells.length % 7 !== 0) cells.push(null);
 
   return (
-    <div ref={containerRef} className="relative">
+    // dropdown-open sentinel: CSS :has(.dropdown-open) elevates the parent card's
+    // stacking context above sibling cards when the calendar is open.
+    <div ref={containerRef} className={`relative ${open ? 'dropdown-open' : ''}`}>
       {/* Trigger */}
       <button
         type="button"

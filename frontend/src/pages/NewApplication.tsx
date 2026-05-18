@@ -78,6 +78,7 @@ export default function NewApplication() {
         route_id: selectedRouteId || undefined,
       });
       queryClient.invalidateQueries({ queryKey: ['myApplications'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'summary'] });
       navigate('/history?submitted=1');
     } catch (error: any) {
       // Surface to user via alert (replaced with toast in P2 polish).

@@ -55,6 +55,8 @@ interface FormField {
     field:  string;
     equals: string | number | boolean;
   };
+  /** Layout width override. undefined = auto (type-based default). */
+  col_span?: 'half' | 'full';
 }
 
 interface FormSchema {
@@ -987,6 +989,19 @@ function FieldEditor({
         />
       )}
 
+      {/* Header type: minimal expanded — subtitle only */}
+      {expanded && isHeader && (
+        <div className="pt-3 border-t border-white/40 space-y-3">
+          <input
+            type="text"
+            value={field.helper_text ?? ''}
+            onChange={(e) => onUpdate({ helper_text: e.target.value })}
+            className="input text-xs"
+            placeholder={lang === 'en' ? 'Subtitle / description (optional)' : 'サブタイトル（任意）'}
+          />
+        </div>
+      )}
+
       {expanded && !isHeader && (
         <div className="pt-3 border-t border-white/40 space-y-3">
           {/* Required + multiple + computed flags */}
@@ -1020,6 +1035,40 @@ function FieldEditor({
               </label>
             )}
           </div>
+
+          {/* Width toggle — not shown for repeat_group (always full) or header (always full) */}
+          {!isRepeatGroup && (
+            <div className="flex items-center gap-2.5">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-warmgray-500 shrink-0">
+                {lang === 'en' ? 'Width' : '幅'}
+              </span>
+              <div className="flex rounded-lg border border-warmgray-200 overflow-hidden text-xs font-medium">
+                {([
+                  { v: undefined,  ja: '自動',   en: 'Auto' },
+                  { v: 'half',     ja: '½ 半幅', en: '½ Half' },
+                  { v: 'full',     ja: '⬛ 全幅', en: '⬛ Full' },
+                ] as const).map(({ v, ja, en }, i) => (
+                  <button
+                    key={String(v ?? 'auto')}
+                    type="button"
+                    onClick={() => onUpdate({ col_span: v })}
+                    className={`px-3 py-1.5 transition-colors ${i > 0 ? 'border-l border-warmgray-200' : ''} ${
+                      field.col_span === v
+                        ? 'bg-ringo-500 text-white'
+                        : 'text-warmgray-600 hover:bg-warmgray-50'
+                    }`}
+                  >
+                    {lang === 'en' ? en : ja}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[10px] text-warmgray-400">
+                {lang === 'en'
+                  ? 'Auto = full for textarea/file, half for others'
+                  : '自動 = textarea/fileは全幅、他は半幅'}
+              </span>
+            </div>
+          )}
 
           {isRepeatGroup && (
             <RepeatGroupFieldsEditor

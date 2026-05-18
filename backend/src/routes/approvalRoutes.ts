@@ -20,8 +20,19 @@ router.get('/pending/count', async (req: Request, res: Response): Promise<void> 
   try {
     const r = await query(
       systemView
-        ? `SELECT COUNT(*)::int AS total FROM approval_steps WHERE status = 'PENDING'`
-        : `SELECT COUNT(*)::int AS total FROM approval_steps WHERE status = 'PENDING' AND approver_id = $1`,
+        ? `SELECT COUNT(*)::int AS total
+           FROM approval_steps s
+           JOIN applications a ON a.id = s.application_id
+           WHERE s.status = 'PENDING'
+             AND a.status IN ('PENDING_APPROVAL','PENDING_SETTLEMENT')
+             AND a.archived_at IS NULL`
+        : `SELECT COUNT(*)::int AS total
+           FROM approval_steps s
+           JOIN applications a ON a.id = s.application_id
+           WHERE s.status = 'PENDING'
+             AND a.status IN ('PENDING_APPROVAL','PENDING_SETTLEMENT')
+             AND a.archived_at IS NULL
+             AND s.approver_id = $1`,
       systemView ? [] : [userId],
     );
     res.json({ total: r.rows[0]?.total ?? 0 });
@@ -50,7 +61,10 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
          CASE WHEN u.avatar_url LIKE 'data:%' THEN NULL ELSE u.avatar_url END AS applicant_avatar,
          COALESCE(d.name, '—') AS department_name,
          s.id AS current_step_id,
-         (s.step_order - (s.step_order / 100) * 100) AS current_step,
+         (SELECT COUNT(*) FROM approval_steps
+          WHERE application_id = a.id AND stage = s.stage
+            AND step_order / 100 = s.step_order / 100
+            AND step_order <= s.step_order)::int AS current_step,
          s.stage AS current_stage,
          s.label AS current_step_label,
          s.action_type AS current_step_action,
@@ -58,7 +72,7 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
          CASE WHEN approver.avatar_url LIKE 'data:%' THEN NULL ELSE approver.avatar_url END AS current_approver_avatar,
          (SELECT COUNT(*) FROM approval_steps
           WHERE application_id = a.id AND stage = s.stage
-            AND step_order / 100 = s.step_order / 100) AS total_steps,
+            AND step_order / 100 = s.step_order / 100)::int AS total_steps,
          COUNT(*) OVER() AS total_count
        FROM applications a
        JOIN form_templates t ON a.template_id = t.id

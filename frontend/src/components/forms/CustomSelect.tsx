@@ -30,6 +30,7 @@ export default function CustomSelect({
   const effectivePlaceholder = placeholder ?? t('select_placeholder');
   const selectedLabel = options.find(o => o.value === value)?.label;
 
+  // Close on outside click
   useEffect(() => {
     if (!open) return;
     function handle(e: MouseEvent) {
@@ -47,7 +48,9 @@ export default function CustomSelect({
   }
 
   return (
-    <div ref={containerRef} className={`relative ${className}`}>
+    // dropdown-open sentinel: CSS :has(.dropdown-open) elevates the parent card's
+    // stacking context above sibling cards when this dropdown is open.
+    <div ref={containerRef} className={`relative ${open ? 'dropdown-open' : ''} ${className}`}>
       {/* Trigger */}
       <button
         type="button"
@@ -75,7 +78,6 @@ export default function CustomSelect({
           bg-white/85 backdrop-blur-2xl border border-warmgray-200/60
           rounded-xl shadow-[0_8px_28px_rgba(60,40,20,0.16),0_2px_8px_rgba(60,40,20,0.08)]
           py-1 animate-scale-in origin-top overflow-hidden">
-
           <div className="max-h-52 overflow-y-auto overscroll-contain dropdown-scroll">
             {options.length === 0 && (
               <div className="px-3.5 py-3 text-sm text-warmgray-500 text-center">

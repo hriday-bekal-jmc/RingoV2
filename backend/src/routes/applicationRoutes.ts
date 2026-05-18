@@ -943,18 +943,27 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
          a.settlement_submitted_at,
          t.title_ja AS template_name, t.code AS template_code,
          t.settlement_schema IS NOT NULL AS has_settlement,
-         COALESCE(
-           (SELECT s.step_order FROM approval_steps s
-            WHERE s.application_id = a.id AND s.stage = 'SETTLEMENT' AND s.status = 'PENDING'
-            LIMIT 1),
-           (SELECT s.step_order FROM approval_steps s
-            WHERE s.application_id = a.id AND s.stage = 'RINGI' AND s.status = 'PENDING'
-            LIMIT 1)
-         ) AS current_step,
-         (SELECT COUNT(*) FROM approval_steps s
-          WHERE s.application_id = a.id AND s.stage = 'RINGI') AS total_steps
+         COALESCE((
+           SELECT COUNT(*)::int FROM approval_steps
+           WHERE application_id = a.id
+             AND stage = ps.stage
+             AND step_order / 100 = ps.batch
+             AND step_order <= ps.step_order
+         ), 0) AS current_step,
+         COALESCE((
+           SELECT COUNT(*)::int FROM approval_steps
+           WHERE application_id = a.id
+             AND stage = ps.stage
+             AND step_order / 100 = ps.batch
+         ), 0) AS total_steps
        FROM applications a
        JOIN form_templates t ON a.template_id = t.id
+       LEFT JOIN LATERAL (
+         SELECT s.step_order, s.stage, s.step_order / 100 AS batch
+         FROM approval_steps s
+         WHERE s.application_id = a.id AND s.status = 'PENDING'
+         ORDER BY s.step_order ASC LIMIT 1
+       ) ps ON TRUE
        WHERE a.applicant_id = $1
          AND ($2 = 'ALL' OR a.status = $2)
          AND ($7::boolean OR a.archived_at IS NULL)

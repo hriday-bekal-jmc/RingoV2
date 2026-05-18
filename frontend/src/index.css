@@ -39,6 +39,17 @@
     -webkit-backdrop-filter: blur(20px) saturate(130%);
     border-right: 1px solid rgba(255, 255, 255, 0.10);
   }
+  /* When a dropdown/calendar inside a card is open, elevate the card above
+     sibling cards. backdrop-filter creates a stacking context, so z-index on
+     the dropdown only competes within that card's context — not across cards.
+     :has(.dropdown-open) lifts the entire card stacking context above siblings. */
+  .glass:has(.dropdown-open),
+  .card:has(.dropdown-open),
+  .card-sm:has(.dropdown-open) {
+    position: relative;
+    z-index: 50;
+  }
+
   .card {
     @apply glass rounded-2xl p-6;
   }

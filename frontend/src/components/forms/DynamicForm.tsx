@@ -31,6 +31,7 @@ interface FormField {
     field: string;
     equals: string | number | boolean;
   };
+  col_span?: 'half' | 'full';
 }
 
 interface Template {
@@ -205,8 +206,13 @@ export default function DynamicForm({
     );
   }
 
-  const isFullWidth = (field: FormField) =>
-    field.type === 'textarea' || field.type === 'file' || field.type === 'repeat_group' || field.type === 'computed';
+  const isFullWidth = (field: FormField) => {
+    if (field.type === 'header') return true;   // section headers always span full row
+    if (field.col_span === 'full') return true;
+    if (field.col_span === 'half') return false;
+    // Auto: type-based defaults
+    return field.type === 'textarea' || field.type === 'file' || field.type === 'repeat_group' || field.type === 'computed';
+  };
 
   return (
     <form onSubmit={handleSubmit(handleFormSubmit)} className="card space-y-6">
@@ -220,18 +226,30 @@ export default function DynamicForm({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
         {activeFields.map((field) => (
           <div key={field.name} className={isFullWidth(field) ? 'md:col-span-2' : ''}>
-            <StandardInput
-              field={field as never}
-              register={register}
-              setValue={setValue}
-              watch={watch}
-              error={errors[field.name]}
-              initialValue={
-                field.type === 'file'
-                  ? (defaultValues?.[field.name] as string | undefined)
-                  : undefined
-              }
-            />
+            {field.type === 'header' ? (
+              <div className="flex items-center gap-3 py-1">
+                <div className="flex flex-col gap-0.5 min-w-0">
+                  <span className="text-sm font-bold text-warmgray-700 leading-tight">{field.label}</span>
+                  {field.helper_text && (
+                    <span className="text-xs text-warmgray-400">{field.helper_text}</span>
+                  )}
+                </div>
+                <div className="flex-1 h-px bg-warmgray-200/70" />
+              </div>
+            ) : (
+              <StandardInput
+                field={field as never}
+                register={register}
+                setValue={setValue}
+                watch={watch}
+                error={errors[field.name]}
+                initialValue={
+                  field.type === 'file'
+                    ? (defaultValues?.[field.name] as string | undefined)
+                    : undefined
+                }
+              />
+            )}
           </div>
         ))}
       </div>

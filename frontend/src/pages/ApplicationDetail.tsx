@@ -10,6 +10,7 @@ import { fieldLabel } from '../i18n';
 import CustomSelect from '../components/forms/CustomSelect';
 import RouteTimeline from '../components/common/RouteTimeline';
 import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
+import CollapsibleComment from '../components/common/CollapsibleComment';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -556,13 +557,13 @@ export default function ApplicationDetail() {
           </div>
         )}
         {step.comment && (
-          <div className={`mt-2 text-xs p-2.5 rounded-lg ${
+          <div className={`mt-2 text-xs p-2.5 rounded-lg min-w-0 overflow-hidden ${
             step.status === 'RETURNED'
               ? 'bg-amber-50 border border-amber-200 text-amber-800'
               : 'bg-white/60 border border-white/80 text-warmgray-700'
           }`}>
-            <span className="font-bold mr-1">{t('detail_comment')}:</span>
-            {step.comment}
+            <span className="font-bold">{t('detail_comment')}:</span>
+            <CollapsibleComment text={step.comment} className="mt-0.5" />
           </div>
         )}
       </div>
@@ -644,7 +645,12 @@ export default function ApplicationDetail() {
                   )}
                 </div>
                 {returnedStep.comment ? (
-                  <p className="text-sm text-amber-900 font-medium pl-6 leading-relaxed">"{returnedStep.comment}"</p>
+                  <div className="pl-6 min-w-0 overflow-hidden">
+                    <CollapsibleComment
+                      text={returnedStep.comment}
+                      className="text-sm text-amber-900 font-medium leading-relaxed"
+                    />
+                  </div>
                 ) : (
                   <p className="text-xs text-amber-600 pl-6">{t('not_entered')}</p>
                 )}
