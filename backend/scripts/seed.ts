@@ -50,11 +50,12 @@ async function seed(): Promise<void> {
     // departments
     const deptRows = await client.query(`
       INSERT INTO departments (name, code) VALUES
-        ('総務',   'SOUMU'),
-        ('健保',   'KENPO'),
-        ('美容',   'BIYOU'),
-        ('DX人材', 'DX'),
-        ('経理',   'KEIRI')
+        ('JMC',            'JMC'),
+        ('DX事業推進室',    'DX'),
+        ('企画推進室',     'KIKAKU'),
+        ('保健情報部',     'HOKEN'),
+        ('総務部',         'SOUMU'),
+        ('美容決済部',     'BIYOU')
       ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
       RETURNING id, code
     `);
@@ -71,7 +72,7 @@ async function seed(): Promise<void> {
       { email: 'soumu1@jmc-ltd.co.jp',      name: '佐藤 三郎', role: 'SOUMU',      dept: 'SOUMU', pw: false },
       { email: 'senmu@jmc-ltd.co.jp',       name: '高橋 専務', role: 'SENMU',      dept: 'SOUMU', pw: false },
       { email: 'shacho@jmc-ltd.co.jp',      name: '渡辺 社長', role: 'PRESIDENT',  dept: 'SOUMU', pw: false },
-      { email: 'keiri1@jmc-ltd.co.jp',      name: '中村 経理', role: 'ACCOUNTING', dept: 'KEIRI', pw: false },
+      { email: 'keiri1@jmc-ltd.co.jp',      name: '中村 経理', role: 'ACCOUNTING', dept: 'KIKAKU', pw: false },
       // ── Admin ── login: h-bekal@jmc-ltd.co.jp / Ringo2026!
       { email: 'h-bekal@jmc-ltd.co.jp',    name: 'H. Bekal',  role: 'SOUMU',      dept: 'SOUMU', is_admin: true, pw: true  },
     ];
@@ -112,7 +113,7 @@ async function seed(): Promise<void> {
     const templateId = templateRow.rows[0].id as string;
 
     // template_permissions
-    for (const code of ['DX', 'SOUMU', 'KENPO', 'BIYOU']) {
+    for (const code of ['DX', 'SOUMU', 'HOKEN', 'BIYOU', 'KIKAKU', 'JMC']) {
       await client.query(
         `INSERT INTO template_permissions (template_id, department_id, requirement_level)
          VALUES ($1, $2, 'SHOULD')

@@ -7,6 +7,7 @@ import { resolveApprovalSteps, skipStepsThroughApplicant, type ResolvedStep } fr
 import { applyComputedFormData, validateFormData } from '../services/formValidation';
 import { insertOutboxEvent } from '../services/eventOutbox';
 import { computeApplicationRecipients } from '../services/eventRecipients';
+import { invalidateDashboardCache } from '../services/dashboardCache';
 import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
 import type pg from 'pg';
 
@@ -358,9 +359,11 @@ router.post('/:id/resubmit', async (req: Request, res: Response): Promise<void> 
         round_offset: offset,
         total_steps: resolvedSteps.length,
         skipped_steps: routePolicy.skipped_steps,
+        _recipients: recipients,
       };
     });
 
+    invalidateDashboardCache((result as any)._recipients ?? []);
     res.json({ message: '再提出しました', application: result });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
@@ -456,8 +459,10 @@ router.post('/:id/submit', async (req: Request, res: Response): Promise<void> =>
         application_number: finalApp?.application_number ?? null,
         total_steps: resolvedSubmitSteps.length,
         skipped_steps: submitRoutePolicy.skipped_steps,
+        _recipients: recipients,
       };
     });
+    invalidateDashboardCache((result as any)._recipients ?? []);
     res.json({ message: '申請を提出しました', application: result });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
@@ -618,9 +623,11 @@ router.post('/:id/start-settlement', async (req: Request, res: Response): Promis
         application_number: finalApp?.application_number ?? null,
         total_settlement_steps: resolvedSteps.length,
         skipped_steps: settleRoutePolicy.skipped_steps,
+        _recipients: recipients,
       };
     });
 
+    invalidateDashboardCache((result as any)._recipients ?? []);
     res.json({ message: '精算申請を提出しました', application: result });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
@@ -792,9 +799,11 @@ router.post('/:id/resubmit-settlement', async (req: Request, res: Response): Pro
         application_number: finalApp?.application_number ?? null,
         total_settlement_steps: resolvedSteps.length,
         skipped_steps: settleRoutePolicy.skipped_steps,
+        _recipients: recipients,
       };
     });
 
+    invalidateDashboardCache((result as any)._recipients ?? []);
     res.json({ message: '精算を再提出しました', application: result });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };

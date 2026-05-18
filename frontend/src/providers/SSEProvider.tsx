@@ -52,8 +52,10 @@ function keysForApprovalAction(d: ApprovalPayload): KeyList {
     keys.push(['application', d.applicationId]);
     keys.push(['route-preview']);
   }
-  // Final approval → applicant's history list might shift (status change)
-  if (d.final) keys.push(['myApplications']);
+  // Any approval action (approve/return/reject) changes the app status →
+  // invalidate applicant's history list unconditionally, not just on final.
+  // Previously guarded by `d.final` which left dashboard dots stale after return.
+  keys.push(['myApplications']);
   return keys;
 }
 

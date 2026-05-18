@@ -5,6 +5,7 @@ import { assertCanActOnStep, httpErr } from '../middlewares/authz';
 import { mutationLimiter } from '../middlewares/rateLimit';
 import { insertOutboxEvent } from '../services/eventOutbox';
 import { computeApplicationRecipients } from '../services/eventRecipients';
+import { invalidateDashboardCache } from '../services/dashboardCache';
 import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
 import type pg from 'pg';
 
@@ -118,11 +119,12 @@ router.post('/:id/approve', async (req: Request, res: Response): Promise<void> =
   const { id: userId } = req.user!;
   const isAdmin = isAdminUser(req.user);
 
+  let approveRecipients: string[] = [];
   try {
     const result = await withTransaction(async (client: pg.PoolClient) => {
-      // Lock the application row
+      // Lock the application row (include applicant_id for cache invalidation)
       const appRow = await client.query(
-        `SELECT id, status, application_number, route_id FROM applications WHERE id = $1 FOR UPDATE`,
+        `SELECT id, status, application_number, route_id, applicant_id FROM applications WHERE id = $1 FOR UPDATE`,
         [id],
       );
       if (appRow.rows.length === 0) throw Object.assign(new Error('Application not found'), { status: 404 });
@@ -242,8 +244,13 @@ router.post('/:id/approve', async (req: Request, res: Response): Promise<void> =
         payload:            { type: 'approve', applicationId: appId, final: isFinalForOutbox },
       });
 
+      approveRecipients = recipients;
       return updatedApp;
     });
+
+    // Bust Redis dashboard cache for all affected users — must happen AFTER tx commits
+    // so the next refetch hits the DB and gets fresh data.
+    invalidateDashboardCache(approveRecipients);
 
     const status = (result as { status?: string }).status;
     // APPROVED = ringi final; SETTLEMENT_APPROVED = settlement workflow final (accounting closes separately)
@@ -276,6 +283,7 @@ router.post('/:id/return', async (req: Request, res: Response): Promise<void> =>
   const { id } = req.params;
   const { comment } = (req.body ?? {}) as { comment?: string };
   const { id: userId, role } = req.user!;
+  let returnRecipients: string[] = [];
   try {
     await withTransaction(async (client: pg.PoolClient) => {
       // ── Authorization: only assigned approver / role-gated MANAGER+ on
@@ -330,7 +338,9 @@ router.post('/:id/return', async (req: Request, res: Response): Promise<void> =>
         recipient_user_ids: recipients,
         payload:            { type: 'return', applicationId: id },
       });
+      returnRecipients = recipients;
     });
+    invalidateDashboardCache(returnRecipients);
     res.json({ message: '差し戻しました' });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
@@ -345,6 +355,7 @@ router.post('/:id/reject', async (req: Request, res: Response): Promise<void> =>
   const { id } = req.params;
   const { comment } = (req.body ?? {}) as { comment?: string };
   const { id: userId, role } = req.user!;
+  let rejectRecipients: string[] = [];
   try {
     await withTransaction(async (client: pg.PoolClient) => {
       // ── Authorization: only assigned approver / role-gated / ADMIN
@@ -386,7 +397,9 @@ router.post('/:id/reject', async (req: Request, res: Response): Promise<void> =>
         recipient_user_ids: recipients,
         payload:            { type: 'reject', applicationId: id },
       });
+      rejectRecipients = recipients;
     });
+    invalidateDashboardCache(rejectRecipients);
     res.json({ message: '却下しました' });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
