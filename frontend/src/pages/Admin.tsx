@@ -202,7 +202,7 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
               className={`relative h-6 w-11 rounded-full transition-colors ${form.is_admin ? 'bg-ringo-500' : 'bg-warmgray-300'}`}
             >
               <span
-                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${form.is_admin ? 'translate-x-5' : 'translate-x-0.5'}`}
+                className={`absolute top-[3px] left-[3px] h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-transform duration-200 ${form.is_admin ? 'translate-x-[20px]' : 'translate-x-0'}`}
               />
             </button>
           </div>

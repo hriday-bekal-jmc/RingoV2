@@ -17,6 +17,7 @@ import apiClient from '../../services/apiClient';
 import { templateLabel } from '../../config/templateLabels';
 import { useLang } from '../../context/LanguageContext';
 import RepeatGroupDisplay from '../forms/RepeatGroupDisplay';
+import CollapsibleComment from '../common/CollapsibleComment';
 
 interface ApplicationDetail {
   id: string;
@@ -195,7 +196,7 @@ export default function AdminAppDetailModal({ appId, onClose }: Props) {
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden">
           {isLoading && (
             <div className="flex items-center justify-center gap-3 py-16 text-warmgray-400">
               <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
@@ -482,13 +483,13 @@ function TimelineCard({ steps, lang, dateLocale }: { steps: StepRow[]; lang: 'ja
           </p>
         )}
         {s.comment && (
-          <div className={`mt-2 text-xs px-2.5 py-2 rounded-lg ${
+          <div className={`mt-2 text-xs px-2.5 py-2 rounded-lg min-w-0 overflow-hidden ${
             s.status === 'RETURNED'  ? 'bg-amber-50 border border-amber-200 text-amber-800' :
             s.status === 'REJECTED'  ? 'bg-red-50 border border-red-200 text-red-800' :
             'bg-white/60 border border-white/80 text-warmgray-700'
           }`}>
-            <span className="font-bold mr-1">{lang === 'en' ? 'Comment' : 'コメント'}:</span>
-            {s.comment}
+            <span className="font-bold">{lang === 'en' ? 'Comment' : 'コメント'}:</span>
+            <CollapsibleComment text={s.comment} className="mt-0.5" />
           </div>
         )}
       </div>

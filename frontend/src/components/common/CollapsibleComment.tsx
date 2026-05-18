@@ -1,40 +1,31 @@
-import { useState, useRef, useLayoutEffect } from 'react';
+import { useState } from 'react';
 import { useLang } from '../../context/LanguageContext';
 
 interface CollapsibleCommentProps {
   text: string;
-  /** Max visible lines before collapse. Default 3. */
-  lines?: number;
+  /** Character threshold before collapsing. Default 150. */
+  charLimit?: number;
   className?: string;
 }
 
 /**
- * Renders comment text clamped to `lines` lines.
- * "Read more" toggle only appears when text actually overflows — determined
- * by measuring scrollHeight > clientHeight with clamp active.
+ * Renders comment text. Collapses to 3 lines when text exceeds `charLimit`
+ * chars or contains 3+ newlines. "Read more" toggle expands fully.
+ * Uses char count — no DOM measurement, works inside portals/modals.
  */
-export default function CollapsibleComment({ text, lines = 3, className }: CollapsibleCommentProps) {
+export default function CollapsibleComment({ text, charLimit = 150, className }: CollapsibleCommentProps) {
   const { lang } = useLang();
   const [expanded, setExpanded] = useState(false);
-  const [overflows, setOverflows] = useState(false);
-  const ref = useRef<HTMLSpanElement>(null);
 
-  // Measure overflow AFTER clamp is painted
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    setOverflows(el.scrollHeight > el.clientHeight + 1);
-  }, [text, lines]);
+  const newlineCount = (text.match(/\n/g) ?? []).length;
+  const isLong = text.length > charLimit || newlineCount >= 3;
 
   return (
     <span className={`block ${className ?? ''}`}>
-      <span
-        ref={ref}
-        className={`block break-words overflow-wrap-anywhere ${expanded ? '' : `line-clamp-${lines}`}`}
-      >
+      <span className={`break-all ${!expanded && isLong ? 'line-clamp-3' : 'block'}`}>
         {text}
       </span>
-      {(overflows || expanded) && (
+      {isLong && (
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); setExpanded(v => !v); }}

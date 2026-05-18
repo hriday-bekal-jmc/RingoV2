@@ -327,7 +327,7 @@ function AppDetailPanel({ appId, onClose, tFn, lang }: {
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden">
           {isLoading && <RingoLoader.Block label={tFn('loading')} />}
           {isError && (
             <div className="p-6 text-sm text-ringo-500 text-center">{tFn('approvals_error_msg')}</div>
@@ -562,7 +562,7 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
         </div>
 
         {/* Body — scrollable */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden">
           <div className="px-7 py-5 space-y-6">
 
             {isDetailLoading && <RingoLoader.Block label={t('loading')} />}

@@ -8,6 +8,7 @@ import { useLang } from '../context/LanguageContext';
 import CalendarPicker from '../components/forms/CalendarPicker';
 import CustomSelect from '../components/forms/CustomSelect';
 import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
+import CollapsibleComment from '../components/common/CollapsibleComment';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -138,7 +139,7 @@ function DetailPanel({ applicationId, onClose, lang }: { applicationId: string; 
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-7 py-5 space-y-6">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-7 py-5 space-y-6">
           {isLoading && (
             <div className="space-y-3">
               {[...Array(6)].map((_, i) => <div key={i} className="h-12 rounded-xl bg-white/40 animate-pulse" />)}
@@ -240,9 +241,9 @@ function DetailPanel({ applicationId, onClose, lang }: { applicationId: string; 
                             </p>
                           )}
                           {step.comment && (
-                            <p className="text-xs text-warmgray-600 mt-1 bg-white/60 rounded-lg px-2.5 py-1.5 border border-white/80 italic">
-                              "{step.comment}"
-                            </p>
+                            <div className="mt-1 text-xs bg-white/60 rounded-lg px-2.5 py-1.5 border border-white/80 min-w-0 overflow-hidden">
+                              <CollapsibleComment text={step.comment} className="text-warmgray-600 italic" />
+                            </div>
                           )}
                         </div>
                       </div>
