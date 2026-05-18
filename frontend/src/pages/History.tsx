@@ -360,21 +360,38 @@ export default function History() {
 
             {/* Sentinel — h-px keeps it invisible; IntersectionObserver fires 200px early */}
             <div ref={sentinelRef} className="h-px" />
-            {(isFetchingNextPage || (!hasNextPage && sorted.length >= PAGE)) && (
+
+            {isFetchingNextPage ? (
               <div className="px-5 py-3 flex items-center justify-center gap-2 text-warmgray-400 text-xs border-t border-white/20">
-                {isFetchingNextPage ? (
-                  <>
-                    <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                    </svg>
-                    {t('loading')}
-                  </>
-                ) : (
-                  <span className="text-warmgray-300">{lang === 'en' ? 'All records loaded' : '全件表示済み'}</span>
-                )}
+                <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                {t('loading')}
               </div>
-            )}
+            ) : hasNextPage ? (
+              <div className="px-5 py-3 flex items-center gap-2.5 border-t border-amber-200/40 bg-amber-50/60 text-amber-700 text-xs">
+                <svg className="w-4 h-4 shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+                <span className="font-semibold">
+                  {lang === 'en'
+                    ? 'More records not yet loaded — scroll down to load them'
+                    : 'まだ読み込まれていない件があります。スクロールして続きを表示'}
+                </span>
+                <button
+                  onClick={() => fetchNextPage()}
+                  disabled={isFetchingNextPage}
+                  className="ml-auto text-[11px] font-bold underline underline-offset-2 hover:text-amber-800 transition-colors"
+                >
+                  {lang === 'en' ? 'Load now' : '今すぐ読み込む'}
+                </button>
+              </div>
+            ) : sorted.length >= PAGE ? (
+              <div className="px-5 py-3 flex items-center justify-center text-warmgray-300 text-xs border-t border-white/20">
+                {lang === 'en' ? 'All records loaded' : '全件表示済み'}
+              </div>
+            ) : null}
           </div>
         )}
       </div>

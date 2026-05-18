@@ -84,7 +84,7 @@ async function readBatch(cursor: CursorClient): Promise<Record<string, unknown>[
 // ── Job processor ────────────────────────────────────────────────────────────
 async function processCsvExport(job: Job<CsvExportPayload>): Promise<{ filename: string; rowCount: number }> {
   const jobId = job.id!;
-  const { userId, ids } = job.data;
+  const { userId, ids, selectAll, dateFrom, dateTo } = job.data;
 
   await setCsvExportMeta(jobId, { status: 'processing' });
 
@@ -106,46 +106,40 @@ async function processCsvExport(job: Job<CsvExportPayload>): Promise<{ filename:
     let sql: string;
     let params: unknown[];
 
+    const SELECT_COLS = `
+        SELECT
+          a.application_number,
+          u.full_name AS applicant,
+          d.name      AS department,
+          ft.title_ja AS form_type,
+          s.expected_amount,
+          s.actual_amount,
+          s.transfer_date,
+          s.accounting_note,
+          s.status    AS settlement_status,
+          s.created_at
+        FROM settlements s
+        JOIN applications a    ON a.id = s.application_id
+        JOIN form_templates ft ON ft.id = a.template_id
+        JOIN users u           ON u.id = a.applicant_id
+        LEFT JOIN departments d ON d.id = u.department_id`;
+
     if (ids && ids.length > 0) {
-      sql = `
-        SELECT
-          a.application_number,
-          u.full_name AS applicant,
-          d.name      AS department,
-          ft.title_ja AS form_type,
-          s.expected_amount,
-          s.actual_amount,
-          s.transfer_date,
-          s.accounting_note,
-          s.status    AS settlement_status,
-          s.created_at
-        FROM settlements s
-        JOIN applications a    ON a.id = s.application_id
-        JOIN form_templates ft ON ft.id = a.template_id
-        JOIN users u           ON u.id = a.applicant_id
-        LEFT JOIN departments d ON d.id = u.department_id
-        WHERE s.id = ANY($1::uuid[])
-        ORDER BY s.created_at DESC`;
+      // Specific IDs — manual row selection
+      sql    = `${SELECT_COLS} WHERE s.id = ANY($1::uuid[]) ORDER BY s.created_at DESC`;
       params = [ids];
-    } else {
-      sql = `
-        SELECT
-          a.application_number,
-          u.full_name AS applicant,
-          d.name      AS department,
-          ft.title_ja AS form_type,
-          s.expected_amount,
-          s.actual_amount,
-          s.transfer_date,
-          s.accounting_note,
-          s.status    AS settlement_status,
-          s.created_at
-        FROM settlements s
-        JOIN applications a    ON a.id = s.application_id
-        JOIN form_templates ft ON ft.id = a.template_id
-        JOIN users u           ON u.id = a.applicant_id
-        LEFT JOIN departments d ON d.id = u.department_id
+    } else if (selectAll && (dateFrom || dateTo)) {
+      // "Select all in period" — date-filtered export (no specific IDs)
+      // Filter matches the display date shown in the UI: settlement_submitted_at ?? s.created_at
+      sql = `${SELECT_COLS}
+        WHERE ($1::date IS NULL OR COALESCE(a.settlement_submitted_at, s.created_at)::date >= $1::date)
+          AND ($2::date IS NULL OR COALESCE(a.settlement_submitted_at, s.created_at)::date <= $2::date)
+          AND a.archived_at IS NULL
         ORDER BY s.created_at DESC`;
+      params = [dateFrom ?? null, dateTo ?? null];
+    } else {
+      // No filter — export every settlement
+      sql    = `${SELECT_COLS} WHERE a.archived_at IS NULL ORDER BY s.created_at DESC`;
       params = [];
     }
 

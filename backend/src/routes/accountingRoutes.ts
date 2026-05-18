@@ -57,13 +57,17 @@ function safeProofName(original: string): string {
 }
 
 // ── GET /accounting/settlements  (paginated, server-side filter)
-// ?filter=ALL|PENDING|DONE  &limit=25&offset=0
+// ?filter=ALL|PENDING|DONE  &date_from=YYYY-MM-DD  &date_to=YYYY-MM-DD  &limit=25
+// date_from/date_to filter on COALESCE(a.settlement_submitted_at, s.created_at)
+// to match the date shown in the UI.
 const SETTLE_PAGE_SIZE = 25;
 router.get('/settlements', async (req: Request, res: Response): Promise<void> => {
-  const filter = ((req.query.filter as string | undefined) ?? 'ALL').toUpperCase();
-  const limit  = parsePageLimit(req.query.limit, SETTLE_PAGE_SIZE, 100);
-  const offset = Math.max(Number(req.query.offset ?? 0), 0);
-  const cursor = decodeCursor(req.query.cursor);
+  const filter   = ((req.query.filter as string | undefined) ?? 'ALL').toUpperCase();
+  const dateFrom = (req.query.date_from as string | undefined) || null;
+  const dateTo   = (req.query.date_to   as string | undefined) || null;
+  const limit    = parsePageLimit(req.query.limit, SETTLE_PAGE_SIZE, 100);
+  const offset   = Math.max(Number(req.query.offset ?? 0), 0);
+  const cursor   = decodeCursor(req.query.cursor);
   try {
     const result = await query(
       `SELECT
@@ -102,16 +106,19 @@ router.get('/settlements', async (req: Request, res: Response): Promise<void> =>
        ) pending_step ON TRUE
        LEFT JOIN users pending_approver ON pending_approver.id = pending_step.approver_id
        WHERE ($1 = 'ALL'
-          OR ($1 = 'PENDING' AND a.status = 'PENDING_SETTLEMENT')
-          OR ($1 = 'DONE'    AND a.status IN ('COMPLETED', 'SETTLEMENT_APPROVED')))
+          OR ($1 = 'PENDING' AND a.status = 'SETTLEMENT_APPROVED')
+          OR ($1 = 'DONE'    AND a.status = 'COMPLETED'))
          AND a.archived_at IS NULL
+         -- date range filter on display date (settlement submitted or settlement created)
+         AND ($6::date IS NULL OR COALESCE(a.settlement_submitted_at, s.created_at)::date >= $6::date)
+         AND ($7::date IS NULL OR COALESCE(a.settlement_submitted_at, s.created_at)::date <= $7::date)
          AND (
            $2::timestamptz IS NULL
            OR (s.created_at, s.id) < ($2::timestamptz, $3::uuid)
          )
        ORDER BY s.created_at DESC, s.id DESC
        LIMIT $4 OFFSET $5`,
-      [filter, cursor?.created_at ?? null, cursor?.id ?? null, limit + 1, cursor ? 0 : offset],
+      [filter, cursor?.created_at ?? null, cursor?.id ?? null, limit + 1, cursor ? 0 : offset, dateFrom, dateTo],
     );
     const rows    = result.rows;
     const hasMore = rows.length > limit;
@@ -386,11 +393,19 @@ router.post('/settlements/:id/close', async (req: Request, res: Response): Promi
 
 // POST /accounting/settlements/csv/export — enqueue export job
 router.post('/settlements/csv/export', async (req: Request, res: Response): Promise<void> => {
-  const { ids } = req.body as { ids?: string[] };
+  const { ids, selectAll, dateFrom, dateTo } = req.body as {
+    ids?: string[];
+    selectAll?: boolean;
+    dateFrom?: string;
+    dateTo?: string;
+  };
   try {
     const jobId = await addCsvExportJob({
-      userId: req.user!.id,
-      ids:    Array.isArray(ids) && ids.length > 0 ? ids : undefined,
+      userId:    req.user!.id,
+      ids:       Array.isArray(ids) && ids.length > 0 ? ids : undefined,
+      selectAll: selectAll === true,
+      dateFrom:  typeof dateFrom === 'string' && dateFrom ? dateFrom : undefined,
+      dateTo:    typeof dateTo   === 'string' && dateTo   ? dateTo   : undefined,
     });
     res.status(202).json({ jobId, status: 'queued' });
   } catch (err) {

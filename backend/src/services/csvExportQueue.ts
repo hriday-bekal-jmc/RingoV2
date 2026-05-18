@@ -33,8 +33,14 @@ export const csvExportQueue = new Queue(CSV_EXPORT_QUEUE_NAME, {
 export interface CsvExportPayload {
   /** User who requested the export — used for ownership check on download. */
   userId: string;
-  /** Optional UUIDs to filter; empty/undefined = export all settlements. */
+  /** Specific settlement UUIDs to export (partial/manual selection). */
   ids?: string[];
+  /** Export all records matching date range — ignores `ids`. */
+  selectAll?: boolean;
+  /** ISO date YYYY-MM-DD — inclusive lower bound on settlement/created date. */
+  dateFrom?: string;
+  /** ISO date YYYY-MM-DD — inclusive upper bound. */
+  dateTo?: string;
 }
 
 // ── Job metadata (stored in Redis hash for status polling) ───────────────────
