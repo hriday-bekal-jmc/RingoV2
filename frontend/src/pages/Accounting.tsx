@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import RingoLoader from '../components/common/RingoLoader';
+import { Sk } from '../components/common/Skeleton';
 import { useLang } from '../context/LanguageContext';
 
 // File URLs are same-origin (vite proxy /api in dev, reverse proxy in prod) — no base prefix needed
@@ -642,8 +643,53 @@ export default function Accounting() {
 
         {/* Table */}
         {isLoading ? (
-          <div className="card">
-            <RingoLoader.Block label={t('loading')} />
+          <div className="card !p-0 md:overflow-hidden">
+            <div className="md:overflow-x-auto">
+              <table className="table-base table-responsive">
+                <thead>
+                  <tr>
+                    <th className="w-10"><Sk.Box w="w-4" h="h-4" className="rounded" /></th>
+                    <th>{t('accounting_col_app')}</th>
+                    <th>{t('accounting_col_applicant')}</th>
+                    <th>{t('accounting_col_template')}</th>
+                    <th className="text-right">{t('accounting_col_expected')}</th>
+                    <th className="text-right">{t('accounting_col_actual')}</th>
+                    <th>{t('accounting_col_transfer')}</th>
+                    <th>{t('accounting_col_proof')}</th>
+                    <th>{t('accounting_col_status')}</th>
+                    <th>精算処理</th>
+                    <th>{t('col_detail')}</th>
+                  </tr>
+                </thead>
+                <tbody className="md:divide-y md:divide-white/20">
+                  {[...Array(8)].map((_, i) => (
+                    <tr key={i}>
+                      <td><Sk.Box w="w-4" h="h-4" className="rounded" /></td>
+                      <td>
+                        <div className="space-y-1.5">
+                          <Sk.Line w={i % 3 === 0 ? 'w-24' : i % 3 === 1 ? 'w-20' : 'w-28'} h="h-3" />
+                          <Sk.Line w="w-16" h="h-2.5" />
+                        </div>
+                      </td>
+                      <td>
+                        <div className="space-y-1.5">
+                          <Sk.Line w={i % 2 === 0 ? 'w-28' : 'w-24'} h="h-3.5" />
+                          <Sk.Line w="w-20" h="h-2.5" />
+                        </div>
+                      </td>
+                      <td><Sk.Line w={i % 2 === 0 ? 'w-32' : 'w-40'} h="h-3" /></td>
+                      <td><Sk.Line w="w-20" h="h-3" className="ml-auto" /></td>
+                      <td><Sk.Line w="w-20" h="h-3" className="ml-auto" /></td>
+                      <td><Sk.Line w="w-24" h="h-3" /></td>
+                      <td><Sk.Circle size="sm" /></td>
+                      <td><Sk.Badge w="w-20" /></td>
+                      <td><Sk.Badge w="w-16" /></td>
+                      <td><Sk.Line w="w-8" h="h-3" /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : filtered.length === 0 ? (
           <div className="card flex flex-col items-center justify-center py-20 gap-4 text-warmgray-400">

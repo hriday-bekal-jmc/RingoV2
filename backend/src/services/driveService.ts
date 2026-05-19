@@ -112,6 +112,13 @@ export async function uploadToDrive(
   };
 }
 
+// ── Delete ────────────────────────────────────────────────────────────────────
+export async function deleteFromDrive(fileId: string): Promise<void> {
+  if (!isDriveEnabled()) return;
+  const drive = getDrive();
+  await drive.files.delete({ fileId, supportsAllDrives: true });
+}
+
 // ── Download stream ───────────────────────────────────────────────────────────
 /**
  * Proxy-download a Drive file. Used by fileRoutes when we want to keep files

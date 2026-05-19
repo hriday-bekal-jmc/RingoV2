@@ -8,6 +8,7 @@ import ConfirmDialog from '../components/common/ConfirmDialog';
 import { useLang } from '../context/LanguageContext';
 import { templateLabel } from '../config/templateLabels';
 import RingoLoader from '../components/common/RingoLoader';
+import { Sk } from '../components/common/Skeleton';
 
 interface Application {
   id: string;
@@ -226,8 +227,28 @@ export default function History() {
 
         {/* List */}
         {isLoading ? (
-          <div className="card">
-            <RingoLoader.Block label={t('loading')} />
+          <div className="card !p-0 overflow-hidden">
+            <ul className="divide-y divide-white/30">
+              {[...Array(9)].map((_, i) => {
+                const wTitle = i % 3 === 0 ? 'w-40' : i % 3 === 1 ? 'w-32' : 'w-48';
+                return (
+                  <li key={i} className="flex items-center gap-4 px-5 py-4">
+                    <Sk.Dot />
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Sk.Line w={wTitle} h="h-3.5" />
+                        <Sk.Badge w="w-14" />
+                      </div>
+                      <Sk.Line w="w-28" h="h-2.5" />
+                    </div>
+                    <div className="hidden md:flex items-center gap-3 shrink-0">
+                      <Sk.Line w="w-24" h="h-2.5" />
+                    </div>
+                    <Sk.Box w="w-4" h="h-4" className="rounded" />
+                  </li>
+                );
+              })}
+            </ul>
           </div>
         ) : sorted.length === 0 ? (
           <div className="card flex flex-col items-center justify-center py-20 gap-4 text-warmgray-400 animate-fade-up">

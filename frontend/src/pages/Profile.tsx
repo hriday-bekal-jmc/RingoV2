@@ -5,14 +5,9 @@ import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
 import { usePermissions } from '../hooks/usePermissions';
 import apiClient from '../services/apiClient';
+import UserAvatar from '../components/common/UserAvatar';
 import type { Lang } from '../i18n';
 
-function nameToColor(name: string): string {
-  const colors = ['from-ringo-400 to-ringo-600', 'from-mustard-400 to-mustard-600', 'from-teal-500 to-teal-700', 'from-warmgray-500 to-warmgray-700'];
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffff;
-  return colors[h % colors.length];
-}
 
 export default function Profile() {
   const { user, setUser } = useAuth();
@@ -39,12 +34,9 @@ export default function Profile() {
     },
   });
 
-  const gradient = nameToColor(name || user?.full_name || '?');
-  const initial = (name || user?.full_name || '?').slice(0, 1);
-
   const avatarMutation = useMutation({
     mutationFn: async (avatar_url: string) =>
-      (await apiClient.post('/auth/me/avatar', { avatar_url })).data,
+      (await apiClient.post('/avatars/me', { avatar_url })).data,
     onSuccess: (data) => {
       setUser((prev) => prev ? { ...prev, avatar_url: data.avatar_url } : prev);
       setAvatarStatus('saved');
@@ -55,9 +47,9 @@ export default function Profile() {
   });
 
   const removeAvatarMutation = useMutation({
-    mutationFn: async () => (await apiClient.delete('/auth/me/avatar')).data,
-    onSuccess: () => {
-      setUser((prev) => prev ? { ...prev, avatar_url: null } : prev);
+    mutationFn: async () => (await apiClient.delete('/avatars/me')).data,
+    onSuccess: (data) => {
+      setUser((prev) => prev ? { ...prev, avatar_url: data.avatar_url ?? null } : prev);
       setAvatarPreview(null);
       setAvatarStatus('saved');
       setTimeout(() => setAvatarStatus('idle'), 3000);
@@ -113,16 +105,22 @@ export default function Profile() {
           <div className="flex items-center gap-5 mb-5">
             {/* Avatar display */}
             <div className="relative group shrink-0">
-              {(avatarPreview ?? user?.avatar_url) ? (
+              {avatarPreview ? (
+                // Preview uses data URL directly — not served via /api/avatars/
                 <img
-                  src={avatarPreview ?? user!.avatar_url!}
+                  src={avatarPreview}
                   alt={user?.full_name}
                   className="w-20 h-20 rounded-2xl object-cover ring-2 ring-white/60"
                 />
               ) : (
-                <div className={`w-20 h-20 rounded-2xl bg-gradient-to-br ${gradient} flex items-center justify-center text-white text-3xl font-bold shadow-lg`}>
-                  {initial}
-                </div>
+                <UserAvatar
+                  name={user?.full_name ?? ''}
+                  avatarUrl={user?.avatar_url}
+                  size={20}
+                  shape="rounded-2xl"
+                  ring="ring-2 ring-white/60"
+                  className="shadow-lg text-3xl"
+                />
               )}
               {/* Overlay camera icon */}
               <button

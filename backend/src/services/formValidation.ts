@@ -24,6 +24,9 @@ export interface FormField {
     min?: number;
     max?: number;
     maxlength?: number;
+    /** Time fields: HH:mm boundary strings, step in minutes (informational, not re-validated here) */
+    min_time?: string;
+    max_time?: string;
   };
   conditional_on?: {
     field: string;
@@ -184,6 +187,21 @@ function validateFieldList(
         }
         if (validation.max != null && num > validation.max) {
           errors.push({ field: path, message: `${field.label ?? field.name} must be at most ${validation.max}` });
+        }
+      }
+    }
+
+    if (field.type === 'time') {
+      // HH:mm format — browsers always emit this format, but validate defensively
+      if (!/^\d{2}:\d{2}$/.test(stringValue)) {
+        errors.push({ field: path, message: `${field.label ?? field.name} must be a valid time (HH:mm)` });
+      } else {
+        // String comparison works correctly for zero-padded HH:mm in 24h format
+        if (validation.min_time && stringValue < validation.min_time) {
+          errors.push({ field: path, message: `${field.label ?? field.name} must be ${validation.min_time} or later` });
+        }
+        if (validation.max_time && stringValue > validation.max_time) {
+          errors.push({ field: path, message: `${field.label ?? field.name} must be ${validation.max_time} or earlier` });
         }
       }
     }

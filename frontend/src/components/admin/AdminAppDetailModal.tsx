@@ -18,7 +18,7 @@ import { templateLabel } from '../../config/templateLabels';
 import { useLang } from '../../context/LanguageContext';
 import RepeatGroupDisplay from '../forms/RepeatGroupDisplay';
 import CollapsibleComment from '../common/CollapsibleComment';
-import RingoLoader from '../common/RingoLoader';
+import { Sk } from '../common/Skeleton';
 
 interface ApplicationDetail {
   id: string;
@@ -198,7 +198,56 @@ export default function AdminAppDetailModal({ appId, onClose }: Props) {
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden">
-          {isLoading && <RingoLoader.Block />}
+          {isLoading && (
+            <div className="p-4 md:p-5 space-y-5">
+              {/* Meta card skeleton */}
+              <div className="card space-y-4">
+                <div className="flex flex-col gap-3 border-b border-white/40 pb-4">
+                  <div className="flex items-center gap-2">
+                    <Sk.Badge w="w-24" />
+                    <Sk.Badge w="w-16" />
+                    <Sk.Badge w="w-8" />
+                  </div>
+                  <Sk.Line w="w-48" h="h-5" />
+                  <div className="flex items-center gap-3">
+                    <Sk.Line w="w-28" h="h-2.5" />
+                    <Sk.Line w="w-32" h="h-2.5" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {[...Array(6)].map((_, i) => (
+                    <div key={i} className="space-y-1.5">
+                      <Sk.Line w="w-16" h="h-2.5" />
+                      <Sk.Line w="w-24" h="h-3.5" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Form data card skeleton */}
+              <div className="card space-y-3">
+                <Sk.Line w="w-32" h="h-4" />
+                {[...Array(5)].map((_, i) => (
+                  <div key={i} className="flex justify-between items-center py-1.5 border-b border-white/30">
+                    <Sk.Line w={i % 2 === 0 ? 'w-28' : 'w-24'} h="h-3" />
+                    <Sk.Line w={i % 3 === 0 ? 'w-32' : i % 3 === 1 ? 'w-24' : 'w-40'} h="h-3" />
+                  </div>
+                ))}
+              </div>
+              {/* Timeline skeleton */}
+              <div className="card space-y-3">
+                <Sk.Line w="w-28" h="h-4" />
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="flex items-start gap-3">
+                    <Sk.Circle size="md" />
+                    <div className="flex-1 space-y-1.5 pt-1">
+                      <Sk.Line w={i % 2 === 0 ? 'w-32' : 'w-40'} h="h-3.5" />
+                      <Sk.Line w="w-24" h="h-2.5" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {isError && (
             <div className="p-6 text-sm text-red-500 text-center">
               {(error as { message?: string })?.message ?? (lang === 'en' ? 'Failed to load' : '取得に失敗しました')}

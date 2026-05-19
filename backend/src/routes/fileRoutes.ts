@@ -8,6 +8,9 @@ import fs from 'fs';
 import { query } from '../config/db';
 import { isAdminUser, requireAuth } from '../middlewares/authMiddleware';
 import { assertCanReadApp } from '../middlewares/authz';
+import { isDriveEnabled, deleteFromDrive } from '../services/driveService';
+
+const UPLOADS_DIR = path.join(__dirname, '../../uploads');
 
 const router = Router();
 router.use(requireAuth);
@@ -69,6 +72,63 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
     if (e.status) { res.status(e.status).json({ error: e.message }); return; }
     console.error('[files] serve failed:', err);
     res.status(500).json({ error: 'ファイル取得に失敗しました' });
+  }
+});
+
+// DELETE /api/files/:id — remove unlinked file (draft upload cleaned up when user removes from form).
+// Normal users: own unlinked files only. Admins: any unlinked file.
+// Linked files (application_id IS NOT NULL) cannot be deleted this way — use application delete flow.
+router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const r = await query(
+      `SELECT id, application_id, uploader_id, stored_path, drive_file_id
+       FROM uploaded_files WHERE id = $1`,
+      [req.params.id],
+    );
+    if (r.rows.length === 0) { res.status(404).json({ error: 'File not found' }); return; }
+
+    const f = r.rows[0] as {
+      id: string;
+      application_id: string | null;
+      uploader_id: string;
+      stored_path: string;
+      drive_file_id: string | null;
+    };
+
+    const actor = req.user!;
+
+    // Linked files are immutable via this endpoint — protect application integrity.
+    if (f.application_id) {
+      res.status(409).json({ error: 'ファイルはアプリケーションに紐付いているため削除できません' });
+      return;
+    }
+
+    // Auth: uploader or admin
+    if (f.uploader_id !== actor.id && !isAdminUser(req.user)) {
+      res.status(403).json({ error: 'このファイルを削除する権限がありません' });
+      return;
+    }
+
+    // Delete physical file
+    if (f.drive_file_id && isDriveEnabled()) {
+      try {
+        await deleteFromDrive(f.drive_file_id);
+      } catch (driveErr) {
+        // Log but continue — Drive file may already be gone; still remove DB row.
+        console.warn('[files] Drive delete failed, removing DB row anyway:', driveErr);
+      }
+    } else if (f.stored_path && !f.stored_path.startsWith('drive:')) {
+      const abs = path.join(UPLOADS_DIR, f.stored_path);
+      if (fs.existsSync(abs)) {
+        try { fs.unlinkSync(abs); } catch { /* already gone */ }
+      }
+    }
+
+    await query(`DELETE FROM uploaded_files WHERE id = $1`, [f.id]);
+    res.status(204).end();
+  } catch (err) {
+    console.error('[files] delete failed:', err);
+    res.status(500).json({ error: 'ファイルの削除に失敗しました' });
   }
 });
 

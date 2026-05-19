@@ -10,6 +10,8 @@ import CustomSelect from '../components/forms/CustomSelect';
 import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
 import CollapsibleComment from '../components/common/CollapsibleComment';
 import RingoLoader from '../components/common/RingoLoader';
+import { Sk } from '../components/common/Skeleton';
+import UserAvatar from '../components/common/UserAvatar';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -31,22 +33,6 @@ interface HistoryItem {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function UserAvatar({ name, avatarUrl, size = 8 }: { name: string; avatarUrl?: string | null; size?: number }) {
-  const colors = ['from-ringo-400 to-ringo-600', 'from-mustard-400 to-mustard-600', 'from-teal-500 to-teal-700', 'from-indigo-400 to-violet-600'];
-  let h = 0;
-  for (let i = 0; i < (name || '?').length; i++) h = (h * 31 + (name || '?').charCodeAt(i)) & 0xffff;
-  const grad = colors[h % colors.length];
-  if (avatarUrl) {
-    return <img src={avatarUrl} alt={name || '?'} className={`w-${size} h-${size} rounded-full object-cover ring-2 ring-white/60 shrink-0`} />;
-  }
-  return (
-    <div className={`w-${size} h-${size} rounded-full bg-gradient-to-br ${grad} flex items-center justify-center text-white font-bold shrink-0`}
-      style={{ fontSize: `${size * 0.4}px` }}>
-      {(name || '?').slice(0, 1)}
-    </div>
-  );
-}
 
 // ── Application Detail Types ───────────────────────────────────────────────────
 
@@ -492,10 +478,45 @@ export default function ApprovalHistory() {
           )}
 
           {isLoading ? (
-            <div className="space-y-3">
-              {[...Array(5)].map((_, i) => (
-                <div key={i} className="h-16 rounded-xl bg-white/40 animate-pulse" />
-              ))}
+            <div className="md:overflow-x-auto">
+              <table className="table-base table-responsive">
+                <thead>
+                  <tr>
+                    <th>{lang === 'en' ? 'Application' : '申請'}</th>
+                    <th>{lang === 'en' ? 'Applicant' : '申請者'}</th>
+                    <th>{lang === 'en' ? 'Step' : 'ステップ'}</th>
+                    <th>{lang === 'en' ? 'Stage' : 'ステージ'}</th>
+                    <th>{lang === 'en' ? 'Action' : 'アクション'}</th>
+                    <th>{lang === 'en' ? 'App Status' : '申請状態'}</th>
+                    <th>{lang === 'en' ? 'Date' : '日時'}</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...Array(9)].map((_, i) => (
+                    <tr key={i}>
+                      <td>
+                        <div className="space-y-1.5">
+                          <Sk.Line w={i % 3 === 0 ? 'w-32' : i % 3 === 1 ? 'w-28' : 'w-40'} h="h-3.5" />
+                          <Sk.Line w="w-20" h="h-2.5" />
+                        </div>
+                      </td>
+                      <td>
+                        <div className="space-y-1.5">
+                          <Sk.Line w={i % 2 === 0 ? 'w-24' : 'w-28'} h="h-3.5" />
+                          <Sk.Line w="w-16" h="h-2.5" />
+                        </div>
+                      </td>
+                      <td><Sk.Line w={i % 2 === 0 ? 'w-28' : 'w-24'} h="h-3" /></td>
+                      <td><Sk.Badge w="w-16" /></td>
+                      <td><Sk.Badge w={i % 2 === 0 ? 'w-16' : 'w-20'} /></td>
+                      <td><Sk.Badge w="w-20" /></td>
+                      <td><Sk.Line w="w-24" h="h-3" /></td>
+                      <td />
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           ) : items.length === 0 ? (
             <div className="py-16 text-center">

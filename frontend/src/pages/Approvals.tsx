@@ -8,8 +8,10 @@ import Toast, { useToast } from '../components/common/Toast';
 import { useLang } from '../context/LanguageContext';
 import { useAuth } from '../context/AuthContext';
 import RingoLoader from '../components/common/RingoLoader';
+import { Sk } from '../components/common/Skeleton';
 import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
 import CollapsibleComment from '../components/common/CollapsibleComment';
+import UserAvatar from '../components/common/UserAvatar';
 
 // File URLs are same-origin (vite proxy /api in dev, reverse proxy in prod)
 
@@ -44,22 +46,6 @@ interface Application {
   current_step_action?: string;
   current_approver_name?: string;
   current_approver_avatar?: string | null;
-}
-
-// ── Avatar ────────────────────────────────────────────────────────────────────
-function UserAvatar({ name, avatarUrl, size = 8 }: { name: string; avatarUrl?: string | null; size?: number }) {
-  const colors = ['from-ringo-400 to-ringo-600', 'from-mustard-400 to-mustard-600', 'from-teal-500 to-teal-700', 'from-indigo-400 to-violet-600'];
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffff;
-  const grad = colors[h % colors.length];
-  if (avatarUrl) {
-    return <img src={avatarUrl} alt={name} className={`w-${size} h-${size} rounded-full object-cover ring-2 ring-white/60 shrink-0`} />;
-  }
-  return (
-    <div className={`w-${size} h-${size} rounded-full bg-gradient-to-br ${grad} flex items-center justify-center text-white text-xs font-bold shrink-0 ring-2 ring-white/60`}>
-      {name.slice(0, 1)}
-    </div>
-  );
 }
 
 // ── Step progress bar ─────────────────────────────────────────────────────────
@@ -841,8 +827,40 @@ export default function Approvals() {
 
         {/* Loading */}
         {isLoading && (
-          <div className="card">
-            <RingoLoader.Block label={t('loading')} />
+          <div className="card !p-0 md:overflow-hidden">
+            <table className="table-base table-responsive">
+              <thead>
+                <tr>
+                  <th>{t('approvals_col_app')}</th>
+                  <th>{t('approvals_col_step')}</th>
+                  <th>{t('approvals_col_date')}</th>
+                  <th className="w-8" />
+                </tr>
+              </thead>
+              <tbody className="md:divide-y md:divide-white/30">
+                {[...Array(8)].map((_, i) => (
+                  <tr key={i}>
+                    <td>
+                      <div className="flex items-center gap-3">
+                        <Sk.Circle size="md" />
+                        <div className="space-y-1.5">
+                          <Sk.Line w={i % 2 === 0 ? 'w-36' : 'w-28'} h="h-3.5" />
+                          <Sk.Line w="w-20" h="h-2.5" />
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="space-y-1.5">
+                        <Sk.Line w="w-24" h="h-3" />
+                        <Sk.Line w="w-16" h="h-2.5" />
+                      </div>
+                    </td>
+                    <td><Sk.Line w="w-20" h="h-3" /></td>
+                    <td />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
 

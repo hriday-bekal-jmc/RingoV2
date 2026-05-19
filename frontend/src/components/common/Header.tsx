@@ -2,15 +2,10 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLang } from '../../context/LanguageContext';
 import { useSidebar } from '../../context/SidebarContext';
+import UserAvatar from './UserAvatar';
 
 interface HeaderProps { title: string }
 
-function nameToColor(name: string): string {
-  const colors = ['from-ringo-400 to-ringo-600', 'from-mustard-400 to-mustard-600', 'from-teal-500 to-teal-700', 'from-warmgray-500 to-warmgray-700'];
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffff;
-  return colors[h % colors.length];
-}
 
 export default function Header({ title }: HeaderProps) {
   const { user, logout } = useAuth();
@@ -18,7 +13,6 @@ export default function Header({ title }: HeaderProps) {
   const { openMobile } = useSidebar();
   const displayName = user?.full_name || 'Guest';
   const dept = user?.department_name || '';
-  const gradient = nameToColor(displayName);
 
   return (
     <header className="glass border-b border-white/40 px-4 md:px-6 py-0 flex items-center justify-between h-14 shrink-0 sticky top-0 z-30">
@@ -50,17 +44,13 @@ export default function Header({ title }: HeaderProps) {
 
         {/* Avatar → links to profile */}
         <Link to="/profile" className="flex items-center gap-2.5 hover:opacity-80 transition-opacity" title={t('nav_profile')}>
-          {user?.avatar_url ? (
-            <img
-              src={user.avatar_url}
-              alt={displayName}
-              className="w-8 h-8 rounded-full object-cover ring-2 ring-white/60 shrink-0"
-            />
-          ) : (
-            <div className={`w-8 h-8 rounded-full bg-gradient-to-br ${gradient} flex items-center justify-center text-white text-xs font-bold shadow-sm shrink-0`}>
-              {displayName.slice(0, 1)}
-            </div>
-          )}
+          <UserAvatar
+            name={displayName}
+            avatarUrl={user?.avatar_url}
+            size={8}
+            ring="ring-2 ring-white/60"
+            className="shadow-sm"
+          />
           <span className="hidden md:block text-sm font-medium text-warmgray-700">{displayName}</span>
         </Link>
 

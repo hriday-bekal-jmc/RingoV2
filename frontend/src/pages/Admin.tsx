@@ -10,6 +10,7 @@ import InlineConfirm from '../components/common/InlineConfirm';
 import AdminAppDetailModal from '../components/admin/AdminAppDetailModal';
 import FormsTab from '../components/admin/FormsTab';
 import RingoLoader from '../components/common/RingoLoader';
+import { Sk } from '../components/common/Skeleton';
 import Toast, { useToast } from '../components/common/Toast';
 import CustomSelect from '../components/forms/CustomSelect';
 import { useLang } from '../context/LanguageContext';
@@ -1207,7 +1208,39 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
       </div>
 
       {isLoading ? (
-        <RingoLoader.Block label="読み込み中..." />
+        <div className="card !p-0 md:overflow-hidden">
+          <table className="table-base table-responsive">
+            <thead>
+              <tr>
+                <th>{t('admin_col_app_number')}</th>
+                <th>{t('admin_field_template')}</th>
+                <th>{t('admin_step_approver')}</th>
+                <th>{t('admin_field_dept')}</th>
+                <th>{t('admin_col_status')}</th>
+                <th>{t('admin_col_submitted')}</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {[...Array(9)].map((_, i) => (
+                <tr key={i}>
+                  <td><Sk.Line w="w-20" h="h-2.5" /></td>
+                  <td><Sk.Line w={i % 2 === 0 ? 'w-36' : 'w-28'} h="h-3.5" /></td>
+                  <td>
+                    <div className="space-y-1.5">
+                      <Sk.Line w="w-28" h="h-3.5" />
+                      <Sk.Line w="w-36" h="h-2.5" />
+                    </div>
+                  </td>
+                  <td><Sk.Line w="w-16" h="h-3" /></td>
+                  <td><Sk.Badge w={i % 3 === 0 ? 'w-24' : 'w-20'} /></td>
+                  <td><Sk.Line w="w-20" h="h-3" /></td>
+                  <td />
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <div className={`card !p-0 md:overflow-hidden transition-opacity duration-200 ${isFetching && !isFetchingNextPage ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
           <table className="table-base table-responsive">

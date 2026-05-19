@@ -50,6 +50,10 @@ interface FormField {
     min?:       number;
     max?:       number;
     maxlength?: number;
+    /** Time fields: HH:mm earliest/latest allowed, step in minutes */
+    min_time?:  string;
+    max_time?:  string;
+    step?:      number;
   };
   conditional_on?: {
     field:  string;
@@ -134,6 +138,7 @@ const FIELD_TYPES = [
   { value: 'textarea', label_ja: 'テキスト（複数行）', label_en: 'Textarea' },
   { value: 'number',   label_ja: '数値',            label_en: 'Number' },
   { value: 'date',     label_ja: '日付',            label_en: 'Date' },
+  { value: 'time',     label_ja: '時刻',            label_en: 'Time' },
   { value: 'select',   label_ja: 'プルダウン',       label_en: 'Select' },
   { value: 'checkbox', label_ja: 'チェックボックス', label_en: 'Checkbox' },
   { value: 'file',     label_ja: 'ファイル',         label_en: 'File upload' },
@@ -897,6 +902,7 @@ function FieldEditor({
   const isSelect = field.type === 'select';
   const isText = ['text', 'textarea'].includes(field.type);
   const isNumber = field.type === 'number';
+  const isTime = field.type === 'time';
   const isRepeatGroup = field.type === 'repeat_group';
 
   const updateType = (type: string) => {
@@ -1101,7 +1107,7 @@ function FieldEditor({
             </div>
           )}
 
-          {(isText || isNumber || field.type === 'date') && (
+          {(isText || isNumber || field.type === 'date' || isTime) && (
             <input
               type="text"
               value={field.placeholder ?? ''}
@@ -1154,6 +1160,56 @@ function FieldEditor({
                 className="input text-xs"
                 placeholder="max"
               />
+            </div>
+          )}
+
+          {/* Time-specific: min/max boundary + minute step */}
+          {isTime && (
+            <div className="bg-sky-50/50 border border-sky-200/50 rounded-xl p-3 space-y-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-sky-700">
+                {lang === 'en' ? 'Time constraints (optional)' : '時刻制約（任意）'}
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <p className="text-[10px] text-warmgray-500 font-medium">
+                    {lang === 'en' ? 'Earliest (min)' : '最早時刻'}
+                  </p>
+                  <input
+                    type="time"
+                    value={field.validation?.min_time ?? ''}
+                    onChange={(e) => onUpdate({ validation: { ...field.validation, min_time: e.target.value || undefined } })}
+                    className="input-time text-xs w-full"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[10px] text-warmgray-500 font-medium">
+                    {lang === 'en' ? 'Latest (max)' : '最遅時刻'}
+                  </p>
+                  <input
+                    type="time"
+                    value={field.validation?.max_time ?? ''}
+                    onChange={(e) => onUpdate({ validation: { ...field.validation, max_time: e.target.value || undefined } })}
+                    className="input-time text-xs w-full"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[10px] text-warmgray-500 font-medium">
+                  {lang === 'en' ? 'Minute increment' : '分単位'}
+                </p>
+                <select
+                  value={field.validation?.step ?? 1}
+                  onChange={(e) => onUpdate({ validation: { ...field.validation, step: Number(e.target.value) } })}
+                  className="select text-xs"
+                >
+                  <option value={1}>{lang === 'en' ? 'Any (1 min)' : '任意（1分）'}</option>
+                  <option value={5}>5 {lang === 'en' ? 'min' : '分'}</option>
+                  <option value={10}>10 {lang === 'en' ? 'min' : '分'}</option>
+                  <option value={15}>15 {lang === 'en' ? 'min' : '分'}</option>
+                  <option value={30}>30 {lang === 'en' ? 'min' : '分'}</option>
+                  <option value={60}>{lang === 'en' ? '1 hour' : '1時間'}</option>
+                </select>
+              </div>
             </div>
           )}
 

@@ -47,7 +47,7 @@ router.get('/users', async (_req: Request, res: Response): Promise<void> => {
       SELECT u.id, u.full_name, u.email, u.role,
              (u.is_admin OR lower(u.email) = ANY($1::text[])) AS is_admin,
              u.is_active, u.department_id,
-             CASE WHEN u.avatar_url LIKE 'data:%' THEN NULL ELSE u.avatar_url END AS avatar_url,
+             u.avatar_url,
              d.name AS department_name
       FROM users u
       LEFT JOIN departments d ON u.department_id = d.id
@@ -286,7 +286,7 @@ router.get('/routes', async (_req: Request, res: Response): Promise<void> => {
     const steps = await query(`
       SELECT s.id, s.route_id, s.step_order, s.label, s.action_type,
              s.approver_id, u.full_name AS approver_name,
-             CASE WHEN u.avatar_url LIKE 'data:%' THEN NULL ELSE u.avatar_url END AS approver_avatar
+             u.avatar_url AS approver_avatar
       FROM approval_route_steps s
       LEFT JOIN users u ON s.approver_id = u.id
       ORDER BY s.route_id, s.step_order

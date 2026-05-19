@@ -6,6 +6,7 @@ import { useSidebar } from '../../context/SidebarContext';
 import { useLang } from '../../context/LanguageContext';
 import { usePermissions } from '../../hooks/usePermissions';
 import apiClient from '../../services/apiClient';
+import UserAvatar from './UserAvatar';
 
 // ── Icon map ──────────────────────────────────────────────────────────────────
 const ICONS: Record<string, JSX.Element> = {
@@ -91,8 +92,6 @@ export default function Sidebar() {
     refetchOnWindowFocus: false,
   });
   const pendingCount = pendingRes?.total ?? 0;
-
-  const initial = user?.full_name?.slice(0, 1) ?? '?';
 
   return (
     <>
@@ -215,13 +214,13 @@ export default function Sidebar() {
              ${isActive ? 'bg-white/15' : 'hover:bg-white/10'}`
           }
         >
-          {user?.avatar_url ? (
-            <img src={user.avatar_url} alt={user.full_name ?? ''} className="flex-shrink-0 w-7 h-7 rounded-full object-cover ring-2 ring-white/20" />
-          ) : (
-            <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-ringo-400 to-mustard-500 flex items-center justify-center text-[11px] font-bold text-white shadow-md">
-              {initial}
-            </div>
-          )}
+          <UserAvatar
+            name={user?.full_name ?? ''}
+            avatarUrl={user?.avatar_url}
+            size={7}
+            ring="ring-2 ring-white/20"
+            className="flex-shrink-0 shadow-md"
+          />
           {!collapsed && (
             <div className="min-w-0 flex-1">
               <div className="text-xs font-semibold text-white/90 truncate">{user?.full_name ?? '—'}</div>

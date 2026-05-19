@@ -12,6 +12,7 @@ import {
 } from '../middlewares/authMiddleware';
 import { authLimiter } from '../middlewares/rateLimit';
 import { env, SUPER_ADMIN_EMAILS } from '../config/env';
+import { downloadGoogleAvatar } from './avatarRoutes';
 import { getJsonCache, setJsonCache } from '../services/cache';
 
 const router = Router();
@@ -182,56 +183,7 @@ router.patch('/me', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-// POST /auth/me/avatar — set custom avatar (base64 data URL, max ~200KB)
-router.post('/me/avatar', async (req: Request, res: Response): Promise<void> => {
-  const token = req.cookies?.token as string | undefined;
-  if (!token) { res.status(401).json({ error: 'Not authenticated' }); return; }
-  const { avatar_url } = req.body as { avatar_url?: string };
-  if (!avatar_url) { res.status(400).json({ error: 'avatar_url is required' }); return; }
-  // Accept base64 data URLs or plain https URLs
-  const isDataUrl = avatar_url.startsWith('data:image/');
-  const isHttps = avatar_url.startsWith('https://');
-  if (!isDataUrl && !isHttps) { res.status(400).json({ error: 'Invalid avatar URL format' }); return; }
-  // Rough size guard: base64 of 300×300 JPEG ~= 30KB → 40000 chars is generous limit
-  if (avatar_url.length > 400_000) { res.status(413).json({ error: '画像サイズが大きすぎます（最大300KB）' }); return; }
-  try {
-    const { default: jwt } = await import('jsonwebtoken');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as { id: string };
-    await query(
-      `UPDATE users SET avatar_url = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
-      [avatar_url, decoded.id],
-    );
-    await invalidateUserStateCache(decoded.id);
-    res.json({ avatar_url });
-  } catch {
-    res.status(500).json({ error: 'アバターの更新に失敗しました' });
-  }
-});
-
-// DELETE /auth/me/avatar — remove custom avatar (resets to Google photo or null)
-router.delete('/me/avatar', async (req: Request, res: Response): Promise<void> => {
-  const token = req.cookies?.token as string | undefined;
-  if (!token) { res.status(401).json({ error: 'Not authenticated' }); return; }
-  try {
-    const { default: jwt } = await import('jsonwebtoken');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as { id: string };
-    // Try to find their Google picture by refreshing from google_oauth_sub
-    const userRes = await query(
-      `SELECT google_oauth_sub FROM users WHERE id = $1`,
-      [decoded.id],
-    );
-    const user = userRes.rows[0] as { google_oauth_sub: string | null } | undefined;
-    // Just clear it — next Google login will repopulate
-    await query(
-      `UPDATE users SET avatar_url = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-      [decoded.id],
-    );
-    await invalidateUserStateCache(decoded.id);
-    res.json({ avatar_url: null, has_google: !!(user?.google_oauth_sub) });
-  } catch {
-    res.status(500).json({ error: 'アバターの削除に失敗しました' });
-  }
-});
+// Avatar endpoints moved to /api/avatars/ (avatarRoutes.ts)
 
 // POST /auth/logout
 router.post('/logout', (_req: Request, res: Response): void => {
@@ -315,32 +267,58 @@ router.get('/google/callback', authLimiter, async (req: Request, res: Response):
     }
 
     let userRes = await query(
-      `SELECT id, full_name, email, role, is_admin, department_id, is_active, google_oauth_sub
+      `SELECT id, full_name, email, role, is_admin, department_id, is_active, google_oauth_sub, avatar_version
        FROM users WHERE google_oauth_sub = $1 LIMIT 1`,
       [google_sub],
     );
 
     if (userRes.rows.length === 0) {
       userRes = await query(
-        `SELECT id, full_name, email, role, is_admin, department_id, is_active, google_oauth_sub
+        `SELECT id, full_name, email, role, is_admin, department_id, is_active, google_oauth_sub, avatar_version
          FROM users WHERE lower(email) = $1 LIMIT 1`,
         [normalizedEmail],
       );
     }
 
     if (userRes.rows.length === 0) {
+      // New user — no avatar yet; will be downloaded below
       userRes = await query(
-        `INSERT INTO users (full_name, email, google_oauth_sub, avatar_url, role, is_active)
+        `INSERT INTO users (full_name, email, google_oauth_sub, google_picture_url, role, is_active)
          VALUES ($1, $2, $3, $4, 'EMPLOYEE', TRUE)
-         RETURNING id, full_name, email, role, is_admin, department_id, is_active`,
+         RETURNING id, full_name, email, role, is_admin, department_id, is_active, avatar_version`,
         [name, normalizedEmail, google_sub, picture ?? null],
       );
     } else {
-      // Always refresh avatar_url + link sub if needed
+      // Existing user — store latest Google picture URL but never overwrite a custom upload
       await query(
-        `UPDATE users SET google_oauth_sub = COALESCE(google_oauth_sub, $1), avatar_url = $2 WHERE id = $3`,
+        `UPDATE users
+         SET google_oauth_sub   = COALESCE(google_oauth_sub, $1),
+             google_picture_url = $2,
+             updated_at         = NOW()
+         WHERE id = $3`,
         [google_sub, picture ?? null, userRes.rows[0].id],
       );
+    }
+
+    // ── Download Google avatar to disk if user has no custom upload ────────────
+    // avatar_version = 0 → Google/default image; > 0 → custom upload (never overwrite)
+    const userId = (userRes.rows[0] as { id: string }).id;
+    const avatarVersion = Number((userRes.rows[0] as { avatar_version?: number }).avatar_version ?? 0);
+    if (picture && avatarVersion === 0) {
+      try {
+        await downloadGoogleAvatar(picture, userId);
+        // Update avatar_url to the local endpoint URL (overwrites only if version still 0)
+        await query(
+          `UPDATE users
+           SET avatar_url = $1, updated_at = NOW()
+           WHERE id = $2 AND avatar_version = 0`,
+          [`/api/avatars/${userId}?v=0`, userId],
+        );
+      } catch (dlErr) {
+        const msg = dlErr instanceof Error ? dlErr.message : String(dlErr);
+        console.warn(`[avatar] Google download failed for ${userId}: ${msg}`);
+        // Non-fatal — user will see gradient initials
+      }
     }
 
     const user = userRes.rows[0] as UserRow;

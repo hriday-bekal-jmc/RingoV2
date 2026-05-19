@@ -9,6 +9,7 @@ import {
 } from 'react-hook-form';
 import apiClient from '../../services/apiClient';
 import CalendarPicker from './CalendarPicker';
+import TimePicker from './TimePicker';
 import CustomSelect from './CustomSelect';
 import { useLang } from '../../context/LanguageContext';
 
@@ -33,6 +34,16 @@ interface FormField {
   sum_target?: string;
   col_span?: 'half' | 'full';
   options?: string[] | { value: string; label?: string; label_ja?: string; label_en?: string }[];
+  validation?: {
+    regex?: string;
+    min?: number;
+    max?: number;
+    maxlength?: number;
+    /** Time fields: earliest/latest HH:mm, step in minutes */
+    min_time?: string;
+    max_time?: string;
+    step?: number;
+  };
 }
 
 interface UploadedFile {
@@ -146,6 +157,9 @@ export default function StandardInput({
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Track IDs uploaded in this session — only these get DELETE-on-remove.
+  // Pre-existing files (from initialValue/watchedValue) are never auto-deleted.
+  const newUploadIds = useRef<Set<string>>(new Set());
 
   // ── Initialise uploaded-file list from existing value ──────────────────────
   // Priority: initialValue prop (explicit) → watch current form value → empty
@@ -196,6 +210,7 @@ export default function StandardInput({
         // Keep URL relative — same-origin in prod / vite proxy in dev means cookie auto-sent
         url: f.url,
       }));
+      newFiles.forEach((f) => newUploadIds.current.add(f.id));
       const updated = [...uploadedFiles, ...newFiles];
       setUploadedFiles(updated);
       setValue?.(field.name, updated.map((f) => f.url).join(','));
@@ -209,6 +224,11 @@ export default function StandardInput({
   };
 
   const removeFile = (id: string) => {
+    // Fire-and-forget DELETE for files uploaded this session (unlinked = safe to delete).
+    if (newUploadIds.current.has(id)) {
+      newUploadIds.current.delete(id);
+      apiClient.delete(`/files/${id}`).catch(() => {});
+    }
     const updated = uploadedFiles.filter((f) => f.id !== id);
     setUploadedFiles(updated);
     setValue?.(field.name, updated.map((f) => f.url).join(','));
@@ -288,6 +308,41 @@ export default function StandardInput({
               value={watched}
               onChange={(v) => setValue?.(field.name, v)}
               required={field.required}
+            />
+          </>
+        );
+      })()}
+
+      {field.type === 'time' && (() => {
+        const watched = watch ? String(watch(field.name) ?? '') : '';
+        return (
+          <>
+            <input
+              type="hidden"
+              {...register(field.name, {
+                required: requiredRule,
+                validate: (v) => {
+                  if (!v) return true;
+                  if (!/^\d{2}:\d{2}$/.test(String(v)))
+                    return lang === 'en' ? 'Invalid time format' : '時刻の形式が正しくありません';
+                  if (field.validation?.min_time && String(v) < field.validation.min_time)
+                    return lang === 'en'
+                      ? `Must be ${field.validation.min_time} or later`
+                      : `${field.validation.min_time} 以降を入力してください`;
+                  if (field.validation?.max_time && String(v) > field.validation.max_time)
+                    return lang === 'en'
+                      ? `Must be ${field.validation.max_time} or earlier`
+                      : `${field.validation.max_time} 以前を入力してください`;
+                  return true;
+                },
+              })}
+            />
+            <TimePicker
+              value={watched}
+              onChange={(v) => setValue?.(field.name, v)}
+              minTime={field.validation?.min_time}
+              maxTime={field.validation?.max_time}
+              step={field.validation?.step ?? 1}
             />
           </>
         );
@@ -655,6 +710,16 @@ function RepeatCell({
         />
       )}
 
+      {field.type === 'time' && (
+        <TimePicker
+          value={String(value ?? '')}
+          onChange={onChange}
+          minTime={field.validation?.min_time}
+          maxTime={field.validation?.max_time}
+          step={field.validation?.step ?? 1}
+        />
+      )}
+
       {field.type === 'select' && (
         <select value={String(value ?? '')} onChange={(e) => onChange(e.target.value)} className="input">
           <option value="">-</option>
@@ -742,6 +807,7 @@ function RepeatFileInput({
       .filter(Boolean)
       .map((url, i) => parseFileUrl(url.trim(), i)),
   );
+  const newUploadIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (files.length > 0 || !value) return;
@@ -762,6 +828,7 @@ function RepeatFileInput({
     try {
       const res = await apiClient.post('/uploads', formData);
       const uploaded = (res.data.files as UploadedFile[]).map((f) => ({ ...f, url: f.url }));
+      uploaded.forEach((f) => newUploadIds.current.add(f.id));
       const next = field.multiple ? [...files, ...uploaded] : uploaded.slice(-1);
       setFiles(next);
       onChange(next.map((f) => f.url).join(','));
@@ -775,6 +842,10 @@ function RepeatFileInput({
   };
 
   const removeFile = (id: string) => {
+    if (newUploadIds.current.has(id)) {
+      newUploadIds.current.delete(id);
+      apiClient.delete(`/files/${id}`).catch(() => {});
+    }
     const next = files.filter((f) => f.id !== id);
     setFiles(next);
     onChange(next.map((f) => f.url).join(','));

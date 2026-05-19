@@ -13,6 +13,8 @@ import { redis } from './config/redis';
 import { errorHandler } from './middlewares/errorHandler';
 
 
+import { scheduleOrphanCleanup } from './services/orphanCleanup';
+
 import authRoutes from './routes/authRoutes';
 import templateRoutes from './routes/templateRoutes';
 import applicationRoutes from './routes/applicationRoutes';
@@ -26,6 +28,7 @@ import fileRoutes from './routes/fileRoutes';
 import sseRoutes from './routes/sseRoutes';
 import accountingRoutes from './routes/accountingRoutes';
 import dashboardRoutes from './routes/dashboardRoutes';
+import avatarRoutes from './routes/avatarRoutes';
 
 const app: Application = express();
 const PORT = env.PORT;
@@ -97,6 +100,7 @@ app.use('/api/files',        fileRoutes);
 app.use('/api/events',       sseRoutes);
 app.use('/api/accounting',   accountingRoutes);
 app.use('/api/dashboard',    dashboardRoutes);
+app.use('/api/avatars',      avatarRoutes);
 
 app.use(errorHandler);
 
@@ -107,6 +111,8 @@ async function start(): Promise<void> {
     const message = err instanceof Error ? err.message : 'unknown';
     console.warn(`[ringo] PostgreSQL warmup failed: ${message}`);
   }
+
+  scheduleOrphanCleanup();
 
   app.listen(PORT, () => {
     console.log(`[ringo] backend listening on port ${PORT}`);

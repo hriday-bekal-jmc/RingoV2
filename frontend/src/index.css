@@ -135,6 +135,26 @@
     opacity: 0.8;
     background-color: rgba(199,91,71,0.08);
   }
+  /* Time input — same chrome as .input-date, 24h spinner styled to match brand */
+  .input-time {
+    @apply input;
+    color-scheme: light;
+  }
+  .input-time::-webkit-calendar-picker-indicator {
+    opacity: 0.4;
+    cursor: pointer;
+    border-radius: 4px;
+    padding: 2px;
+    transition: opacity 0.15s;
+  }
+  .input-time::-webkit-calendar-picker-indicator:hover {
+    opacity: 0.8;
+    background-color: rgba(199,91,71,0.08);
+  }
+  /* Ensure inner edit fields inherit brand text colour on Chrome */
+  .input-time::-webkit-datetime-edit-fields-wrapper { color: #3d2f23; }
+  .input-time::-webkit-datetime-edit-hour-field:focus,
+  .input-time::-webkit-datetime-edit-minute-field:focus { background-color: rgba(199,91,71,0.12); border-radius: 3px; }
   .label {
     @apply block text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1.5 break-words;
     overflow-wrap: anywhere;
@@ -283,9 +303,15 @@
   100% { background-position: 200% 0; }
 }
 
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(100%); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 .animate-fade-up   { animation: fadeInUp 0.35s ease-out both; }
 .animate-scale-in  { animation: scaleIn  0.25s ease-out both; }
 .animate-fade-in   { animation: fadeIn   0.18s ease-out both; }
+.animate-slide-up  { animation: slideUp  0.28s cubic-bezier(0.32,0.72,0,1) both; }
 
 /* ── Thin scrollbar for glass dropdowns ── */
 .dropdown-scroll::-webkit-scrollbar        { width: 4px; }

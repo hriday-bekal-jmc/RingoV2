@@ -59,7 +59,7 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
          a.id, a.application_number, a.status, a.created_at,
          t.title_ja AS template_name,
          u.full_name AS applicant_name,
-         CASE WHEN u.avatar_url LIKE 'data:%' THEN NULL ELSE u.avatar_url END AS applicant_avatar,
+         u.avatar_url AS applicant_avatar,
          COALESCE(d.name, '—') AS department_name,
          s.id AS current_step_id,
          (SELECT COUNT(*) FROM approval_steps
@@ -70,7 +70,7 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
          s.label AS current_step_label,
          s.action_type AS current_step_action,
          approver.full_name AS current_approver_name,
-         CASE WHEN approver.avatar_url LIKE 'data:%' THEN NULL ELSE approver.avatar_url END AS current_approver_avatar,
+         approver.avatar_url AS current_approver_avatar,
          (SELECT COUNT(*) FROM approval_steps
           WHERE application_id = a.id AND stage = s.stage
             AND step_order / 100 = s.step_order / 100)::int AS total_steps,
@@ -475,7 +475,7 @@ router.get('/history', async (req: Request, res: Response): Promise<void> => {
         s.comment,
         s.acted_at,
         u_app.full_name AS applicant_name,
-        CASE WHEN u_app.avatar_url LIKE 'data:%' THEN NULL ELSE u_app.avatar_url END AS applicant_avatar,
+        u_app.avatar_url AS applicant_avatar,
         a.status AS app_status
       FROM approval_steps s
       JOIN applications a ON s.application_id = a.id
