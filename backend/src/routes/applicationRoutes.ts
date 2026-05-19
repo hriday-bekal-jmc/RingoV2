@@ -45,6 +45,27 @@ async function nextApplicationNumber(client: pg.PoolClient, appId: string): Prom
   return `${prefix}-${year}-${String(seq).padStart(digits, '0')}`;
 }
 
+// Assign application_number on DRAFT exit if not already set.
+// Caller must hold a row lock (FOR UPDATE) on the application row to prevent
+// concurrent assignment races. Returns the resulting number (existing or new).
+async function ensureApplicationNumber(client: pg.PoolClient, appId: string): Promise<string> {
+  const existing = await client.query(
+    `SELECT application_number FROM applications WHERE id = $1`,
+    [appId],
+  );
+  const current = existing.rows[0]?.application_number as string | null | undefined;
+  if (current) return current;
+
+  const appNumber = await nextApplicationNumber(client, appId);
+  await client.query(
+    `UPDATE applications
+     SET application_number = $1, updated_at = CURRENT_TIMESTAMP
+     WHERE id = $2 AND application_number IS NULL`,
+    [appNumber, appId],
+  );
+  return appNumber;
+}
+
 async function finalizeStageWithoutApprovalSteps(
   client: pg.PoolClient,
   appId: string,
@@ -344,6 +365,9 @@ router.post('/:id/resubmit', async (req: Request, res: Response): Promise<void> 
         );
       }
 
+      // Backward compat: assign number if not already set (older apps lacked one until approval)
+      const assignedNumber = await ensureApplicationNumber(client, String(req.params.id));
+
       let finalApp: { id: string; status: string; application_number: string | null } | null = null;
       if (resolvedSteps.length > 0) {
         await insertApprovalSteps(client, String(req.params.id), 'RINGI', resolvedSteps, offset);
@@ -377,7 +401,7 @@ router.post('/:id/resubmit', async (req: Request, res: Response): Promise<void> 
       return {
         id: req.params.id,
         status: finalApp?.status ?? 'PENDING_APPROVAL',
-        application_number: finalApp?.application_number ?? null,
+        application_number: finalApp?.application_number ?? assignedNumber,
         round_offset: offset,
         total_steps: resolvedSteps.length,
         skipped_steps: routePolicy.skipped_steps,
@@ -446,6 +470,9 @@ router.post('/:id/submit', async (req: Request, res: Response): Promise<void> =>
         [req.params.id, route_id],
       );
 
+      // Assign application_number at submit time — row already locked above
+      const assignedNumber = await ensureApplicationNumber(client, String(req.params.id));
+
       let finalApp: { id: string; status: string; application_number: string | null } | null = null;
       if (resolvedSubmitSteps.length > 0) {
         await insertApprovalSteps(client, String(req.params.id), 'RINGI', resolvedSubmitSteps);
@@ -478,7 +505,7 @@ router.post('/:id/submit', async (req: Request, res: Response): Promise<void> =>
       return {
         id: req.params.id,
         status: finalApp?.status ?? 'PENDING_APPROVAL',
-        application_number: finalApp?.application_number ?? null,
+        application_number: finalApp?.application_number ?? assignedNumber,
         total_steps: resolvedSubmitSteps.length,
         skipped_steps: submitRoutePolicy.skipped_steps,
         _recipients: recipients,
@@ -916,6 +943,10 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         [applicant_id, template_id, versionId, route_id, JSON.stringify(normalizedFormData)],
       );
       let app = appRes.rows[0] as { id: string; status: string; application_number?: string | null };
+
+      // Assign application_number immediately on submit (not on final approval)
+      const assignedNumber = await ensureApplicationNumber(client, app.id);
+      app.application_number = assignedNumber;
 
       if (ringiResolvedSteps.length > 0) {
         await insertApprovalSteps(client, app.id, 'RINGI', ringiResolvedSteps);

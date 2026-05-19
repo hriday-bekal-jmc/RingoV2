@@ -102,6 +102,7 @@ router.post('/form-templates', async (req: Request, res: Response): Promise<void
     code, title, title_ja, pattern_id,
     icon, gradient, description_ja, description_en,
     schema_definition, settlement_schema, notes,
+    app_number_prefix, app_number_digits,
   } = req.body as {
     code: string;
     title: string;
@@ -114,7 +115,12 @@ router.post('/form-templates', async (req: Request, res: Response): Promise<void
     schema_definition: unknown;
     settlement_schema?: unknown;
     notes?: string;
+    app_number_prefix?: string;
+    app_number_digits?: number;
   };
+
+  const cleanPrefix = (app_number_prefix ?? 'RNG').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10) || 'RNG';
+  const cleanDigits = Math.max(4, Math.min(10, Number(app_number_digits ?? 6)));
 
   if (!code || !title_ja || !pattern_id || !schema_definition) {
     res.status(400).json({ error: 'code / title_ja / pattern_id / schema_definition は必須です' });
@@ -127,15 +133,16 @@ router.post('/form-templates', async (req: Request, res: Response): Promise<void
       const t = await client.query(
         `INSERT INTO form_templates
            (code, title, title_ja, pattern_id, icon, gradient, description_ja, description_en,
-            schema_definition, settlement_schema, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE)
-         RETURNING id, code, title_ja`,
+            schema_definition, settlement_schema, is_active, app_number_prefix, app_number_digits)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE, $11, $12)
+         RETURNING id, code, title_ja, app_number_prefix, app_number_digits`,
         [
           code, title ?? title_ja, title_ja, pattern_id,
           icon ?? '📋', gradient ?? 'from-slate-400 to-slate-500',
           description_ja ?? null, description_en ?? null,
           JSON.stringify(schema_definition),
           settlement_schema ? JSON.stringify(settlement_schema) : null,
+          cleanPrefix, cleanDigits,
         ],
       );
       const templateId = t.rows[0].id;

@@ -199,10 +199,27 @@ router.post('/:id/approve', async (req: Request, res: Response): Promise<void> =
         );
         updatedApp = { ...appRes.rows[0], advanced_to_step: nextStep.step_order };
       } else {
-        // Final step for this stage
-        const seqRow = await client.query(`SELECT nextval('application_number_seq') AS n`);
+        // Final step for this stage — assign app number using per-template per-year sequence
         const year = new Date().getFullYear();
-        const appNumber = `RNG-${year}-${String(seqRow.rows[0].n).padStart(6, '0')}`;
+        const tmplRes = await client.query(
+          `SELECT ft.app_number_prefix, ft.app_number_digits
+           FROM applications a
+           JOIN form_templates ft ON ft.id = a.template_id
+           WHERE a.id = $1`,
+          [id],
+        );
+        const prefix: string = tmplRes.rows[0]?.app_number_prefix ?? 'RNG';
+        const digits: number = tmplRes.rows[0]?.app_number_digits  ?? 6;
+        const seqRes = await client.query(
+          `INSERT INTO application_number_sequences (template_id, year, last_seq)
+           SELECT a.template_id, $2, 1
+           FROM applications a WHERE a.id = $1
+           ON CONFLICT (template_id, year) DO UPDATE
+             SET last_seq = application_number_sequences.last_seq + 1
+           RETURNING last_seq`,
+          [id, year],
+        );
+        const appNumber = `${prefix}-${year}-${String(seqRes.rows[0].last_seq).padStart(digits, '0')}`;
 
         // RINGI final → APPROVED
         // SETTLEMENT final → SETTLEMENT_APPROVED (accounting must close with date+proof separately)

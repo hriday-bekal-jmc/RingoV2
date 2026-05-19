@@ -15,6 +15,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../../services/apiClient';
 import { useLang } from '../../context/LanguageContext';
 import ConfirmDialog from '../common/ConfirmDialog';
+import InlineConfirm from '../common/InlineConfirm';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 interface FieldOption {
@@ -161,7 +162,7 @@ export default function FormsTab({ showToast }: { showToast: (m: string, t?: 'su
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating]   = useState(false);
-  const [confirmHardDelete, setConfirmHardDelete] = useState<TemplateListItem | null>(null);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
 
   const { data: templates, isLoading } = useQuery<TemplateListItem[]>({
     queryKey: ['form-templates'],
@@ -257,14 +258,21 @@ export default function FormsTab({ showToast }: { showToast: (m: string, t?: 'su
                 </button>
                 {/* Hard delete only when zero apps reference this template */}
                 {t.application_count === 0 && (
-                  <button
-                    onClick={() => setConfirmHardDelete(t)}
+                  <InlineConfirm
+                    isActive={confirmingDeleteId === t.id}
+                    onTrigger={() => setConfirmingDeleteId(t.id)}
+                    onConfirm={() => {
+                      hardDelete.mutate(t.id);
+                      setConfirmingDeleteId(null);
+                    }}
+                    onCancel={() => setConfirmingDeleteId(null)}
+                    message={lang === 'en' ? 'Delete form?' : '削除しますか？'}
+                    triggerLabel="✕"
+                    confirmLabel={lang === 'en' ? 'Delete' : '削除する'}
+                    triggerClass="text-xs px-2.5 py-1.5 rounded-lg font-semibold border border-red-200/60 text-red-600 hover:bg-red-50 transition-colors"
                     disabled={hardDelete.isPending}
-                    className="text-xs px-2.5 py-1.5 rounded-lg font-semibold border border-red-200/60 text-red-600 hover:bg-red-50 transition-colors"
-                    title={lang === 'en' ? 'Permanently delete (no apps reference this)' : '完全削除（申請なし）'}
-                  >
-                    ✕
-                  </button>
+                    reservedWidth={confirmingDeleteId === t.id ? 220 : 36}
+                  />
                 )}
               </div>
             </div>
@@ -287,21 +295,6 @@ export default function FormsTab({ showToast }: { showToast: (m: string, t?: 'su
         />
       )}
 
-      <ConfirmDialog
-        isOpen={confirmHardDelete !== null}
-        title={lang === 'en' ? 'Permanently delete form?' : 'フォームを完全に削除しますか？'}
-        message={lang === 'en'
-          ? `"${confirmHardDelete?.title_ja}" will be permanently deleted. This cannot be undone.`
-          : `「${confirmHardDelete?.title_ja}」を完全に削除します。この操作は元に戻せません。`}
-        confirmLabel={lang === 'en' ? 'Delete permanently' : '完全に削除する'}
-        confirmClass="btn-danger"
-        cancelLabel={lang === 'en' ? 'Cancel' : 'キャンセル'}
-        onConfirm={() => {
-          if (confirmHardDelete) hardDelete.mutate(confirmHardDelete.id);
-          setConfirmHardDelete(null);
-        }}
-        onCancel={() => setConfirmHardDelete(null)}
-      />
     </div>
   );
 }
@@ -573,7 +566,9 @@ function FormBuilder({
         || icon !== (detail?.template.icon ?? '📋')
         || gradient !== (detail?.template.gradient ?? 'from-slate-400 to-slate-500')
         || descJa !== (detail?.template.description_ja ?? '')
-        || descEn !== (detail?.template.description_en ?? '');
+        || descEn !== (detail?.template.description_en ?? '')
+        || appNumberPrefix !== (detail?.template.app_number_prefix ?? 'RNG')
+        || appNumberDigits !== (detail?.template.app_number_digits ?? 6);
       const deptsChanged = JSON.stringify([...allowedDepts].sort())
         !== JSON.stringify([...(detail?.allowed_dept_ids ?? [])].sort());
       if (metaChanged)  saveMeta.mutate();
