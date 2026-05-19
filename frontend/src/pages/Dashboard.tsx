@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import Layout from '../components/common/Layout';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
-import { getPermissions } from '../config/permissions';
+import { usePermissions } from '../hooks/usePermissions';
 import { TEMPLATE_LABELS, templateLabel } from '../config/templateLabels';
 import apiClient from '../services/apiClient';
 
@@ -80,7 +80,7 @@ export default function Dashboard() {
   const { user, loading, isAdmin } = useAuth();
   const { t, lang } = useLang();
   const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
-  const perms = getPermissions(user?.role, user?.is_admin);
+  const perms = usePermissions(user?.role, user?.is_admin);
   const [adminView, setAdminView] = useState(false);
 
   // ── Personal summary ───────────────────────────────────────────────────────

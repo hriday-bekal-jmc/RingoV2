@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import Layout from '../components/common/Layout';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
-import { getPermissions } from '../config/permissions';
+import { usePermissions } from '../hooks/usePermissions';
 import apiClient from '../services/apiClient';
 import type { Lang } from '../i18n';
 
@@ -17,7 +17,7 @@ function nameToColor(name: string): string {
 export default function Profile() {
   const { user, setUser } = useAuth();
   const { lang, setLang, t } = useLang();
-  const perms = getPermissions(user?.role, user?.is_admin);
+  const perms = usePermissions(user?.role, user?.is_admin);
 
   const [name, setName] = useState(user?.full_name ?? '');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');

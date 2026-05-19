@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import argon2 from 'argon2';
-import { query, withTransaction } from '../config/db';
+import { query, withTransaction, pool } from '../config/db';
 import { requireAuth, requireAdmin, invalidateUserStateCache } from '../middlewares/authMiddleware';
 import { mutationLimiter } from '../middlewares/rateLimit';
 import { insertOutboxEvent } from '../services/eventOutbox';
@@ -8,6 +8,7 @@ import { computeApplicationRecipients } from '../services/eventRecipients';
 import { redis } from '../config/redis';
 import { SUPER_ADMIN_EMAILS } from '../config/env';
 import { getJsonCache, setJsonCache } from '../services/cache';
+import { invalidateRolePermissionsCache } from '../services/rolePermissionsCache';
 import {
   ADMIN_REF_CACHE_TTL_SEC,
   adminRefCacheKey,
@@ -756,6 +757,136 @@ router.delete('/applications/:id', async (req: Request, res: Response): Promise<
     if (e.status) { res.status(e.status).json({ error: e.message }); return; }
     console.error('[admin] application delete failed:', err);
     res.status(500).json({ error: '申請の削除に失敗しました' });
+  }
+});
+
+// ─── Role Permissions ─────────────────────────────────────────────────────────
+
+const KNOWN_ROLES = new Set(['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ACCOUNTING', 'ADMIN']);
+
+interface RolePermRowAdmin {
+  role: string;
+  can_submit: boolean;
+  can_approve: boolean;
+  can_settle: boolean;
+  can_admin: boolean;
+  nav_pages: string[];
+  updated_at: Date;
+}
+
+// GET /admin/role-permissions — returns all role permission rows as dict
+router.get('/role-permissions', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await pool.query<RolePermRowAdmin>('SELECT * FROM role_permissions ORDER BY role');
+    const data: Record<string, {
+      canSubmit: boolean;
+      canApprove: boolean;
+      canSettle: boolean;
+      canAdmin: boolean;
+      navPages: string[];
+    }> = {};
+
+    for (const row of result.rows) {
+      data[row.role] = {
+        canSubmit:  row.can_submit,
+        canApprove: row.can_approve,
+        canSettle:  row.can_settle,
+        canAdmin:   row.can_admin,
+        navPages:   row.nav_pages,
+      };
+    }
+
+    res.json(data);
+  } catch (err) {
+    console.error('[admin] role-permissions fetch failed:', err);
+    res.status(500).json({ error: '権限情報の取得に失敗しました' });
+  }
+});
+
+// PATCH /admin/role-permissions/:role — update one role's permissions
+router.patch('/role-permissions/:role', async (req: Request, res: Response): Promise<void> => {
+  const role = String(req.params.role);
+
+  if (!KNOWN_ROLES.has(role)) {
+    res.status(400).json({ error: '無効なロールです' });
+    return;
+  }
+  if (role === 'ADMIN') {
+    res.status(403).json({ error: 'システム管理者の権限は変更できません' });
+    return;
+  }
+
+  const { canSubmit, canApprove, canSettle, canAdmin, navPages } = req.body as {
+    canSubmit?: boolean;
+    canApprove?: boolean;
+    canSettle?: boolean;
+    canAdmin?: boolean;
+    navPages?: string[];
+  };
+
+  try {
+    // Fetch current row first
+    const current = await pool.query<RolePermRowAdmin>(
+      'SELECT * FROM role_permissions WHERE role = $1',
+      [role],
+    );
+    if (current.rows.length === 0) {
+      res.status(404).json({ error: 'ロールが見つかりません' });
+      return;
+    }
+    const cur = current.rows[0];
+
+    const newCanSubmit  = canSubmit  ?? cur.can_submit;
+    const newCanApprove = canApprove ?? cur.can_approve;
+    const newCanSettle  = canSettle  ?? cur.can_settle;
+    const newCanAdmin   = canAdmin   ?? cur.can_admin;
+    const newNavPages   = navPages   ?? cur.nav_pages;
+
+    // Get all active user IDs for SSE broadcast
+    const { rows: allUsers } = await pool.query<{ id: string }>(
+      'SELECT id FROM users WHERE is_active = TRUE',
+    );
+    const recipientIds = allUsers.map((u) => u.id);
+
+    const updated = await withTransaction(async (client: pg.PoolClient) => {
+      const updateRes = await client.query<RolePermRowAdmin>(
+        `UPDATE role_permissions
+         SET can_submit  = $1,
+             can_approve = $2,
+             can_settle  = $3,
+             can_admin   = $4,
+             nav_pages   = $5,
+             updated_at  = NOW()
+         WHERE role = $6
+         RETURNING *`,
+        [newCanSubmit, newCanApprove, newCanSettle, newCanAdmin, newNavPages, role],
+      );
+
+      await insertOutboxEvent(client, {
+        event_type:         'PERMISSIONS_UPDATED',
+        entity_type:        'role_permission',
+        entity_id:          null,
+        recipient_user_ids: recipientIds,
+        payload:            { role },
+      });
+
+      return updateRes.rows[0];
+    });
+
+    // Bust backend Redis cache so requireAccounting picks up new can_settle immediately
+    invalidateRolePermissionsCache();
+
+    res.json({
+      role:       updated.role,
+      canSubmit:  updated.can_submit,
+      canApprove: updated.can_approve,
+      canSettle:  updated.can_settle,
+      canAdmin:   updated.can_admin,
+      navPages:   updated.nav_pages,
+    });
+  } catch (err) {
+    console.error('[admin] role-permissions update failed:', err);
+    res.status(500).json({ error: '権限の更新に失敗しました' });
   }
 });
 

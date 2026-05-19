@@ -1,7 +1,8 @@
 import { ReactNode, lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
-import { getPermissions } from './config/permissions';
+import { usePermissions } from './hooks/usePermissions';
+import type { RolePermissions } from './config/permissions';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import RingoLoader from './components/common/RingoLoader';
 
@@ -39,11 +40,11 @@ function RequirePermission({
   check,
   children,
 }: {
-  check: (perms: ReturnType<typeof getPermissions>) => boolean;
+  check: (perms: RolePermissions) => boolean;
   children: ReactNode;
 }) {
   const { role, isAdmin } = useAuth();
-  const perms = getPermissions(role, isAdmin);
+  const perms = usePermissions(role, isAdmin);
   if (!check(perms)) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }

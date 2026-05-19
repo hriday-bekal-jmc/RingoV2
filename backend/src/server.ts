@@ -20,6 +20,7 @@ import approvalRoutes from './routes/approvalRoutes';
 import settlementRoutes from './routes/settlementRoutes';
 import adminRoutes from './routes/adminRoutes';
 import formTemplateRoutes from './routes/formTemplateRoutes';
+import permissionsRoutes from './routes/permissionsRoutes';
 import uploadRoutes from './routes/uploadRoutes';
 import fileRoutes from './routes/fileRoutes';
 import sseRoutes from './routes/sseRoutes';
@@ -90,6 +91,7 @@ app.use('/api/approvals',    approvalRoutes);
 app.use('/api/settlements',  settlementRoutes);
 app.use('/api/admin',        adminRoutes);
 app.use('/api/admin',        formTemplateRoutes);    // form-templates CRUD + versioning
+app.use('/api',              permissionsRoutes);     // GET /api/permissions
 app.use('/api/uploads',      uploadRoutes);
 app.use('/api/files',        fileRoutes);
 app.use('/api/events',       sseRoutes);

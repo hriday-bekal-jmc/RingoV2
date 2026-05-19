@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { query, withTransaction } from '../config/db';
 import { isAdminUser, requireAuth } from '../middlewares/authMiddleware';
+import { canRoleSettle } from '../services/rolePermissionsCache';
 import { insertOutboxEvent } from '../services/eventOutbox';
 import { computeApplicationRecipients } from '../services/eventRecipients';
 import { addCsvExportJob, getCsvExportMeta } from '../services/csvExportQueue';
@@ -13,14 +14,23 @@ import multer from 'multer';
 const router = Router();
 router.use(requireAuth);
 
-// Only ACCOUNTING, SOUMU, ADMIN can access
-function requireAccounting(req: Request, res: Response, next: NextFunction): void {
-  const role = req.user?.role ?? '';
-  if (!isAdminUser(req.user) && !['ACCOUNTING', 'SOUMU'].includes(role)) {
-    res.status(403).json({ error: 'この機能は経理・総務・管理者のみ利用できます' });
-    return;
+// Dynamic settle guard — reads can_settle from role_permissions table (Redis-cached, 60s TTL).
+// Admin flag (is_admin) always passes. No hardcoded role list.
+async function requireAccounting(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const role    = req.user?.role    ?? '';
+  const isAdmin = isAdminUser(req.user);
+  try {
+    const allowed = await canRoleSettle(role, isAdmin);
+    if (!allowed) {
+      res.status(403).json({ error: 'この機能は精算管理権限を持つユーザーのみ利用できます' });
+      return;
+    }
+    next();
+  } catch (err) {
+    // DB/Redis failure — fall back to admin-only to avoid silently opening access
+    if (isAdmin) { next(); return; }
+    res.status(403).json({ error: 'この機能は精算管理権限を持つユーザーのみ利用できます' });
   }
-  next();
 }
 router.use(requireAccounting);
 

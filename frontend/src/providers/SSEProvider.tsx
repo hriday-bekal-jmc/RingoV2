@@ -99,6 +99,10 @@ function keysForCsvReady(_d: CsvPayload): KeyList {
   return [['csv-export-status']];
 }
 
+function keysForPermissionsUpdated(): KeyList {
+  return [['permissions'], ['dashboard', 'summary']];
+}
+
 // ─── Batched invalidation ────────────────────────────────────────────────────
 //
 // Coalesce all invalidation requests in a 50ms window so a burst of events
@@ -171,12 +175,16 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
       const data = JSON.parse(e.data ?? '{}') as CsvPayload;
       debounced.enqueue(keysForCsvReady(data));
     };
+    const onPermissionsUpdated = (): void => {
+      debounced.enqueue(keysForPermissionsUpdated());
+    };
 
     es.addEventListener('APPROVAL_ACTION',       onApprovalAction);
     es.addEventListener('APPLICATION_SUBMITTED', onAppSubmitted);
     es.addEventListener('APPLICATION_CHANGED',   onAppChanged);
     es.addEventListener('SETTLEMENT_ACTION',     onSettlementAction);
     es.addEventListener('CSV_EXPORT_READY',      onCsvReady);
+    es.addEventListener('PERMISSIONS_UPDATED',   onPermissionsUpdated);
 
     // ── Admin changed THIS user's profile (role / dept / active / password) ─
     // Backend emits via outbox → emitToUsers([userId], 'user-state-changed').
@@ -203,6 +211,7 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
     return () => {
       debounced.flush();
       window.removeEventListener('pagehide', onPageHide);
+      es.removeEventListener('PERMISSIONS_UPDATED', onPermissionsUpdated);
       es.close();
       esRef.current = null;
     };

@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
 import { useSidebar } from '../../context/SidebarContext';
 import { useLang } from '../../context/LanguageContext';
-import { getPermissions } from '../../config/permissions';
+import { usePermissions } from '../../hooks/usePermissions';
 import apiClient from '../../services/apiClient';
 
 // ── Icon map ──────────────────────────────────────────────────────────────────
@@ -68,7 +68,7 @@ export default function Sidebar() {
   const { t } = useLang();
   const navigate = useNavigate();
   const location = useLocation();
-  const perms = getPermissions(user?.role, user?.is_admin);
+  const perms = usePermissions(user?.role, user?.is_admin);
 
   // Auto-close mobile drawer when route changes
   useEffect(() => { closeMobile(); }, [location.pathname, closeMobile]);
@@ -226,7 +226,7 @@ export default function Sidebar() {
             <div className="min-w-0 flex-1">
               <div className="text-xs font-semibold text-white/90 truncate">{user?.full_name ?? '—'}</div>
               <div className="text-[10px] text-white/40">
-                {getPermissions(user?.role, user?.is_admin).label}
+                {perms.label}
                 {user?.is_admin ? ' / Admin' : ''}
               </div>
             </div>

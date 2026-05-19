@@ -1356,15 +1356,92 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
 
 // ─── Role Permissions Tab ─────────────────────────────────────────────────────
 
-function PermissionsTab() {
-  const { t, lang } = useLang();
+interface PermRowDraft {
+  canSubmit: boolean;
+  canApprove: boolean;
+  canSettle: boolean;
+  canAdmin: boolean;
+  navPages: string[];
+}
 
-  const check = (v: boolean) =>
-    v ? (
-      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 text-xs font-bold">✓</span>
-    ) : (
-      <span className="text-surface-300 text-lg font-light">—</span>
+const NAV_ROUTE_LABELS: Record<string, string> = {
+  '/dashboard':        'ダッシュ',
+  '/approvals':        '承認待ち',
+  '/approval-history': '承認履歴',
+  '/accounting':       '精算管理',
+  '/history':          '申請履歴',
+  '/admin':            '管理画面',
+};
+
+const ALL_NAV_ROUTES = [
+  '/dashboard',
+  '/approvals',
+  '/approval-history',
+  '/accounting',
+  '/history',
+  '/admin',
+];
+
+function PermissionsTab({ showToast }: { showToast: (msg: string, type?: 'success' | 'error' | 'info') => void }) {
+  const { t, lang } = useLang();
+  const queryClient = useQueryClient();
+
+  const { data: dbPerms, isLoading } = useQuery<Record<string, PermRowDraft>>({
+    queryKey: ['admin-role-permissions'],
+    queryFn: async () => (await apiClient.get('/admin/role-permissions')).data,
+    staleTime: 0,
+  });
+
+  const [draft, setDraft] = useState<Record<string, PermRowDraft>>({});
+  const [dirty, setDirty] = useState<Record<string, boolean>>({});
+
+  // Sync draft when DB data loads
+  useEffect(() => {
+    if (dbPerms) {
+      setDraft(dbPerms);
+      setDirty({});
+    }
+  }, [dbPerms]);
+
+  const saveMutation = useMutation({
+    mutationFn: (payload: { role: string; data: PermRowDraft }) =>
+      apiClient.patch(`/admin/role-permissions/${payload.role}`, payload.data),
+    onSuccess: (_, payload) => {
+      queryClient.invalidateQueries({ queryKey: ['permissions'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-role-permissions'] });
+      setDirty((d) => { const n = { ...d }; delete n[payload.role]; return n; });
+      showToast('保存しました', 'success');
+    },
+    onError: () => showToast('保存に失敗しました', 'error'),
+  });
+
+  const toggleBool = (role: string, field: keyof Omit<PermRowDraft, 'navPages'>, value: boolean) => {
+    setDraft((prev) => ({ ...prev, [role]: { ...prev[role], [field]: value } }));
+    setDirty((prev) => ({ ...prev, [role]: true }));
+  };
+
+  const toggleNav = (role: string, route: string, checked: boolean) => {
+    setDraft((prev) => {
+      const cur = prev[role];
+      const pages = checked
+        ? [...cur.navPages, route]
+        : cur.navPages.filter((p) => p !== route);
+      // Keep canonical order
+      const ordered = ALL_NAV_ROUTES.filter((r) => pages.includes(r));
+      return { ...prev, [role]: { ...cur, navPages: ordered } };
+    });
+    setDirty((prev) => ({ ...prev, [role]: true }));
+  };
+
+  const PERM_ROLES = Object.keys(ROLE_MAP) as Role[];
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="w-6 h-6 border-2 border-ringo-400 border-t-transparent rounded-full animate-spin" />
+      </div>
     );
+  }
 
   return (
     <div className="space-y-6">
@@ -1375,61 +1452,105 @@ function PermissionsTab() {
       </div>
 
       {/* Permissions table */}
-      <div className="card !p-0 md:overflow-hidden">
-        <table className="table-base table-responsive">
+      <div className="card !p-0 overflow-x-auto">
+        <table className="table-base w-full text-sm">
           <thead>
             <tr>
-              <th>{t('admin_perms_col_role')}</th>
-              <th>{t('admin_perms_col_display')}</th>
-              <th className="text-center">{t('admin_perms_col_submit')}</th>
-              <th className="text-center">{t('admin_perms_col_approve')}</th>
-              <th className="text-center">{t('admin_perms_col_settle')}</th>
-              <th className="text-center">{t('admin_perms_col_admin')}</th>
-              <th>{t('admin_perms_col_pages')}</th>
+              <th className="whitespace-nowrap">{t('admin_perms_col_role')}</th>
+              <th className="whitespace-nowrap text-center">{t('admin_perms_col_submit')}</th>
+              <th className="whitespace-nowrap text-center">{t('admin_perms_col_approve')}</th>
+              <th className="whitespace-nowrap text-center">{t('admin_perms_col_settle')}</th>
+              <th className="whitespace-nowrap text-center">{t('admin_perms_col_admin')}</th>
+              <th className="whitespace-nowrap">{t('admin_perms_col_pages')}</th>
+              <th className="whitespace-nowrap text-center">操作</th>
             </tr>
           </thead>
           <tbody>
-            {(Object.entries(ROLE_MAP) as [Role, typeof ROLE_MAP[Role]][])
-              .filter(([, p]) => !p.legacy)
-              .map(([role, p], i) => (
-              <tr
-                key={role}
-                className="animate-fade-up"
-                style={{ animationDelay: `${i * 45}ms` }}
-              >
-                <td data-label={t('admin_perms_col_role')}>
-                  <RoleBadge role={role} />
-                </td>
+            {PERM_ROLES.map((role, i) => {
+              const row = draft[role];
+              const isAdminRole = role === 'ADMIN';
+              const isDirty = !!dirty[role];
+              const saving = saveMutation.isPending && (saveMutation.variables as { role: string } | undefined)?.role === role;
 
-                <td data-label={t('admin_perms_col_display')}>
-                  <div className="font-semibold text-warmgray-800 text-sm">
-                    {lang === 'en' ? p.label_en : p.label}
-                  </div>
-                  <div className="text-[11px] text-warmgray-400 mt-0.5 md:max-w-xs">
-                    {lang === 'en' ? p.description_en : p.description}
-                  </div>
-                </td>
+              return (
+                <tr
+                  key={role}
+                  className={`animate-fade-up ${isAdminRole ? 'opacity-70' : ''}`}
+                  style={{ animationDelay: `${i * 45}ms` }}
+                >
+                  <td className="whitespace-nowrap">
+                    <div className="flex items-center gap-1.5">
+                      <RoleBadge role={role} />
+                      {isAdminRole && (
+                        <span
+                          className="text-warmgray-400 text-xs"
+                          title="システム管理者の権限は変更できません"
+                        >
+                          🔒
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-warmgray-400 mt-0.5">
+                      {lang === 'en' ? ROLE_MAP[role].label_en : ROLE_MAP[role].label}
+                    </div>
+                  </td>
 
-                <td data-label={t('admin_perms_col_submit')} className="text-center">{check(p.canSubmit)}</td>
-                <td data-label={t('admin_perms_col_approve')} className="text-center">{check(p.canApprove)}</td>
-                <td data-label={t('admin_perms_col_settle')} className="text-center">{check(p.canSettle)}</td>
-                <td data-label={t('admin_perms_col_admin')} className="text-center">{check(p.canAdmin)}</td>
+                  {(['canSubmit', 'canApprove', 'canSettle', 'canAdmin'] as const).map((field) => (
+                    <td key={field} className="text-center">
+                      <input
+                        type="checkbox"
+                        checked={row?.[field] ?? false}
+                        disabled={isAdminRole}
+                        onChange={(e) => toggleBool(role, field, e.target.checked)}
+                        className="w-4 h-4 accent-ringo-500 cursor-pointer disabled:cursor-not-allowed"
+                      />
+                    </td>
+                  ))}
 
-                <td data-label={t('admin_perms_col_pages')}>
-                  <div className="flex flex-wrap gap-1 justify-end md:justify-start">
-                    {p.navItems.map((nav) => (
-                      <span
-                        key={nav.to}
-                        className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-surface-100/80 text-warmgray-600 border border-surface-200/80"
-                      >
-                        <span className="text-[10px] leading-none">{nav.icon}</span>
-                        {nav.label}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-              </tr>
-            ))}
+                  <td>
+                    <div className="flex flex-wrap gap-1">
+                      {ALL_NAV_ROUTES.map((route) => (
+                        <label
+                          key={route}
+                          className={`inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-md border cursor-pointer select-none
+                            ${row?.navPages?.includes(route)
+                              ? 'bg-ringo-50 text-ringo-700 border-ringo-200'
+                              : 'bg-surface-100/80 text-warmgray-400 border-surface-200/80'
+                            }
+                            ${isAdminRole ? 'cursor-not-allowed opacity-60' : ''}
+                          `}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={row?.navPages?.includes(route) ?? false}
+                            disabled={isAdminRole}
+                            onChange={(e) => toggleNav(role, route, e.target.checked)}
+                            className="sr-only"
+                          />
+                          {NAV_ROUTE_LABELS[route] ?? route}
+                        </label>
+                      ))}
+                    </div>
+                  </td>
+
+                  <td className="text-center">
+                    <button
+                      disabled={isAdminRole || !isDirty || saving}
+                      onClick={() => row && saveMutation.mutate({ role, data: row })}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150
+                        ${isAdminRole || !isDirty
+                          ? 'bg-surface-100 text-warmgray-300 cursor-not-allowed'
+                          : saving
+                            ? 'bg-ringo-100 text-ringo-400 cursor-wait'
+                            : 'bg-ringo-500 text-white hover:bg-ringo-600 shadow-sm'
+                        }`}
+                    >
+                      {saving ? '保存中…' : '保存'}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -1507,7 +1628,7 @@ export default function Admin() {
           {tab === 'users'        && <UsersTab showToast={showToast} />}
           {tab === 'applications' && <ApplicationsTab showToast={showToast} />}
           {tab === 'forms'        && <FormsTab showToast={showToast} />}
-          {tab === 'permissions'  && <PermissionsTab />}
+          {tab === 'permissions'  && <PermissionsTab showToast={showToast} />}
         </div>
       </div>
     </Layout>
