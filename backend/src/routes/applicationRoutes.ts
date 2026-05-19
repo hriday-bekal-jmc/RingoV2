@@ -88,7 +88,8 @@ router.get('/route-preview', async (req: Request, res: Response): Promise<void> 
 
     const steps = await query(
       `SELECT s.route_id, s.step_order, s.approver_id, s.label, s.action_type,
-              u.full_name AS approver_name, u.role AS approver_role
+              u.full_name AS approver_name, u.role AS approver_role,
+              u.avatar_url AS approver_avatar
        FROM approval_route_steps s
        LEFT JOIN users u ON s.approver_id = u.id
        WHERE s.route_id = ANY($1::uuid[])

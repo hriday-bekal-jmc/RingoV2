@@ -14,6 +14,7 @@ import { requireAdmin, requireAuth } from '../middlewares/authMiddleware';
 import { mutationLimiter } from '../middlewares/rateLimit';
 import { invalidateTemplatesCache } from './templateRoutes';
 import { invalidateAdminReferenceCache } from '../services/adminReferenceCache';
+import { emitAll } from './sseRoutes';
 import type pg from 'pg';
 
 const router = Router();
@@ -150,6 +151,7 @@ router.post('/form-templates', async (req: Request, res: Response): Promise<void
 
     void invalidateTemplatesCache();
     void invalidateAdminReferenceCache('templates', 'routes');
+    emitAll('TEMPLATE_UPDATED', { templateId: (result as { template: { id: string } }).template.id });
     res.status(201).json(result);
   } catch (err: unknown) {
     const e = err as { code?: string; message?: string };
@@ -198,6 +200,7 @@ router.patch('/form-templates/:id', async (req: Request, res: Response): Promise
     }
     void invalidateTemplatesCache();
     void invalidateAdminReferenceCache('templates', 'routes');
+    emitAll('TEMPLATE_UPDATED', { templateId: req.params.id });
     res.json(r.rows[0]);
   } catch (err) {
     console.error('[admin/forms] patch failed:', err);
@@ -269,6 +272,7 @@ router.post('/form-templates/:id/versions', async (req: Request, res: Response):
 
     void invalidateTemplatesCache();
     void invalidateAdminReferenceCache('templates', 'routes');
+    emitAll('TEMPLATE_UPDATED', { templateId: req.params.id });
     res.status(201).json(result);
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
@@ -325,6 +329,7 @@ router.post('/form-templates/:id/versions/:vid/activate', async (req: Request, r
 
     void invalidateTemplatesCache();
     void invalidateAdminReferenceCache('templates', 'routes');
+    emitAll('TEMPLATE_UPDATED', { templateId: req.params.id });
     res.json({ message: 'バージョンを切り替えました' });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
@@ -356,6 +361,7 @@ router.put('/form-templates/:id/departments', async (req: Request, res: Response
     });
     void invalidateTemplatesCache();
     void invalidateAdminReferenceCache('templates', 'routes');
+    emitAll('TEMPLATE_UPDATED', { templateId: req.params.id });
     res.json({ message: '部署設定を更新しました' });
   } catch (err) {
     console.error('[admin/forms] dept permissions failed:', err);
@@ -418,6 +424,7 @@ router.delete('/form-templates/:id', async (req: Request, res: Response): Promis
       }
       void invalidateTemplatesCache();
       void invalidateAdminReferenceCache('templates', 'routes');
+      emitAll('TEMPLATE_UPDATED', { templateId: req.params.id });
       res.json({ message: 'テンプレートを無効化しました' });
       return;
     }
@@ -442,6 +449,7 @@ router.delete('/form-templates/:id', async (req: Request, res: Response): Promis
     });
     void invalidateTemplatesCache();
     void invalidateAdminReferenceCache('templates', 'routes');
+    emitAll('TEMPLATE_UPDATED', { templateId: req.params.id });
     res.json({ message: 'テンプレートを完全削除しました' });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };

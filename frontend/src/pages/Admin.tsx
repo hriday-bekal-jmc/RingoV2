@@ -14,6 +14,7 @@ import { Sk } from '../components/common/Skeleton';
 import Toast, { useToast } from '../components/common/Toast';
 import CustomSelect from '../components/forms/CustomSelect';
 import { useLang } from '../context/LanguageContext';
+import UserAvatar from '../components/common/UserAvatar';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -59,35 +60,6 @@ interface Template { id: string; code: string; title_ja: string }
 // ACCOUNTING is kept in DB for backward compat but 総務部 handles financial tasks now
 const ROLES = ['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ACCOUNTING'];
 
-// ─── Shared helpers ───────────────────────────────────────────────────────────
-
-function nameToGradient(name: string): string {
-  const opts = [
-    'from-ringo-400 to-ringo-600', 'from-mustard-400 to-mustard-600',
-    'from-teal-500 to-teal-700', 'from-indigo-400 to-violet-600', 'from-emerald-400 to-teal-600',
-  ];
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffff;
-  return opts[h % opts.length];
-}
-
-function UserAvatar({ name, avatarUrl, size = 8 }: { name: string; avatarUrl?: string | null; size?: number }) {
-  const grad = nameToGradient(name);
-  if (avatarUrl) {
-    return (
-      <img
-        src={avatarUrl}
-        alt={name}
-        className={`w-${size} h-${size} rounded-full object-cover ring-2 ring-white/60 shrink-0`}
-      />
-    );
-  }
-  return (
-    <div className={`w-${size} h-${size} rounded-full bg-gradient-to-br ${grad} flex items-center justify-center text-white text-xs font-bold shrink-0 ring-2 ring-white/60`}>
-      {name.slice(0, 1)}
-    </div>
-  );
-}
 
 function RoleBadge({ role }: { role: string }) {
   const colors: Record<string, string> = {
@@ -871,17 +843,12 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
                     <div className="flex flex-col items-center gap-1 group/step relative">
                       {/* Avatar or step number */}
                       <div className="relative">
-                        {step.approver_avatar ? (
-                          <img
-                            src={step.approver_avatar}
-                            alt={step.approver_name ?? ''}
-                            className="w-10 h-10 rounded-full object-cover ring-2 ring-white shadow-sm"
-                          />
-                        ) : (
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-ringo-400 to-ringo-600 flex items-center justify-center text-white text-xs font-bold shadow-sm">
-                            {step.approver_name ? step.approver_name.slice(0, 1) : step.step_order}
-                          </div>
-                        )}
+                        <UserAvatar
+                          name={step.approver_name ?? String(step.step_order)}
+                          avatarUrl={step.approver_avatar}
+                          size={10}
+                          className="shadow-sm"
+                        />
                         {/* Delete badge — first click arms, second confirms.
                             Inline-on-avatar to keep chain layout compact. */}
                         {step.step_order > 1 && (

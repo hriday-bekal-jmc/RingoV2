@@ -103,6 +103,12 @@ function keysForPermissionsUpdated(): KeyList {
   return [['permissions'], ['dashboard', 'summary']];
 }
 
+function keysForTemplateUpdated(): KeyList {
+  // Invalidate all cached template schemas + the list on dashboard/new-app.
+  // ['template'] prefix matches ['template', code] for any code.
+  return [['template'], ['templates'], ['dashboard', 'summary']];
+}
+
 // ─── Batched invalidation ────────────────────────────────────────────────────
 //
 // Coalesce all invalidation requests in a 50ms window so a burst of events
@@ -178,6 +184,9 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
     const onPermissionsUpdated = (): void => {
       debounced.enqueue(keysForPermissionsUpdated());
     };
+    const onTemplateUpdated = (): void => {
+      debounced.enqueue(keysForTemplateUpdated());
+    };
 
     es.addEventListener('APPROVAL_ACTION',       onApprovalAction);
     es.addEventListener('APPLICATION_SUBMITTED', onAppSubmitted);
@@ -185,6 +194,7 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
     es.addEventListener('SETTLEMENT_ACTION',     onSettlementAction);
     es.addEventListener('CSV_EXPORT_READY',      onCsvReady);
     es.addEventListener('PERMISSIONS_UPDATED',   onPermissionsUpdated);
+    es.addEventListener('TEMPLATE_UPDATED',      onTemplateUpdated);
 
     // ── Admin changed THIS user's profile (role / dept / active / password) ─
     // Backend emits via outbox → emitToUsers([userId], 'user-state-changed').
@@ -212,6 +222,7 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
       debounced.flush();
       window.removeEventListener('pagehide', onPageHide);
       es.removeEventListener('PERMISSIONS_UPDATED', onPermissionsUpdated);
+      es.removeEventListener('TEMPLATE_UPDATED', onTemplateUpdated);
       es.close();
       esRef.current = null;
     };

@@ -46,8 +46,9 @@ export default function NewApplication() {
       return res.data;
     },
     enabled: !!templateCode,
-    // Templates barely change — keep cached across the session
-    staleTime: 15 * 60_000,
+    // SSE TEMPLATE_UPDATED event invalidates this immediately when admin edits.
+    // 5min staleTime = safety net for tab re-focuses between edits.
+    staleTime: 5 * 60_000,
     gcTime:    30 * 60_000,
   });
 

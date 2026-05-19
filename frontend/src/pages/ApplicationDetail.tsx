@@ -12,6 +12,7 @@ import CustomSelect from '../components/forms/CustomSelect';
 import RouteTimeline from '../components/common/RouteTimeline';
 import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
 import CollapsibleComment from '../components/common/CollapsibleComment';
+import UserAvatar from '../components/common/UserAvatar';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -46,23 +47,6 @@ interface ApplicationDetail {
   accounting_note: string | null;
   settlement_processed_at: string | null;
   settlement_status: string | null;
-}
-
-// ── Avatar ─────────────────────────────────────────────────────────────────────
-function UserAvatar({ name, avatarUrl, size = 8 }: { name: string; avatarUrl?: string | null; size?: number }) {
-  const colors = ['from-ringo-400 to-ringo-600', 'from-mustard-400 to-mustard-600', 'from-teal-500 to-teal-700', 'from-indigo-400 to-violet-600'];
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffff;
-  const grad = colors[h % colors.length];
-  if (avatarUrl) {
-    return <img src={avatarUrl} alt={name} className={`w-${size} h-${size} rounded-full object-cover ring-2 ring-white/60 shrink-0`} />;
-  }
-  return (
-    <div className={`w-${size} h-${size} rounded-full bg-gradient-to-br ${grad} flex items-center justify-center text-white font-bold shrink-0`}
-      style={{ fontSize: `${size * 0.4}px` }}>
-      {name.slice(0, 1)}
-    </div>
-  );
 }
 
 // ── UI Components ─────────────────────────────────────────────────────────────
