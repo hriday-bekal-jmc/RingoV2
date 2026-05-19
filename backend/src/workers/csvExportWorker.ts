@@ -130,16 +130,19 @@ async function processCsvExport(job: Job<CsvExportPayload>): Promise<{ filename:
       params = [ids];
     } else if (selectAll && (dateFrom || dateTo)) {
       // "Select all in period" — date-filtered export (no specific IDs)
+      // Only export accounting-ready rows: SETTLEMENT_APPROVED or COMPLETED.
       // Filter matches the display date shown in the UI: settlement_submitted_at ?? s.created_at
       sql = `${SELECT_COLS}
         WHERE ($1::date IS NULL OR COALESCE(a.settlement_submitted_at, s.created_at)::date >= $1::date)
           AND ($2::date IS NULL OR COALESCE(a.settlement_submitted_at, s.created_at)::date <= $2::date)
+          AND a.status IN ('SETTLEMENT_APPROVED', 'COMPLETED')
           AND a.archived_at IS NULL
         ORDER BY s.created_at DESC`;
       params = [dateFrom ?? null, dateTo ?? null];
     } else {
-      // No filter — export every settlement
-      sql    = `${SELECT_COLS} WHERE a.archived_at IS NULL ORDER BY s.created_at DESC`;
+      // No filter — export all accounting-ready settlements (SETTLEMENT_APPROVED or COMPLETED).
+      // Excludes PENDING_SETTLEMENT — approval not yet complete, not accounting's concern.
+      sql    = `${SELECT_COLS} WHERE a.status IN ('SETTLEMENT_APPROVED', 'COMPLETED') AND a.archived_at IS NULL ORDER BY s.created_at DESC`;
       params = [];
     }
 

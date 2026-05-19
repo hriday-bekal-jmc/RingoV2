@@ -115,7 +115,7 @@ router.get('/settlements', async (req: Request, res: Response): Promise<void> =>
          ORDER BY step_order ASC LIMIT 1
        ) pending_step ON TRUE
        LEFT JOIN users pending_approver ON pending_approver.id = pending_step.approver_id
-       WHERE ($1 = 'ALL'
+       WHERE (($1 = 'ALL'     AND a.status IN ('SETTLEMENT_APPROVED', 'COMPLETED'))
           OR ($1 = 'PENDING' AND a.status = 'SETTLEMENT_APPROVED')
           OR ($1 = 'DONE'    AND a.status = 'COMPLETED'))
          AND a.archived_at IS NULL
