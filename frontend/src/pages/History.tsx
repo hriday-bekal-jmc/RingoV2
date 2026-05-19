@@ -291,8 +291,9 @@ export default function History() {
                 return (
                   <li
                     key={app.id}
-                    className="list-virt flex items-center gap-4 px-5 py-4 hover:bg-white/40 transition-colors duration-100 animate-fade-up"
+                    className="list-virt flex items-center gap-4 px-5 py-4 hover:bg-white/40 transition-colors duration-100 animate-fade-up cursor-pointer"
                     style={{ animationDelay: `${Math.min(idx, 12) * 30}ms` }}
+                    onClick={() => navigate(`/applications/${app.id}`)}
                   >
                     {/* Status dot */}
                     <div className={`w-2 h-2 rounded-full shrink-0 ${
@@ -338,19 +339,20 @@ export default function History() {
                           <button
                             className="btn-primary text-xs px-3 py-1.5 rounded-lg"
                             disabled={submitDraft.isPending}
-                            onClick={() => setConfirmSubmit(app)}
+                            onClick={(e) => { e.stopPropagation(); setConfirmSubmit(app); }}
                           >
                             {t('btn_submit')}
                           </button>
                           <Link
                             to={`/applications/${app.id}`}
                             className="btn-outline text-xs px-3 py-1.5 rounded-lg"
+                            onClick={(e) => e.stopPropagation()}
                           >
                             {t('history_edit')}
                           </Link>
                           <button
                             className="text-[11px] text-warmgray-400 hover:text-red-500 transition-colors font-medium"
-                            onClick={() => setConfirmDelete(app)}
+                            onClick={(e) => { e.stopPropagation(); setConfirmDelete(app); }}
                           >
                             {t('history_delete')}
                           </button>
@@ -359,7 +361,7 @@ export default function History() {
                       {isSettleable && (
                         <button
                           className="btn-primary text-xs px-3 py-1.5 rounded-lg bg-teal-500 hover:bg-teal-600 border-teal-500 hover:border-teal-600"
-                          onClick={() => navigate(`/applications/${app.id}/settlement`)}
+                          onClick={(e) => { e.stopPropagation(); navigate(`/applications/${app.id}/settlement`); }}
                         >
                           💴 {t('btn_settle')}
                         </button>
@@ -368,6 +370,7 @@ export default function History() {
                         <Link
                           to={`/applications/${app.id}`}
                           className="text-xs font-semibold text-ringo-500 hover:text-ringo-600 transition-colors flex items-center gap-0.5"
+                          onClick={(e) => e.stopPropagation()}
                         >
                           {t('history_detail')}
                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>

@@ -18,10 +18,31 @@ router.use(mutationLimiter);
 
 type ApprovalStage = 'RINGI' | 'SETTLEMENT';
 
-async function nextApplicationNumber(client: pg.PoolClient): Promise<string> {
-  const seqRow = await client.query(`SELECT nextval('application_number_seq') AS n`);
+async function nextApplicationNumber(client: pg.PoolClient, appId: string): Promise<string> {
   const year = new Date().getFullYear();
-  return `RNG-${year}-${String(seqRow.rows[0].n).padStart(6, '0')}`;
+  // Look up template's prefix and digit padding
+  const tmplRes = await client.query(
+    `SELECT ft.app_number_prefix, ft.app_number_digits
+     FROM applications a
+     JOIN form_templates ft ON ft.id = a.template_id
+     WHERE a.id = $1`,
+    [appId],
+  );
+  const prefix: string  = tmplRes.rows[0]?.app_number_prefix ?? 'RNG';
+  const digits: number  = tmplRes.rows[0]?.app_number_digits  ?? 6;
+
+  // Atomic upsert — increments counter for this template+year, returns new seq
+  const seqRes = await client.query(
+    `INSERT INTO application_number_sequences (template_id, year, last_seq)
+     SELECT a.template_id, $2, 1
+     FROM applications a WHERE a.id = $1
+     ON CONFLICT (template_id, year) DO UPDATE
+       SET last_seq = application_number_sequences.last_seq + 1
+     RETURNING last_seq`,
+    [appId, year],
+  );
+  const seq: number = seqRes.rows[0].last_seq;
+  return `${prefix}-${year}-${String(seq).padStart(digits, '0')}`;
 }
 
 async function finalizeStageWithoutApprovalSteps(
@@ -29,7 +50,7 @@ async function finalizeStageWithoutApprovalSteps(
   appId: string,
   stage: ApprovalStage,
 ): Promise<{ id: string; status: string; application_number: string | null }> {
-  const appNumber = await nextApplicationNumber(client);
+  const appNumber = await nextApplicationNumber(client, appId);
   const status = stage === 'SETTLEMENT' ? 'SETTLEMENT_APPROVED' : 'APPROVED';
   const appRes = await client.query(
     `UPDATE applications

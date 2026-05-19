@@ -78,6 +78,8 @@ interface TemplateListItem {
   gradient:                    string | null;
   description_ja:              string | null;
   description_en:              string | null;
+  app_number_prefix:           string;
+  app_number_digits:           number;
   active_version_id:           string | null;
   active_version_number:       number | null;
   active_version_created_at:   string | null;
@@ -99,16 +101,18 @@ interface TemplateVersion {
 
 interface TemplateDetail {
   template: {
-    id:             string;
-    code:           string;
-    title:          string;
-    title_ja:       string;
-    pattern_id:     number;
-    is_active:      boolean;
-    icon:           string | null;
-    gradient:       string | null;
-    description_ja: string | null;
-    description_en: string | null;
+    id:                 string;
+    code:               string;
+    title:              string;
+    title_ja:           string;
+    pattern_id:         number;
+    is_active:          boolean;
+    icon:               string | null;
+    gradient:           string | null;
+    description_ja:     string | null;
+    description_en:     string | null;
+    app_number_prefix:  string;
+    app_number_digits:  number;
   };
   versions: TemplateVersion[];
   allowed_dept_ids: string[];
@@ -326,20 +330,22 @@ function FormBuilder({
   const activeVersion = detail?.versions.find(v => v.is_active);
 
   // Editor state
-  const [code, setCode]                 = useState('');
-  const [titleJa, setTitleJa]           = useState('');
-  const [titleEn, setTitleEn]           = useState('');
-  const [patternId, setPatternId]       = useState(1);
-  const [icon, setIcon]                 = useState('📋');
-  const [gradient, setGradient]         = useState('from-slate-400 to-slate-500');
-  const [descJa, setDescJa]             = useState('');
-  const [descEn, setDescEn]             = useState('');
-  const [fields, setFields]             = useState<FormField[]>([]);
-  const [settleFields, setSettleFields] = useState<FormField[]>([]);
-  const [editingSettle, setEditingSettle] = useState(false);
-  const [notes, setNotes]               = useState('');
-  const [showHistory, setShowHistory]   = useState(false);
-  const [allowedDepts, setAllowedDepts] = useState<string[]>([]);
+  const [code, setCode]                         = useState('');
+  const [titleJa, setTitleJa]                   = useState('');
+  const [titleEn, setTitleEn]                   = useState('');
+  const [patternId, setPatternId]               = useState(1);
+  const [icon, setIcon]                         = useState('📋');
+  const [gradient, setGradient]                 = useState('from-slate-400 to-slate-500');
+  const [descJa, setDescJa]                     = useState('');
+  const [descEn, setDescEn]                     = useState('');
+  const [appNumberPrefix, setAppNumberPrefix]   = useState('RNG');
+  const [appNumberDigits, setAppNumberDigits]   = useState(6);
+  const [fields, setFields]                     = useState<FormField[]>([]);
+  const [settleFields, setSettleFields]         = useState<FormField[]>([]);
+  const [editingSettle, setEditingSettle]       = useState(false);
+  const [notes, setNotes]                       = useState('');
+  const [showHistory, setShowHistory]           = useState(false);
+  const [allowedDepts, setAllowedDepts]         = useState<string[]>([]);
 
   // Load all departments for picker
   const { data: departments } = useQuery<Department[]>({
@@ -359,6 +365,8 @@ function FormBuilder({
     setGradient(detail.template.gradient ?? 'from-slate-400 to-slate-500');
     setDescJa(detail.template.description_ja ?? '');
     setDescEn(detail.template.description_en ?? '');
+    setAppNumberPrefix(detail.template.app_number_prefix ?? 'RNG');
+    setAppNumberDigits(detail.template.app_number_digits ?? 6);
     setAllowedDepts(detail.allowed_dept_ids ?? []);
     setFields(activeVersion?.schema_definition?.fields ?? []);
     setSettleFields(activeVersion?.settlement_schema?.fields ?? []);
@@ -385,6 +393,8 @@ function FormBuilder({
       icon, gradient,
       description_ja: descJa || null,
       description_en: descEn || null,
+      app_number_prefix: appNumberPrefix.trim().toUpperCase() || 'RNG',
+      app_number_digits: appNumberDigits,
       // Pattern 2 (settlement-only) treats settlement schema as primary:
       // sync it to schema_definition too so frontend that reads either field works.
       schema_definition:  hasRingi ? { fields } : { fields: settleFields },
@@ -422,6 +432,8 @@ function FormBuilder({
       icon, gradient,
       description_ja: descJa || null,
       description_en: descEn || null,
+      app_number_prefix: appNumberPrefix.trim().toUpperCase() || 'RNG',
+      app_number_digits: appNumberDigits,
     })).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['form-templates'] });
@@ -733,6 +745,46 @@ function FormBuilder({
                     className="input"
                     placeholder="English description"
                   />
+                </div>
+
+                {/* Application number prefix */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400">
+                    {lang === 'en' ? 'Application Number Prefix' : '申請番号プレフィックス'}
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1.5 flex-1">
+                      <input
+                        type="text"
+                        value={appNumberPrefix}
+                        onChange={(e) => setAppNumberPrefix(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10))}
+                        className="input w-28 font-mono uppercase"
+                        placeholder="RNG"
+                        maxLength={10}
+                      />
+                      <span className="text-xs text-warmgray-400 shrink-0">-{new Date().getFullYear()}-</span>
+                      <span className="text-xs font-mono text-warmgray-500 shrink-0">{'0'.repeat(appNumberDigits - 1)}1</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <label className="text-[10px] text-warmgray-400 shrink-0">
+                        {lang === 'en' ? 'Digits' : '桁数'}
+                      </label>
+                      <select
+                        value={appNumberDigits}
+                        onChange={(e) => setAppNumberDigits(Number(e.target.value))}
+                        className="input w-16 text-sm"
+                      >
+                        {[4, 5, 6, 7, 8].map((d) => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-warmgray-400">
+                    {lang === 'en'
+                      ? 'Sequence resets each year. Letters and numbers only, max 10 chars.'
+                      : '年ごとにリセット。英数字のみ、最大10文字。'}
+                  </p>
                 </div>
               </div>
 

@@ -29,6 +29,7 @@ router.get('/form-templates', async (_req: Request, res: Response): Promise<void
       `SELECT
          t.id, t.code, t.title, t.title_ja, t.pattern_id, t.is_active,
          t.icon, t.gradient, t.description_ja, t.description_en,
+         t.app_number_prefix, t.app_number_digits,
          t.created_at, t.updated_at,
          v.id              AS active_version_id,
          v.version_number  AS active_version_number,
@@ -53,7 +54,9 @@ router.get('/form-templates/:id', async (req: Request, res: Response): Promise<v
   try {
     const tmpl = await query(
       `SELECT id, code, title, title_ja, pattern_id, is_active,
-              icon, gradient, description_ja, description_en, created_at, updated_at
+              icon, gradient, description_ja, description_en,
+              app_number_prefix, app_number_digits,
+              created_at, updated_at
        FROM form_templates WHERE id = $1`,
       [req.params.id],
     );
@@ -167,9 +170,10 @@ router.post('/form-templates', async (req: Request, res: Response): Promise<void
 // ── PATCH /admin/form-templates/:id ── update title/code metadata only ───────
 // (Schema edits go through /versions endpoint to keep history intact)
 router.patch('/form-templates/:id', async (req: Request, res: Response): Promise<void> => {
-  const { title, title_ja, is_active, pattern_id, icon, gradient, description_ja, description_en } = req.body as {
+  const { title, title_ja, is_active, pattern_id, icon, gradient, description_ja, description_en, app_number_prefix, app_number_digits } = req.body as {
     title?: string; title_ja?: string; is_active?: boolean; pattern_id?: number;
     icon?: string; gradient?: string; description_ja?: string; description_en?: string;
+    app_number_prefix?: string; app_number_digits?: number;
   };
   const sets: string[] = [];
   const vals: unknown[] = [];
@@ -182,6 +186,14 @@ router.patch('/form-templates/:id', async (req: Request, res: Response): Promise
   if (gradient !== undefined)       { sets.push(`gradient = $${idx++}`);       vals.push(gradient); }
   if (description_ja !== undefined) { sets.push(`description_ja = $${idx++}`); vals.push(description_ja); }
   if (description_en !== undefined) { sets.push(`description_en = $${idx++}`); vals.push(description_en); }
+  if (app_number_prefix !== undefined) {
+    const clean = app_number_prefix.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+    sets.push(`app_number_prefix = $${idx++}`); vals.push(clean);
+  }
+  if (app_number_digits !== undefined) {
+    const d = Math.max(4, Math.min(10, Number(app_number_digits)));
+    sets.push(`app_number_digits = $${idx++}`); vals.push(d);
+  }
   if (sets.length === 0) {
     res.status(400).json({ error: '更新するフィールドがありません' });
     return;
@@ -191,7 +203,7 @@ router.patch('/form-templates/:id', async (req: Request, res: Response): Promise
   try {
     const r = await query(
       `UPDATE form_templates SET ${sets.join(', ')} WHERE id = $${idx}
-       RETURNING id, code, title, title_ja, is_active`,
+       RETURNING id, code, title, title_ja, is_active, app_number_prefix, app_number_digits`,
       vals,
     );
     if (r.rows.length === 0) {
