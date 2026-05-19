@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useScrollEnd } from '../hooks/useScrollEnd';
 import { Link } from 'react-router-dom';
 import apiClient from '../services/apiClient';
@@ -345,6 +345,7 @@ export default function Accounting() {
     hasNextPage,
     isFetchingNextPage,
     isLoading,
+    isFetching,
   } = useInfiniteQuery<{ items: Settlement[]; hasMore: boolean; offset: number; nextCursor?: string | null }>({
     // Include date params in key — date filter change triggers fresh server fetch.
     // Status filter (ALL/PENDING/DONE) is still client-side on already-loaded pages.
@@ -359,6 +360,8 @@ export default function Accounting() {
     initialPageParam: null,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: 30_000,
+    // Keep old data visible while new date/filter fetch runs — no full spinner flash
+    placeholderData: keepPreviousData,
   });
 
   const allItems = data?.pages.flatMap(p => p.items) ?? [];
@@ -648,7 +651,7 @@ export default function Accounting() {
             <p className="text-sm font-medium">{t('accounting_no_items')}</p>
           </div>
         ) : (
-          <div className="card !p-0 md:overflow-hidden animate-fade-up">
+          <div className={`card !p-0 md:overflow-hidden animate-fade-up transition-opacity duration-200 ${isFetching && !isFetchingNextPage ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
             <div className="md:overflow-x-auto">
               <table className="table-base table-responsive">
                 <thead>
@@ -805,12 +808,8 @@ export default function Accounting() {
 
             {/* Load-more feedback */}
             {isFetchingNextPage ? (
-              <div className="px-5 py-3 flex items-center justify-center gap-2 text-warmgray-400 text-xs border-t border-white/20">
-                <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                </svg>
-                {t('loading')}
+              <div className="px-5 py-3 flex items-center justify-center border-t border-white/20">
+                <RingoLoader.Inline />
               </div>
             ) : hasNextPage ? (
               /* More pages exist on server — user may not see all matching rows for current status filter */

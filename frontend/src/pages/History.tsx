@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { useScrollEnd } from '../hooks/useScrollEnd';
 import apiClient from '../services/apiClient';
@@ -86,6 +86,7 @@ export default function History() {
     hasNextPage,
     isFetchingNextPage,
     isLoading,
+    isFetching,
   } = useInfiniteQuery<{ items: Application[]; hasMore: boolean; offset: number; nextCursor?: string | null }>({
     queryKey: ['myApplications'],                          // always ALL — filter is client-side
     queryFn: async ({ pageParam = null }) => {
@@ -98,6 +99,7 @@ export default function History() {
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: 30_000,
     gcTime:    60_000,
+    placeholderData: keepPreviousData,
   });
 
   const applications = data?.pages.flatMap(p => p.items) ?? [];
@@ -238,7 +240,7 @@ export default function History() {
             )}
           </div>
         ) : (
-          <div className="card !p-0 overflow-hidden">
+          <div className={`card !p-0 overflow-hidden transition-opacity duration-200 ${isFetching && !isFetchingNextPage ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
             {/*
               key={statusFilter} forces React to remount the list when the
               filter pill changes. That triggers the fade-up animation on
@@ -362,12 +364,8 @@ export default function History() {
             <div ref={sentinelRef} className="h-px" />
 
             {isFetchingNextPage ? (
-              <div className="px-5 py-3 flex items-center justify-center gap-2 text-warmgray-400 text-xs border-t border-white/20">
-                <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                </svg>
-                {t('loading')}
+              <div className="px-5 py-3 flex items-center justify-center border-t border-white/20">
+                <RingoLoader.Inline />
               </div>
             ) : hasNextPage ? (
               <div className="px-5 py-3 flex items-center gap-2.5 border-t border-amber-200/40 bg-amber-50/60 text-amber-700 text-xs">

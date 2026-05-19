@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useScrollEnd } from '../hooks/useScrollEnd';
 import { useScrollLock } from '../hooks/useScrollLock';
 import apiClient from '../services/apiClient';
@@ -1069,6 +1069,7 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
     hasNextPage,
     isFetchingNextPage,
     isLoading,
+    isFetching,
   } = useInfiniteQuery<{ items: AppRecord[]; hasMore: boolean; offset: number; nextCursor?: string | null }>({
     queryKey: ['admin', 'applications', debouncedSearch, deptFilter, statusFilter, archiveFilter],
     queryFn: async ({ pageParam = null }) => {
@@ -1082,6 +1083,8 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
     staleTime: 30_000,
     // Drop cached pages quickly when admin leaves the tab — large objects
     gcTime:    60_000,
+    // Keep stale data visible while new filter/search fetches — no flash
+    placeholderData: keepPreviousData,
   });
 
   const apps = data?.pages.flatMap(p => p.items) ?? [];
@@ -1206,7 +1209,7 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
       {isLoading ? (
         <RingoLoader.Block label="読み込み中..." />
       ) : (
-        <div className="card !p-0 md:overflow-hidden">
+        <div className={`card !p-0 md:overflow-hidden transition-opacity duration-200 ${isFetching && !isFetchingNextPage ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
           <table className="table-base table-responsive">
             <thead>
               <tr>
@@ -1332,13 +1335,7 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
           {(isFetchingNextPage || (!hasNextPage && apps.length >= PAGE_APPS)) && (
             <div className="px-5 py-3 flex items-center justify-center gap-2 text-warmgray-400 text-xs border-t border-white/20">
               {isFetchingNextPage ? (
-                <>
-                  <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                  </svg>
-                  読み込み中...
-                </>
+                <RingoLoader.Inline />
               ) : (
                 <span className="text-warmgray-300">全件表示済み</span>
               )}
@@ -1436,11 +1433,7 @@ function PermissionsTab({ showToast }: { showToast: (msg: string, type?: 'succes
   const PERM_ROLES = Object.keys(ROLE_MAP) as Role[];
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <div className="w-6 h-6 border-2 border-ringo-400 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
+    return <RingoLoader.Block />;
   }
 
   return (

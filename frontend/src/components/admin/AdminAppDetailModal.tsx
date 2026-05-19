@@ -18,6 +18,7 @@ import { templateLabel } from '../../config/templateLabels';
 import { useLang } from '../../context/LanguageContext';
 import RepeatGroupDisplay from '../forms/RepeatGroupDisplay';
 import CollapsibleComment from '../common/CollapsibleComment';
+import RingoLoader from '../common/RingoLoader';
 
 interface ApplicationDetail {
   id: string;
@@ -197,15 +198,7 @@ export default function AdminAppDetailModal({ appId, onClose }: Props) {
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden">
-          {isLoading && (
-            <div className="flex items-center justify-center gap-3 py-16 text-warmgray-400">
-              <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-              </svg>
-              {lang === 'en' ? 'Loading…' : '読み込み中…'}
-            </div>
-          )}
+          {isLoading && <RingoLoader.Block />}
           {isError && (
             <div className="p-6 text-sm text-red-500 text-center">
               {(error as { message?: string })?.message ?? (lang === 'en' ? 'Failed to load' : '取得に失敗しました')}

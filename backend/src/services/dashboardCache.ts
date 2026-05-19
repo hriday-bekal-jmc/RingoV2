@@ -24,8 +24,9 @@ const OVERVIEW_KEY = 'dashboard:admin-overview';
  * both the applicant's and approvers' dashboards refresh immediately.
  */
 export function invalidateDashboardCache(userIds: string[]): void {
-  if (userIds.length === 0) return;
-  const keys = [...userIds.map(summaryKey), OVERVIEW_KEY];
+  // Always bust admin-overview (company-wide counts). Per-user keys only if provided.
+  // No early-return guard — even empty userIds must bust the global overview key.
+  const keys: string[] = [OVERVIEW_KEY, ...userIds.map(summaryKey)];
   redis.del(...keys).catch(() => {
     // Non-fatal — natural TTL will expire the cache within 60s
   });

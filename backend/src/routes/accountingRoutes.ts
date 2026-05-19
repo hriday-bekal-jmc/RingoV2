@@ -6,6 +6,7 @@ import { isAdminUser, requireAuth } from '../middlewares/authMiddleware';
 import { canRoleSettle } from '../services/rolePermissionsCache';
 import { insertOutboxEvent } from '../services/eventOutbox';
 import { computeApplicationRecipients } from '../services/eventRecipients';
+import { invalidateDashboardCache } from '../services/dashboardCache';
 import { addCsvExportJob, getCsvExportMeta } from '../services/csvExportQueue';
 import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
 import type pg from 'pg';
@@ -379,8 +380,13 @@ router.post('/settlements/:id/close', async (req: Request, res: Response): Promi
         payload:            { type: 'accounting_close', applicationId: row.application_id },
       });
 
-      return { application_id: row.application_id };
+      return { application_id: row.application_id, recipients };
     });
+
+    // Bust Redis dashboard caches so the next refetch (triggered by SSE) gets fresh counts.
+    // Same pattern as approvalRoutes / applicationRoutes.
+    invalidateDashboardCache(result.recipients);
+
     res.json({ message: '精算を完了しました — 申請が完了状態になりました' });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };

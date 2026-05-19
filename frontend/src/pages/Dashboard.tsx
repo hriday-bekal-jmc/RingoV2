@@ -7,6 +7,7 @@ import { useLang } from '../context/LanguageContext';
 import { usePermissions } from '../hooks/usePermissions';
 import { TEMPLATE_LABELS, templateLabel } from '../config/templateLabels';
 import apiClient from '../services/apiClient';
+import RingoLoader from '../components/common/RingoLoader';
 
 // Template tiles are now data-driven — fetched from `/templates` so any admin
 // addition appears automatically. Falls back to hardcoded TEMPLATE_LABELS
@@ -147,7 +148,7 @@ export default function Dashboard() {
   return (
     <Layout title={t('title_dashboard')}>
       {loading ? (
-        <div className="flex items-center justify-center h-32 text-warmgray-400 text-sm">読み込み中...</div>
+        <RingoLoader.Block />
       ) : (
         <div className="max-w-6xl mx-auto space-y-8">
 

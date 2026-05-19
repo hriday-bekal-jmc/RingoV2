@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useScrollEnd } from '../hooks/useScrollEnd';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
@@ -715,6 +715,7 @@ export default function Approvals() {
     hasNextPage,
     isFetchingNextPage,
     isLoading,
+    isFetching,
     isError,
   } = useInfiniteQuery<{ items: Application[]; hasMore: boolean; total: number; offset: number; nextCursor?: string | null }>({
     queryKey: ['pendingApprovals', systemView],
@@ -727,6 +728,7 @@ export default function Approvals() {
     initialPageParam: null,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: 30_000,
+    placeholderData: keepPreviousData,
   });
 
   const applications = data?.pages.flatMap(p => p.items) ?? [];
@@ -862,7 +864,7 @@ export default function Approvals() {
 
         {/* Table */}
         {applications.length > 0 && (
-          <div className="card !p-0 md:overflow-hidden animate-fade-up">
+          <div className={`card !p-0 md:overflow-hidden animate-fade-up transition-opacity duration-200 ${isFetching && !isFetchingNextPage ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
             <table className="table-base table-responsive">
               <thead>
                 <tr>
@@ -936,13 +938,7 @@ export default function Approvals() {
             {(isFetchingNextPage || (!hasNextPage && applications.length >= PAGE)) && (
               <div className="px-5 py-3 flex items-center justify-center gap-2 text-warmgray-400 text-xs border-t border-white/20">
                 {isFetchingNextPage ? (
-                  <>
-                    <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                    </svg>
-                    {t('loading')}
-                  </>
+                  <RingoLoader.Inline />
                 ) : (
                   <span className="text-warmgray-300">{lang === 'en' ? 'All loaded' : '全件表示済み'}</span>
                 )}

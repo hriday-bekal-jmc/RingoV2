@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, keepPreviousData } from '@tanstack/react-query';
 import { Link } from 'react-router-dom'; // used inside DetailPanel
 import { useScrollEnd } from '../hooks/useScrollEnd';
 import Layout from '../components/common/Layout';
@@ -9,6 +9,7 @@ import CalendarPicker from '../components/forms/CalendarPicker';
 import CustomSelect from '../components/forms/CustomSelect';
 import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
 import CollapsibleComment from '../components/common/CollapsibleComment';
+import RingoLoader from '../components/common/RingoLoader';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -323,6 +324,7 @@ export default function ApprovalHistory() {
     hasNextPage,
     isFetchingNextPage,
     isLoading,
+    isFetching,
     error,
   } = useInfiniteQuery<{ items: HistoryItem[]; hasMore: boolean; offset: number; nextCursor?: string | null }>({
     queryKey: ['approvalHistory', stage, action, templateId, dateFrom, dateTo, applicant],
@@ -336,6 +338,8 @@ export default function ApprovalHistory() {
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: 30_000,
     retry: 1,
+    // Keep old data visible while filter params change — no spinner flash between filters
+    placeholderData: keepPreviousData,
   });
 
   const items = data?.pages.flatMap(p => p.items) ?? [];
@@ -508,7 +512,7 @@ export default function ApprovalHistory() {
               </p>
             </div>
           ) : (
-            <div className="md:overflow-x-auto">
+            <div className={`md:overflow-x-auto transition-opacity duration-200 ${isFetching && !isFetchingNextPage ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
               <table className="table-base table-responsive">
                 <thead>
                   <tr>
@@ -606,13 +610,7 @@ export default function ApprovalHistory() {
               {(isFetchingNextPage || (!hasNextPage && items.length >= PAGE)) && (
                 <div className="px-5 py-3 flex items-center justify-center gap-2 text-warmgray-400 text-xs border-t border-white/20">
                   {isFetchingNextPage ? (
-                    <>
-                      <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                      </svg>
-                      {lang === 'en' ? 'Loading…' : '読み込み中…'}
-                    </>
+                    <RingoLoader.Inline />
                   ) : (
                     <span className="text-warmgray-300">{lang === 'en' ? 'All records loaded' : '全件表示済み'}</span>
                   )}

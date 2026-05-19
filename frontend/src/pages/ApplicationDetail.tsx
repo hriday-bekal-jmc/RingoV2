@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
+import RingoLoader from '../components/common/RingoLoader';
 import DynamicForm from '../components/forms/DynamicForm';
 import Toast, { useToast } from '../components/common/Toast';
 import { useLang } from '../context/LanguageContext';
@@ -513,7 +514,7 @@ export default function ApplicationDetail() {
     SETTLEMENT_APPROVED: t('status_settle_approved'),
   };
 
-  if (isLoading) return <Layout title={t('loading')}><div className="p-8 text-warmgray-500">{t('loading')}</div></Layout>;
+  if (isLoading) return <Layout title={t('loading')}><RingoLoader.Block /></Layout>;
   if (!app) return <Layout title={t('error_load')}><div className="p-8 text-ringo-500 font-bold">{t('settle_not_found')}</div></Layout>;
 
   if (app.status === 'DRAFT') {
