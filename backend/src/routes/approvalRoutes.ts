@@ -211,13 +211,13 @@ router.post('/:id/approve', async (req: Request, res: Response): Promise<void> =
         const prefix: string = tmplRes.rows[0]?.app_number_prefix ?? 'RNG';
         const digits: number = tmplRes.rows[0]?.app_number_digits  ?? 6;
         const seqRes = await client.query(
-          `INSERT INTO application_number_sequences (template_id, year, last_seq)
-           SELECT a.template_id, $2, 1
+          `INSERT INTO application_number_sequences (template_id, year, prefix, last_seq)
+           SELECT a.template_id, $2, $3, 1
            FROM applications a WHERE a.id = $1
-           ON CONFLICT (template_id, year) DO UPDATE
+           ON CONFLICT (template_id, year, prefix) DO UPDATE
              SET last_seq = application_number_sequences.last_seq + 1
            RETURNING last_seq`,
-          [id, year],
+          [id, year, prefix],
         );
         const appNumber = `${prefix}-${year}-${String(seqRes.rows[0].last_seq).padStart(digits, '0')}`;
 

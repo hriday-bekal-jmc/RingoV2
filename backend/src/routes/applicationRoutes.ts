@@ -31,15 +31,16 @@ async function nextApplicationNumber(client: pg.PoolClient, appId: string): Prom
   const prefix: string  = tmplRes.rows[0]?.app_number_prefix ?? 'RNG';
   const digits: number  = tmplRes.rows[0]?.app_number_digits  ?? 6;
 
-  // Atomic upsert — increments counter for this template+year, returns new seq
+  // Atomic upsert keyed on (template_id, year, prefix).
+  // Prefix change → new PK row → counter starts at 1. Old apps unaffected via COALESCE.
   const seqRes = await client.query(
-    `INSERT INTO application_number_sequences (template_id, year, last_seq)
-     SELECT a.template_id, $2, 1
+    `INSERT INTO application_number_sequences (template_id, year, prefix, last_seq)
+     SELECT a.template_id, $2, $3, 1
      FROM applications a WHERE a.id = $1
-     ON CONFLICT (template_id, year) DO UPDATE
+     ON CONFLICT (template_id, year, prefix) DO UPDATE
        SET last_seq = application_number_sequences.last_seq + 1
      RETURNING last_seq`,
-    [appId, year],
+    [appId, year, prefix],
   );
   const seq: number = seqRes.rows[0].last_seq;
   return `${prefix}-${year}-${String(seq).padStart(digits, '0')}`;

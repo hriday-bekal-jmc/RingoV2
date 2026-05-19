@@ -780,6 +780,23 @@ function FormBuilder({
                       ? 'Sequence resets each year. Letters and numbers only, max 10 chars.'
                       : '年ごとにリセット。英数字のみ、最大10文字。'}
                   </p>
+                  {(() => {
+                    const totalApps = detail?.versions.reduce((s, v) => s + (v.application_count ?? 0), 0) ?? 0;
+                    const prefixChanged = appNumberPrefix !== (detail?.template.app_number_prefix ?? 'RNG');
+                    if (!isNew && totalApps > 0 && prefixChanged) {
+                      return (
+                        <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200/60 rounded-lg px-3 py-2 mt-1">
+                          <span className="shrink-0">⚠️</span>
+                          <p>
+                            {lang === 'en'
+                              ? `${totalApps} existing application(s) keep their current numbers. Only new submissions will use "${appNumberPrefix}". Numbering restarts from 1.`
+                              : `既存の申請${totalApps}件は現在の番号を維持します。新規申請からのみ「${appNumberPrefix}」が使用され、連番は1から再開します。`}
+                          </p>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
               </div>
 
