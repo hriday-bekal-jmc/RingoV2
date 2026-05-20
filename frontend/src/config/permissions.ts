@@ -8,7 +8,6 @@ export type Role =
   | 'SOUMU'
   | 'SENMU'
   | 'PRESIDENT'
-  | 'ACCOUNTING'
   | 'ADMIN';
 
 export interface RolePermissions {
@@ -22,7 +21,6 @@ export interface RolePermissions {
   canAdmin: boolean;      // access /admin (user + route management)
   approverRoles: string[]; // which approval step roles this user can act on
   navItems: NavPermission[];
-  legacy?: boolean;       // role kept for DB compat but superseded
 }
 
 export interface NavPermission {
@@ -131,24 +129,6 @@ const ROLE_MAP: Record<Role, RolePermissions> = {
       { to: '/approval-history', label: '承認履歴',       icon: '📋' },
     ],
   },
-  ACCOUNTING: {
-    label: '経理（旧）',
-    label_en: 'Accounting (legacy)',
-    description: '旧経理ロール。現在は総務部（SOUMU）が経理機能を担当します。',
-    description_en: 'Legacy role. General Affairs (SOUMU) now handles accounting duties.',
-    legacy: true,
-    canSubmit: false,
-    canApprove: true,
-    canSettle: true,
-    canAdmin: false,
-    approverRoles: ['ACCOUNTING'],
-    navItems: [
-      { to: '/dashboard',        label: 'ダッシュボード', icon: '▦' },
-      { to: '/approvals',        label: '承認待ち',       icon: '🔔' },
-      { to: '/approval-history', label: '承認履歴',       icon: '📋' },
-      { to: '/accounting',       label: '経理',           icon: '▤' },
-    ],
-  },
   ADMIN: {
     label: 'システム管理者',
     label_en: 'System Administrator',
@@ -158,8 +138,7 @@ const ROLE_MAP: Record<Role, RolePermissions> = {
     canApprove: true,
     canSettle: true,
     canAdmin: true,
-    legacy: true,
-    approverRoles: ['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ACCOUNTING', 'ADMIN'],
+    approverRoles: ['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ADMIN'],
     navItems: [
       { to: '/dashboard',        label: 'ダッシュボード', icon: '▦' },
       { to: '/approvals',        label: '承認待ち',       icon: '🔔' },
@@ -171,15 +150,6 @@ const ROLE_MAP: Record<Role, RolePermissions> = {
   },
 };
 
-/*
-const ADMIN_NAV: NavPermission[] = [
-  { to: '/approvals',        label: '謇ｿ隱榊ｾ・■',       icon: '粕' },
-  { to: '/approval-history', label: '謇ｿ隱榊ｱ･豁ｴ',       icon: '搭' },
-  { to: '/accounting',       label: '邨檎炊',           icon: '笆､' },
-  { to: '/admin',            label: '邂｡逅・判髱｢',       icon: '笞・ },
-];
-
-*/
 const ADMIN_NAV: NavPermission[] = [
   { to: '/approvals',        label: 'Approvals',        icon: 'A' },
   { to: '/approval-history', label: 'Approval History', icon: 'H' },
@@ -209,7 +179,7 @@ export function getPermissions(role?: string, isAdmin = false): RolePermissions 
     canAdmin:   true,
     approverRoles: Array.from(new Set([
       ...base.approverRoles,
-      'EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ACCOUNTING',
+      'EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT',
     ])),
     navItems: mergeNav(base.navItems, ADMIN_NAV),
   };

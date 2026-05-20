@@ -9,6 +9,7 @@ import { insertOutboxEvent } from '../services/eventOutbox';
 import { computeApplicationRecipients } from '../services/eventRecipients';
 import { invalidateDashboardCache } from '../services/dashboardCache';
 import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
+import { extractRowPreview } from '../services/rowPreview';
 import type pg from 'pg';
 
 const router = Router();
@@ -1004,6 +1005,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
       `SELECT
          a.id, a.application_number, a.status, a.created_at, a.submitted_at,
          a.settlement_submitted_at,
+         a.form_data, a.settlement_data, a.template_id,
          t.title_ja AS template_name, t.code AS template_code,
          t.settlement_schema IS NOT NULL AS has_settlement,
          COALESCE((
@@ -1041,11 +1043,44 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
     const rows    = result.rows;
     const hasMore = rows.length > limit;
     if (hasMore) rows.pop();
+
+    // Batch-load active schemas for unique templates in this page.
+    // Uses idx_form_template_versions_active (partial index, fast).
+    const templateIds = [...new Set(rows.map((r: any) => r.template_id as string))];
+    const schemaMap = new Map<string, { schema_definition: any; settlement_schema: any }>();
+    if (templateIds.length > 0) {
+      const sr = await query(
+        `SELECT template_id, schema_definition, settlement_schema
+         FROM form_template_versions
+         WHERE is_active = TRUE AND template_id = ANY($1::uuid[])`,
+        [templateIds],
+      );
+      for (const s of sr.rows) {
+        schemaMap.set(s.template_id as string, {
+          schema_definition: s.schema_definition,
+          settlement_schema: s.settlement_schema,
+        });
+      }
+    }
+
+    // Extract row_preview per row; exclude raw form_data / settlement_data / template_id
+    const items = rows.map((r: any) => {
+      const schemas = schemaMap.get(r.template_id);
+      const row_preview = extractRowPreview(
+        schemas?.schema_definition,
+        r.form_data,
+        schemas?.settlement_schema,
+        r.settlement_data,
+      );
+      const { form_data: _fd, settlement_data: _sd, template_id: _tid, ...rest } = r;
+      return { ...rest, row_preview };
+    });
+
     res.json({
-      items: rows,
+      items,
       hasMore,
       offset,
-      nextCursor: hasMore ? encodeCursor(rows[rows.length - 1]) : null,
+      nextCursor: hasMore ? encodeCursor(items[items.length - 1]) : null,
     });
   } catch (err) {
     console.error('[applications] list failed:', err);
@@ -1057,7 +1092,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
 router.get('/:id', async (req: Request, res: Response): Promise<void> => {
   try {
     // ── Authorization: must be applicant, assigned approver, prior actor,
-    //    same-dept manager+, ACCOUNTING, or ADMIN
+    //    same-dept manager+, SOUMU, or ADMIN
     await assertCanReadApp({ id: req.user!.id, role: req.user!.role, is_admin: req.user!.is_admin }, String(req.params.id));
 
     // Schema resolution: prefer the locked version (form_template_versions row

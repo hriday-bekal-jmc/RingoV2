@@ -22,7 +22,7 @@ router.use(requireAuth);
 router.use(requireAdmin);
 router.use(mutationLimiter);
 
-const USER_ROLES = new Set(['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ACCOUNTING']);
+const USER_ROLES = new Set(['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT']);
 const isValidBusinessRole = (role: unknown): role is string =>
   typeof role === 'string' && USER_ROLES.has(role);
 
@@ -762,7 +762,7 @@ router.delete('/applications/:id', async (req: Request, res: Response): Promise<
 
 // ─── Role Permissions ─────────────────────────────────────────────────────────
 
-const KNOWN_ROLES = new Set(['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ACCOUNTING', 'ADMIN']);
+const KNOWN_ROLES = new Set(['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ADMIN']);
 
 interface RolePermRowAdmin {
   role: string;

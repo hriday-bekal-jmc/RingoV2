@@ -50,7 +50,7 @@ const actorIsAdmin = (actor: Actor): boolean => Boolean(actor.is_admin);
  *   - any user listed in approval_steps as approver_id (assigned approver)
  *   - any user who has acted on the app (acted_by)
  *   - users in same department as applicant + role >= MANAGER (departmental visibility)
- *   - ACCOUNTING / SOUMU (both see all settlements; SOUMU handles accounting)
+ *   - SOUMU (sees all settlements; handles accounting duties)
  *   - ADMIN
  */
 export async function assertCanReadApp(
@@ -58,7 +58,7 @@ export async function assertCanReadApp(
   appId: string,
   client?: pg.PoolClient,
 ): Promise<void> {
-  if (actorIsAdmin(actor) || actor.role === 'ACCOUNTING' || actor.role === 'SOUMU') return;
+  if (actorIsAdmin(actor) || actor.role === 'SOUMU') return;
 
   const q = client ? client.query.bind(client) : query;
   const r = await q(
@@ -92,7 +92,7 @@ export async function assertCanReadApp(
  *   - app must be in actionable status (caller passes allowedStatuses)
  *   - exactly one PENDING step must exist
  *   - if step has explicit approver_id → must match actor (ADMIN bypass)
- *   - if step has no approver_id → role-based (MANAGER/GM/ADMIN/ACCOUNTING for SETTLEMENT)
+ *   - if step has no approver_id → role-based (MANAGER/GM/ADMIN/SOUMU for SETTLEMENT)
  *   - prevent same-user consecutive approvals on unassigned steps (caller can opt-in)
  */
 export async function assertCanActOnStep(
@@ -139,7 +139,7 @@ export async function assertCanActOnStep(
 
   // Unassigned step → role gate by stage
   const allowed = step.stage === 'SETTLEMENT'
-    ? ['ACCOUNTING', 'MANAGER', 'GM']
+    ? ['SOUMU', 'MANAGER', 'GM']
     : ['MANAGER', 'GM'];
   if (!allowed.includes(actor.role)) {
     throw httpErr(403, 'この承認ステップを操作する権限がありません');

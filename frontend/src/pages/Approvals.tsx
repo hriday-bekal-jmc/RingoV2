@@ -25,14 +25,19 @@ interface FormField {
   fields?: FormField[];
 }
 
+interface RowTextPreview { label: string; label_en: string; value: string }
+interface RowNumberPreview {
+  label: string; label_en: string; value: number | null;
+  compare_label?: string; compare_label_en?: string; compare_value?: number | null;
+  is_different: boolean;
+}
+interface RowPreview { text: RowTextPreview | null; numbers: RowNumberPreview[] }
+
 interface Application {
   id: string;
   application_number: string | null;
   status: string;
-  form_data?: Record<string, unknown>;
-  settlement_data?: Record<string, unknown> | null;
-  schema_definition?: { fields: FormField[] } | null;
-  settlement_schema?: { fields: FormField[] } | null;
+  row_preview?: RowPreview | null;
   created_at: string;
   template_name: string;
   applicant_name?: string;
@@ -471,7 +476,7 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
     staleTime: 60_000,
   });
 
-  const viewApp = { ...app, ...detail } as Application;
+  const viewApp = { ...app, ...detail } as Application & Partial<AppDetailData>;
 
   const isConfirmStep = app.current_step_action === 'CONFIRM';
 
@@ -590,7 +595,7 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
         )}
 
         {/* Footer — action area */}
-        <div className="px-7 py-5 border-t border-white/30 bg-surface-50/40 shrink-0">
+        <div className="px-4 sm:px-7 py-4 sm:py-5 border-t border-white/30 bg-surface-50/40 shrink-0">
           {activeAction ? (
             <div className="space-y-3 animate-scale-in">
               {/* Action header */}
@@ -646,35 +651,37 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
               </div>
             </div>
           ) : (
-            <div className="flex items-center gap-2">
-              {/* 詳細 → moved here from header */}
+            <div className="flex items-center justify-between gap-2">
+              {/* 詳細 — left */}
               <button
                 onClick={() => setShowDetail(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-ringo-50/80 hover:bg-ringo-100/80 text-ringo-500 hover:text-ringo-700 text-xs font-bold transition-all border border-ringo-200/60"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-ringo-50/80 hover:bg-ringo-100/80 text-ringo-500 hover:text-ringo-700 text-xs font-bold transition-all border border-ringo-200/60 shrink-0"
               >
                 {lang === 'en' ? 'Details' : '詳細'}
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
                 </svg>
               </button>
-              <div className="flex-1" />
-              {app.current_step_action !== 'CONFIRM' && (
-                <>
-                  <button className="btn-outline text-sm" onClick={() => { setActiveAction('return'); setComment(''); }} disabled={isMutating}>
-                    ↩ {t('btn_return')}
-                  </button>
-                  <button className="btn-danger text-sm" onClick={() => { setActiveAction('reject'); setComment(''); }} disabled={isMutating}>
-                    ✕ {t('btn_reject')}
-                  </button>
-                </>
-              )}
-              <button className="btn-primary text-sm" onClick={() => { setActiveAction('approve'); setComment(''); }} disabled={isMutating}>
-                {app.current_step_action === 'CONFIRM'
-                  ? `✓ ${lang === 'en' ? 'Confirm' : '確認する'}`
-                  : Number(app.current_step) === Number(app.total_steps)
-                    ? `✓ ${t('approvals_final_btn')}`
-                    : `✓ ${t('approvals_approve_btn')}`}
-              </button>
+              {/* Action buttons — right */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                {app.current_step_action !== 'CONFIRM' && (
+                  <>
+                    <button className="btn-outline text-xs sm:text-sm" onClick={() => { setActiveAction('return'); setComment(''); }} disabled={isMutating}>
+                      ↩ {t('btn_return')}
+                    </button>
+                    <button className="btn-danger text-xs sm:text-sm" onClick={() => { setActiveAction('reject'); setComment(''); }} disabled={isMutating}>
+                      ✕ {t('btn_reject')}
+                    </button>
+                  </>
+                )}
+                <button className="btn-primary text-xs sm:text-sm" onClick={() => { setActiveAction('approve'); setComment(''); }} disabled={isMutating}>
+                  {app.current_step_action === 'CONFIRM'
+                    ? `✓ ${lang === 'en' ? 'Confirm' : '確認する'}`
+                    : Number(app.current_step) === Number(app.total_steps)
+                      ? `✓ ${t('approvals_final_btn')}`
+                      : `✓ ${t('approvals_approve_btn')}`}
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -834,7 +841,7 @@ export default function Approvals() {
                   <th>{t('approvals_col_app')}</th>
                   <th>{t('approvals_col_step')}</th>
                   <th>{t('approvals_col_date')}</th>
-                  <th className="w-8" />
+                  <th className="hidden md:table-cell text-right w-32">{lang === 'en' ? 'Amount' : '金額'}</th>
                 </tr>
               </thead>
               <tbody className="md:divide-y md:divide-white/30">
@@ -856,7 +863,7 @@ export default function Approvals() {
                       </div>
                     </td>
                     <td><Sk.Line w="w-20" h="h-3" /></td>
-                    <td />
+                    <td className="hidden md:table-cell" />
                   </tr>
                 ))}
               </tbody>
@@ -889,18 +896,20 @@ export default function Approvals() {
                   <th>{t('approvals_col_app')}</th>
                   <th>{t('approvals_col_step')}</th>
                   <th>{t('approvals_col_date')}</th>
-                  <th className="w-8" />
+                  <th className="hidden md:table-cell text-right w-32">{lang === 'en' ? 'Amount' : '金額'}</th>
                 </tr>
               </thead>
               <tbody className="md:divide-y md:divide-white/30">
-                {applications.map((app, i) => (
+                {applications.map((app, i) => {
+                  const hasDiff = app.row_preview?.numbers.some((n) => n.is_different) ?? false;
+                  return (
                   <tr
                     key={app.id}
-                    className="cursor-pointer hover:bg-white/50 transition-colors duration-100 group animate-fade-up"
+                    className={`cursor-pointer hover:bg-white/50 transition-colors duration-100 group animate-fade-up${hasDiff ? ' bg-amber-50/80' : ''}`}
                     style={{ animationDelay: `${Math.min(i, 14) * 30}ms` }}
                     onClick={() => setSelectedApp(app)}
                   >
-                    <td data-label={t('approvals_col_app')}>
+                    <td data-label={t('approvals_col_app')} className={hasDiff ? 'border-l-[3px] border-amber-500' : ''}>
                       <div className="flex items-center gap-3 md:justify-start justify-end min-w-0">
                         <UserAvatar name={app.applicant_name ?? '?'} avatarUrl={app.applicant_avatar} size={8} />
                         <div className="min-w-0 md:text-left text-right">
@@ -910,6 +919,13 @@ export default function Approvals() {
                               <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700">{t('approvals_settlement_badge')}</span>
                             )}
                           </div>
+                          {app.row_preview?.text && (
+                            <p className="text-[11px] text-warmgray-600 mt-0.5 truncate font-medium md:max-w-[200px]">
+                              {lang === 'en' ? app.row_preview.text.label_en : app.row_preview.text.label}
+                              {': '}
+                              {app.row_preview.text.value}
+                            </p>
+                          )}
                           <p className="text-[11px] text-warmgray-400 mt-0.5 truncate">
                             {app.applicant_name}
                             {app.department_name && app.department_name !== '—' && (
@@ -941,13 +957,27 @@ export default function Approvals() {
                     <td data-label={t('approvals_col_date')} className="text-[11px] text-warmgray-400 whitespace-nowrap">
                       {new Date(app.created_at).toLocaleDateString(dateLocale, { month: 'short', day: 'numeric' })}
                     </td>
-                    <td className="w-8 text-right">
-                      <svg className="w-4 h-4 text-warmgray-300 group-hover:text-ringo-400 transition-colors inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                      </svg>
+                    <td className="hidden md:table-cell text-right w-32 align-middle">
+                      {app.row_preview?.numbers && app.row_preview.numbers.length > 0 && (
+                        <div className="flex flex-col items-end gap-0.5">
+                          {app.row_preview.numbers.map((n, ni) => (
+                            <div key={ni} className="flex items-baseline gap-1">
+                              {n.compare_value !== undefined && n.compare_value !== null && (
+                                <span className={`text-[10px] tabular-nums ${n.is_different ? 'text-amber-500' : 'text-warmgray-400'}`}>
+                                  {n.compare_value.toLocaleString()} {'→'}
+                                </span>
+                              )}
+                              <span className={`text-xs font-bold tabular-nums ${n.is_different ? 'text-amber-600' : 'text-warmgray-700'}`}>
+                                {n.value !== null ? n.value.toLocaleString() : '—'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
 

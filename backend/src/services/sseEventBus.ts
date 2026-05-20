@@ -33,6 +33,8 @@ export interface BusEvent {
   entity_id?:         string | null;
   recipient_user_ids: string[];
   payload:            Record<string, unknown>;
+  /** When true, deliver to every locally-connected client regardless of recipient list. */
+  broadcast?:         boolean;
 }
 
 type Handler = (event: BusEvent) => void;

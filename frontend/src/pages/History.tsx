@@ -10,6 +10,14 @@ import { templateLabel } from '../config/templateLabels';
 import RingoLoader from '../components/common/RingoLoader';
 import { Sk } from '../components/common/Skeleton';
 
+interface RowTextPreview { label: string; label_en: string; value: string }
+interface RowNumberPreview {
+  label: string; label_en: string; value: number | null;
+  compare_label?: string; compare_label_en?: string; compare_value?: number | null;
+  is_different: boolean;
+}
+interface RowPreview { text: RowTextPreview | null; numbers: RowNumberPreview[] }
+
 interface Application {
   id: string;
   application_number: string | null;
@@ -18,7 +26,7 @@ interface Application {
   template_code?: string;
   has_settlement?: boolean;
   created_at: string;
-  form_data: Record<string, any>;
+  row_preview?: RowPreview | null;
 }
 
 function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
@@ -275,6 +283,7 @@ export default function History() {
                 const isDraft = app.status === 'DRAFT';
                 const isReturned = app.status === 'RETURNED';
                 const isSettleable = app.status === 'APPROVED' && app.has_settlement;
+                const hasDiff = app.row_preview?.numbers.some((n) => n.is_different) ?? false;
 
                 // Phase badge for 立替精算申請 (two-stage)
                 const isTakekai = app.has_settlement;
@@ -291,7 +300,7 @@ export default function History() {
                 return (
                   <li
                     key={app.id}
-                    className="list-virt flex items-center gap-4 px-5 py-4 hover:bg-white/40 transition-colors duration-100 animate-fade-up cursor-pointer"
+                    className={`list-virt flex items-center gap-4 px-5 py-4 hover:bg-white/40 transition-colors duration-100 animate-fade-up cursor-pointer${hasDiff ? ' border-l-[3px] border-amber-500' : ''}`}
                     style={{ animationDelay: `${Math.min(idx, 12) * 30}ms` }}
                     onClick={() => navigate(`/applications/${app.id}`)}
                   >
@@ -322,6 +331,13 @@ export default function History() {
                           <span className="text-[10px] text-warmgray-400 font-medium">{t('history_editable')}</span>
                         )}
                       </div>
+                      {app.row_preview?.text && (
+                        <p className="text-[11px] text-warmgray-600 mt-0.5 truncate font-medium">
+                          {lang === 'en' ? app.row_preview.text.label_en : app.row_preview.text.label}
+                          {': '}
+                          {app.row_preview.text.value}
+                        </p>
+                      )}
                       <p className="text-[11px] text-warmgray-400 mt-0.5">
                         {app.application_number ? (
                           <span className="font-mono mr-2">{app.application_number}</span>
@@ -331,6 +347,24 @@ export default function History() {
                         })}
                       </p>
                     </div>
+
+                    {/* Row preview numbers */}
+                    {app.row_preview?.numbers && app.row_preview.numbers.length > 0 && (
+                      <div className="hidden sm:flex flex-col items-end gap-0.5 shrink-0">
+                        {app.row_preview.numbers.map((n, ni) => (
+                          <div key={ni} className="flex items-baseline gap-1">
+                            {n.compare_value !== undefined && n.compare_value !== null && (
+                              <span className={`text-[10px] tabular-nums ${n.is_different ? 'text-amber-500' : 'text-warmgray-400'}`}>
+                                {n.compare_value.toLocaleString()} {'→'}
+                              </span>
+                            )}
+                            <span className={`text-xs font-bold tabular-nums ${n.is_different ? 'text-amber-600' : 'text-warmgray-700'}`}>
+                              {n.value !== null ? n.value.toLocaleString() : '—'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
                     {/* Actions */}
                     <div className="flex items-center gap-2 shrink-0">
@@ -365,18 +399,6 @@ export default function History() {
                         >
                           💴 {t('btn_settle')}
                         </button>
-                      )}
-                      {!isDraft && (
-                        <Link
-                          to={`/applications/${app.id}`}
-                          className="text-xs font-semibold text-ringo-500 hover:text-ringo-600 transition-colors flex items-center gap-0.5"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {t('history_detail')}
-                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                          </svg>
-                        </Link>
                       )}
                     </div>
                   </li>

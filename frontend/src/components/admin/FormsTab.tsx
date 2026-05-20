@@ -62,6 +62,14 @@ interface FormField {
   };
   /** Layout width override. undefined = auto (type-based default). */
   col_span?: 'half' | 'full';
+  /** Show this field's value in the application list row (Approvals + History). */
+  show_in_row?: boolean;
+  /**
+   * For number fields with show_in_row: name of the counterpart field in the
+   * OTHER schema (ringi↔settlement) to compare against. When both values
+   * exist and differ, the row is highlighted amber.
+   */
+  row_compare_with?: string;
 }
 
 interface FormSchema {
@@ -578,21 +586,21 @@ function FormBuilder({
   };
 
   const modal = (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-warmgray-900/60 backdrop-blur-sm animate-fade-up" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center sm:p-4 bg-warmgray-900/60 backdrop-blur-sm animate-fade-up" onClick={onClose}>
       <div
-        className="relative bg-surface-50 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col border border-white/80"
+        className="relative bg-surface-50 sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-4xl sm:max-h-[90vh] overflow-hidden flex flex-col border border-white/80"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-white/40 bg-white/60 backdrop-blur-sm flex items-center justify-between gap-4">
-          <h2 className="text-lg font-bold text-warmgray-800">
+        <div className="px-4 py-3 sm:px-6 sm:py-4 border-b border-white/40 bg-white/60 backdrop-blur-sm flex items-center justify-between gap-2 sm:gap-4">
+          <h2 className="text-base sm:text-lg font-bold text-warmgray-800 truncate min-w-0">
             {isNew ? (lang === 'en' ? 'New form template' : '新規フォーム') : (lang === 'en' ? `Edit: ${titleJa}` : `編集: ${titleJa}`)}
           </h2>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {!isNew && (
               <button
                 onClick={() => setShowHistory(s => !s)}
-                className="btn-outline text-xs"
+                className="btn-outline text-xs whitespace-nowrap"
               >
                 {showHistory ? (lang === 'en' ? '← Edit' : '← 編集') : (lang === 'en' ? 'History' : '履歴')}
               </button>
@@ -602,7 +610,7 @@ function FormBuilder({
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
           {showHistory && detail ? (
             <VersionHistory
               versions={detail.versions}
@@ -747,20 +755,20 @@ function FormBuilder({
                   <label className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400">
                     {lang === 'en' ? 'Application Number Prefix' : '申請番号プレフィックス'}
                   </label>
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-1.5 flex-1">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
                       <input
                         type="text"
                         value={appNumberPrefix}
                         onChange={(e) => setAppNumberPrefix(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10))}
-                        className="input w-28 font-mono uppercase"
+                        className="input w-24 sm:w-28 font-mono uppercase"
                         placeholder="RNG"
                         maxLength={10}
                       />
                       <span className="text-xs text-warmgray-400 shrink-0">-{new Date().getFullYear()}-</span>
-                      <span className="text-xs font-mono text-warmgray-500 shrink-0">{'0'.repeat(appNumberDigits - 1)}1</span>
+                      <span className="text-xs font-mono text-warmgray-500 shrink-0 truncate">{'0'.repeat(appNumberDigits - 1)}1</span>
                     </div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <label className="text-[10px] text-warmgray-400 shrink-0">
                         {lang === 'en' ? 'Digits' : '桁数'}
                       </label>
@@ -896,6 +904,7 @@ function FormBuilder({
                         onCreateRepeatGroupTotal={(childIdx) => createRepeatGroupTotal(i, childIdx)}
                         onRemove={() => removeField(i)}
                         onMove={(d) => moveField(i, d)}
+                        otherSchemaFields={editingSettle ? fields : settleFields}
                       />
                     ))}
                   </div>
@@ -921,12 +930,12 @@ function FormBuilder({
 
         {/* Footer */}
         {!showHistory && (
-          <div className="px-6 py-4 border-t border-white/40 bg-white/60 backdrop-blur-sm flex items-center justify-end gap-2">
-            <button onClick={onClose} className="btn-ghost text-sm">{lang === 'en' ? 'Cancel' : 'キャンセル'}</button>
+          <div className="px-4 py-3 sm:px-6 sm:py-4 border-t border-white/40 bg-white/60 backdrop-blur-sm flex items-center justify-end gap-2 shrink-0">
+            <button onClick={onClose} className="btn-ghost text-sm flex-1 sm:flex-none">{lang === 'en' ? 'Cancel' : 'キャンセル'}</button>
             <button
               onClick={handleSave}
               disabled={create.isPending || saveVersion.isPending}
-              className="btn-primary text-sm"
+              className="btn-primary text-sm flex-1 sm:flex-none"
             >
               {create.isPending || saveVersion.isPending
                 ? (lang === 'en' ? 'Saving...' : '保存中...')
@@ -947,13 +956,16 @@ function FormBuilder({
 // Single field editor card
 // ─────────────────────────────────────────────────────────────────────────────
 function FieldEditor({
-  field, index, total, siblingNames, computedFieldNames, onUpdate, onCreateRepeatGroupTotal, onRemove, onMove,
+  field, index, total, siblingNames, computedFieldNames, otherSchemaFields,
+  onUpdate, onCreateRepeatGroupTotal, onRemove, onMove,
 }: {
   field: FormField;
   index: number;
   total: number;
   siblingNames: string[];
   computedFieldNames: string[];
+  /** Fields from the OTHER schema (ringi↔settlement). Used for row_compare_with dropdown. */
+  otherSchemaFields?: FormField[];
   onUpdate: (patch: Partial<FormField>) => void;
   onCreateRepeatGroupTotal: (childIndex: number) => void;
   onRemove: () => void;
@@ -994,9 +1006,9 @@ function FieldEditor({
 
   return (
     <div className="card !p-4 space-y-3 border border-white/60">
-      {/* Top row: name + type + move/delete */}
+      {/* Row 1: index + name */}
       <div className="flex items-center gap-2">
-        <span className="text-[10px] font-bold text-warmgray-400 w-6">#{index + 1}</span>
+        <span className="text-[10px] font-bold text-warmgray-400 w-6 shrink-0">#{index + 1}</span>
         <div className="flex-1 min-w-0">
           <input
             type="text"
@@ -1011,10 +1023,13 @@ function FieldEditor({
             </p>
           )}
         </div>
+      </div>
+      {/* Row 2: type select + action buttons */}
+      <div className="flex items-center gap-2 pl-8">
         <select
           value={field.type}
           onChange={(e) => updateType(e.target.value)}
-          className="input text-xs w-40"
+          className="input text-xs flex-1 min-w-0"
         >
           {FIELD_TYPES.map(ft => (
             <option key={ft.value} value={ft.value}>
@@ -1022,10 +1037,12 @@ function FieldEditor({
             </option>
           ))}
         </select>
-        <button onClick={() => onMove(-1)} disabled={index === 0} className="btn-ghost text-xs px-2 disabled:opacity-30">▲</button>
-        <button onClick={() => onMove(1)}  disabled={index === total - 1} className="btn-ghost text-xs px-2 disabled:opacity-30">▼</button>
-        <button onClick={() => setExpanded(s => !s)} className="btn-ghost text-xs px-2">{expanded ? '−' : '⚙'}</button>
-        <button onClick={onRemove} className="text-red-400 hover:text-red-600 text-sm">✕</button>
+        <div className="flex items-center gap-1 shrink-0">
+          <button onClick={() => onMove(-1)} disabled={index === 0} className="btn-ghost text-xs px-2 disabled:opacity-30">▲</button>
+          <button onClick={() => onMove(1)}  disabled={index === total - 1} className="btn-ghost text-xs px-2 disabled:opacity-30">▼</button>
+          <button onClick={() => setExpanded(s => !s)} className="btn-ghost text-xs px-2">{expanded ? '−' : '⚙'}</button>
+          <button onClick={onRemove} className="text-red-400 hover:text-red-600 text-sm px-1">✕</button>
+        </div>
       </div>
 
       {/* Labels */}
@@ -1105,6 +1122,38 @@ function FieldEditor({
               </label>
             )}
           </div>
+
+          {/* Show in row */}
+          <div className="flex items-center gap-4 flex-wrap">
+            <label className="flex items-center gap-1.5 text-xs font-semibold text-warmgray-600 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={field.show_in_row ?? false}
+                onChange={(e) => onUpdate({ show_in_row: e.target.checked || undefined })}
+                className="w-4 h-4 accent-ringo-500"
+              />
+              {lang === 'en' ? 'Show in list row' : '一覧行に表示'}
+            </label>
+          </div>
+          {field.show_in_row && isNumber && otherSchemaFields && otherSchemaFields.filter((x) => x.type === 'number').length > 0 && (
+            <div className="flex items-center gap-2.5">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-warmgray-500 shrink-0">
+                {lang === 'en' ? 'Compare with' : '比較対象'}
+              </span>
+              <select
+                value={field.row_compare_with ?? ''}
+                onChange={(e) => onUpdate({ row_compare_with: e.target.value || undefined })}
+                className="input text-xs flex-1"
+              >
+                <option value="">{lang === 'en' ? '— none —' : '— なし —'}</option>
+                {otherSchemaFields.filter((x) => x.type === 'number').map((x) => (
+                  <option key={x.name} value={x.name}>
+                    {x.label}{x.label_en ? ` / ${x.label_en}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Width toggle — not shown for repeat_group (always full) or header (always full) */}
           {!isRepeatGroup && (

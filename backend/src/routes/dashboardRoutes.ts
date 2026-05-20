@@ -18,7 +18,7 @@ import { isAdminUser, requireAuth } from '../middlewares/authMiddleware';
 
 // Roles that may have pending approvals assigned. Backend role-gates the
 // pending query so non-approver users don't pay for an empty join.
-const APPROVER_ROLES = new Set(['MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ACCOUNTING']);
+const APPROVER_ROLES = new Set(['MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT']);
 
 const router = Router();
 router.use(requireAuth);
@@ -317,6 +317,89 @@ router.get('/admin-overview', async (req: Request, res: Response): Promise<void>
   } catch (err) {
     console.error('[dashboard] admin-overview failed:', err);
     res.status(500).json({ error: '管理者ダッシュボードの取得に失敗しました' });
+  }
+});
+
+// ── GET /dashboard/pending-approvals — paginated, cursor-based ───────────────
+// Used exclusively by the "View all" drawer on the personal dashboard.
+// Summary endpoint already returns the first 5 (fast, cached) — this endpoint
+// is only called when the user explicitly opens the full list.
+// No Redis cache: the list is small and must always be fresh.
+router.get('/pending-approvals', async (req: Request, res: Response): Promise<void> => {
+  const userId     = req.user!.id;
+  const role       = req.user!.role;
+  const canApprove = isAdminUser(req.user) || APPROVER_ROLES.has(role);
+
+  if (!canApprove) {
+    res.json({ items: [], nextCursor: null });
+    return;
+  }
+
+  const limit = Math.min(Number(req.query.limit) || 25, 50);
+
+  let cursorCreatedAt: string | null = null;
+  let cursorId: string | null = null;
+
+  if (req.query.cursor && typeof req.query.cursor === 'string') {
+    try {
+      const decoded = JSON.parse(
+        Buffer.from(req.query.cursor, 'base64').toString('utf8'),
+      ) as { ca: string; id: string };
+      cursorCreatedAt = decoded.ca;
+      cursorId = decoded.id;
+    } catch { /* bad cursor → treat as first page */ }
+  }
+
+  try {
+    // Keyset pagination on (created_at ASC, id ASC). No COUNT(*) OVER() —
+    // total is already in the cached summary. Fetching limit+1 rows to detect
+    // whether a next page exists without a separate COUNT query.
+    const result = await query(
+      `SELECT
+         s.id, s.application_id, a.application_number,
+         t.title_ja  AS template_name,
+         t.code      AS template_code,
+         u.full_name AS applicant_name,
+         s.created_at
+       FROM approval_steps s
+       JOIN applications a   ON a.id = s.application_id
+       JOIN form_templates t ON t.id = a.template_id
+       JOIN users u          ON u.id = a.applicant_id
+       WHERE s.approver_id = $1
+         AND s.status = 'PENDING'
+         AND a.archived_at IS NULL
+         AND ($2::timestamptz IS NULL
+              OR (s.created_at, s.id::text) > ($2::timestamptz, $3::text))
+       ORDER BY s.created_at ASC, s.id ASC
+       LIMIT $4`,
+      [userId, cursorCreatedAt, cursorId ?? '', limit + 1],
+    );
+
+    const hasMore = result.rows.length > limit;
+    const rows    = hasMore ? result.rows.slice(0, limit) : result.rows;
+
+    const nextCursor = hasMore
+      ? Buffer.from(JSON.stringify({
+          ca: (rows[rows.length - 1] as any).created_at,
+          id: (rows[rows.length - 1] as any).id,
+        })).toString('base64')
+      : null;
+
+    res.json({
+      items: rows.map((r: any) => ({
+        id:                 r.id,
+        application_id:     r.application_id,
+        application_number: r.application_number,
+        template_name:      r.template_name,
+        template_code:      r.template_code,
+        applicant_name:     r.applicant_name,
+        created_at:         r.created_at,
+      })),
+      nextCursor,
+    });
+  } catch (err) {
+    console.error('[dashboard] pending-approvals failed:', err);
+    res.status(500).json({ error: '承認待ち一覧の取得に失敗しました' });
   }
 });
 

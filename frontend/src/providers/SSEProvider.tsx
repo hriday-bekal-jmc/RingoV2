@@ -47,9 +47,11 @@ function keysForApprovalAction(d: ApprovalPayload): KeyList {
     ['dashboard', 'admin-overview'],
     ['pendingApprovals'],
     ['approvalHistory'],
+    ['admin', 'applications'],   // admin list view
   ];
   if (d.applicationId) {
     keys.push(['application', d.applicationId]);
+    keys.push(['admin', 'application', d.applicationId]); // admin detail modal
     keys.push(['route-preview']);
   }
   // Any approval action (approve/return/reject) changes the app status →
@@ -64,9 +66,13 @@ function keysForApplicationSubmitted(d: SubmitPayload): KeyList {
     ['dashboard', 'summary'],
     ['dashboard', 'admin-overview'],
     ['myApplications'],
-    ['pendingApprovals'],   // approver's inbox flips
+    ['pendingApprovals'],         // approver's inbox flips
+    ['admin', 'applications'],    // admin list view
   ];
-  if (d.applicationId) keys.push(['application', d.applicationId]);
+  if (d.applicationId) {
+    keys.push(['application', d.applicationId]);
+    keys.push(['admin', 'application', d.applicationId]);
+  }
   // Settlement-stage submits also affect accounting list
   if (d.type === 'settlement_start' || d.type === 'settlement_resubmit') {
     keys.push(['accountingSettlements']);
@@ -79,8 +85,12 @@ function keysForApplicationChanged(d: ChangePayload): KeyList {
     ['dashboard', 'summary'],
     ['dashboard', 'admin-overview'],
     ['myApplications'],
+    ['admin', 'applications'],
   ];
-  if (d.applicationId) keys.push(['application', d.applicationId]);
+  if (d.applicationId) {
+    keys.push(['application', d.applicationId]);
+    keys.push(['admin', 'application', d.applicationId]);
+  }
   return keys;
 }
 
@@ -89,8 +99,12 @@ function keysForSettlementAction(d: SettlementPayload): KeyList {
     ['dashboard', 'summary'],
     ['dashboard', 'admin-overview'],
     ['accountingSettlements'],
+    ['admin', 'applications'],
   ];
-  if (d.applicationId) keys.push(['application', d.applicationId]);
+  if (d.applicationId) {
+    keys.push(['application', d.applicationId]);
+    keys.push(['admin', 'application', d.applicationId]);
+  }
   return keys;
 }
 

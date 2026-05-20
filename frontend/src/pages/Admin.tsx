@@ -57,8 +57,7 @@ interface ApprovalRoute {
 
 interface Template { id: string; code: string; title_ja: string }
 
-// ACCOUNTING is kept in DB for backward compat but 総務部 handles financial tasks now
-const ROLES = ['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ACCOUNTING'];
+const ROLES = ['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT'];
 
 
 function RoleBadge({ role }: { role: string }) {
@@ -68,7 +67,6 @@ function RoleBadge({ role }: { role: string }) {
     SENMU:      'bg-indigo-500 text-white',
     GM:         'bg-violet-500 text-white',
     MANAGER:    'bg-sky-500 text-white',
-    ACCOUNTING: 'bg-mustard-500 text-white',
     SOUMU:      'bg-teal-500 text-white',
     EMPLOYEE:   'bg-surface-200 text-warmgray-600',
   };
@@ -324,7 +322,7 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
             className="w-full sm:w-36"
             options={[
               { value: '', label: t('admin_filter_all_role') },
-              ...ROLES.filter((r) => r !== 'ACCOUNTING').map((r) => ({ value: r, label: r })),
+              ...ROLES.map((r) => ({ value: r, label: r })),
             ]}
             value={roleFilter}
             onChange={setRoleFilter}
@@ -501,7 +499,7 @@ function ApproverPicker({ users, departments, value, onChange }: ApproverPickerP
           className="w-32"
           options={[
             { value: '', label: t('admin_filter_all_role') },
-            ...ROLES.filter((r) => r !== 'ACCOUNTING').map((r) => ({ value: r, label: r })),
+            ...ROLES.map((r) => ({ value: r, label: r })),
           ]}
           value={roleFilter}
           onChange={setRoleFilter}
@@ -1444,8 +1442,8 @@ function PermissionsTab({ showToast }: { showToast: (msg: string, type?: 'succes
         <p className="text-sm text-warmgray-700">{t('admin_perms_hint')}</p>
       </div>
 
-      {/* Permissions table */}
-      <div className="card !p-0 overflow-x-auto">
+      {/* Permissions table — desktop */}
+      <div className="card !p-0 overflow-x-auto hidden md:block">
         <table className="table-base w-full text-sm">
           <thead>
             <tr>
@@ -1475,12 +1473,7 @@ function PermissionsTab({ showToast }: { showToast: (msg: string, type?: 'succes
                     <div className="flex items-center gap-1.5">
                       <RoleBadge role={role} />
                       {isAdminRole && (
-                        <span
-                          className="text-warmgray-400 text-xs"
-                          title="システム管理者の権限は変更できません"
-                        >
-                          🔒
-                        </span>
+                        <span className="text-warmgray-400 text-xs" title="システム管理者の権限は変更できません">🔒</span>
                       )}
                     </div>
                     <div className="text-[10px] text-warmgray-400 mt-0.5">
@@ -1546,6 +1539,112 @@ function PermissionsTab({ showToast }: { showToast: (msg: string, type?: 'succes
             })}
           </tbody>
         </table>
+      </div>
+
+      {/* Permissions cards — mobile */}
+      <div className="space-y-3 md:hidden">
+        {PERM_ROLES.map((role, i) => {
+          const row = draft[role];
+          const isAdminRole = role === 'ADMIN';
+          const isDirty = !!dirty[role];
+          const saving = saveMutation.isPending && (saveMutation.variables as { role: string } | undefined)?.role === role;
+
+          return (
+            <div
+              key={role}
+              className={`card !p-4 space-y-3 animate-fade-up ${isAdminRole ? 'opacity-70' : ''}`}
+              style={{ animationDelay: `${i * 45}ms` }}
+            >
+              {/* Header: role + save button */}
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <RoleBadge role={role} />
+                    {isAdminRole && (
+                      <span className="text-warmgray-400 text-xs" title="システム管理者の権限は変更できません">🔒</span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-warmgray-400 mt-0.5">
+                    {lang === 'en' ? ROLE_MAP[role].label_en : ROLE_MAP[role].label}
+                  </div>
+                </div>
+                <button
+                  disabled={isAdminRole || !isDirty || saving}
+                  onClick={() => row && saveMutation.mutate({ role, data: row })}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 shrink-0
+                    ${isAdminRole || !isDirty
+                      ? 'bg-surface-100 text-warmgray-300 cursor-not-allowed'
+                      : saving
+                        ? 'bg-ringo-100 text-ringo-400 cursor-wait'
+                        : 'bg-ringo-500 text-white hover:bg-ringo-600 shadow-sm'
+                    }`}
+                >
+                  {saving ? '保存中…' : '保存'}
+                </button>
+              </div>
+
+              {/* Capability toggles */}
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  ['canSubmit',  t('admin_perms_col_submit')],
+                  ['canApprove', t('admin_perms_col_approve')],
+                  ['canSettle',  t('admin_perms_col_settle')],
+                  ['canAdmin',   t('admin_perms_col_admin')],
+                ] as const).map(([field, label]) => (
+                  <label
+                    key={field}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium cursor-pointer select-none transition-colors
+                      ${row?.[field]
+                        ? 'bg-ringo-50 text-ringo-700 border-ringo-200/80'
+                        : 'bg-white/60 text-warmgray-500 border-white/80'
+                      }
+                      ${isAdminRole ? 'cursor-not-allowed' : ''}
+                    `}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={row?.[field] ?? false}
+                      disabled={isAdminRole}
+                      onChange={(e) => toggleBool(role, field, e.target.checked)}
+                      className="w-4 h-4 accent-ringo-500 shrink-0 disabled:cursor-not-allowed"
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+
+              {/* Nav pages */}
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1.5">
+                  {t('admin_perms_col_pages')}
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {ALL_NAV_ROUTES.map((route) => (
+                    <label
+                      key={route}
+                      className={`inline-flex items-center gap-0.5 text-[10px] font-medium px-2 py-1 rounded-md border cursor-pointer select-none
+                        ${row?.navPages?.includes(route)
+                          ? 'bg-ringo-50 text-ringo-700 border-ringo-200'
+                          : 'bg-surface-100/80 text-warmgray-400 border-surface-200/80'
+                        }
+                        ${isAdminRole ? 'cursor-not-allowed opacity-60' : ''}
+                      `}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={row?.navPages?.includes(route) ?? false}
+                        disabled={isAdminRole}
+                        onChange={(e) => toggleNav(role, route, e.target.checked)}
+                        className="sr-only"
+                      />
+                      {NAV_ROUTE_LABELS[route] ?? route}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* Info cards — updated to reflect current system */}

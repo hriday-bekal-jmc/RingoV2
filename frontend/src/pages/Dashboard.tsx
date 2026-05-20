@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
+import { createPortal } from 'react-dom';
 import Layout from '../components/common/Layout';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
@@ -8,6 +9,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { TEMPLATE_LABELS, templateLabel } from '../config/templateLabels';
 import apiClient from '../services/apiClient';
 import RingoLoader from '../components/common/RingoLoader';
+import { useScrollEnd } from '../hooks/useScrollEnd';
 
 // Template tiles are now data-driven — fetched from `/templates` so any admin
 // addition appears automatically. Falls back to hardcoded TEMPLATE_LABELS
@@ -77,12 +79,157 @@ function StatCard({ label, value, icon, color, to }: {
 }
 
 
+// ── Pending Approvals drawer (opens on "すべて見る") ────────────────────────
+interface PendingItem {
+  id:                 string;
+  application_id:     string;
+  application_number: string | null;
+  template_name:      string;
+  template_code:      string;
+  applicant_name:     string;
+  created_at:         string;
+}
+
+function PendingApprovalsDrawer({
+  total,
+  onClose,
+}: {
+  total: number;
+  onClose: () => void;
+}) {
+  const { lang } = useLang();
+  const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
+
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+  } = useInfiniteQuery<{ items: PendingItem[]; nextCursor: string | null }>({
+    queryKey: ['pendingApprovalsFull'],
+    queryFn:  async ({ pageParam }) => {
+      const qs = pageParam ? `?limit=25&cursor=${encodeURIComponent(pageParam as string)}` : '?limit=25';
+      return (await apiClient.get(`/dashboard/pending-approvals${qs}`)).data;
+    },
+    initialPageParam: undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    staleTime: 30_000,
+  });
+
+  const sentinelRef = useScrollEnd(
+    () => fetchNextPage(),
+    !!hasNextPage && !isFetchingNextPage,
+  );
+
+  const items = data?.pages.flatMap((p) => p.items) ?? [];
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+      onClick={onClose}
+    >
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
+
+      {/* Panel */}
+      <div
+        className="relative z-10 w-full sm:max-w-xl bg-surface-50 rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col"
+        style={{ maxHeight: '85dvh' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-white/40 flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-base">🔔</span>
+            <h2 className="text-sm font-bold text-warmgray-800">
+              {lang === 'en' ? 'Pending Approvals' : '承認待ち一覧'}
+            </h2>
+            <span className="badge-pending text-xs">{total} {lang === 'en' ? 'items' : '件'}</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-warmgray-400 hover:text-warmgray-700 transition-colors text-lg px-1"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Scrollable list */}
+        <div className="flex-1 overflow-y-auto overscroll-contain">
+          {isLoading ? (
+            <RingoLoader.Block />
+          ) : items.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-warmgray-400">
+              <span className="text-3xl mb-2">✅</span>
+              <p className="text-sm">{lang === 'en' ? 'All caught up!' : '承認待ちはありません'}</p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-white/30">
+              {items.map((item, i) => (
+                <li key={item.id} className="animate-fade-up" style={{ animationDelay: `${Math.min(i, 10) * 30}ms` }}>
+                  <Link
+                    to="/approvals"
+                    onClick={onClose}
+                    className="flex items-center gap-3 px-5 py-3.5 hover:bg-white/40 transition-colors"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-warmgray-800 truncate">
+                        {templateLabel(item.template_code, lang, item.template_name)}
+                      </p>
+                      <p className="text-[11px] text-warmgray-400 mt-0.5">
+                        {item.applicant_name}
+                        {item.application_number && (
+                          <span className="ml-1.5 font-mono text-warmgray-300">#{item.application_number}</span>
+                        )}
+                        {' · '}
+                        {new Date(item.created_at).toLocaleDateString(dateLocale)}
+                      </p>
+                    </div>
+                    <svg className="w-3.5 h-3.5 text-warmgray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                    </svg>
+                  </Link>
+                </li>
+              ))}
+
+              {isFetchingNextPage && (
+                <li className="flex items-center justify-center py-4">
+                  <span className="text-xs text-warmgray-400">{lang === 'en' ? 'Loading…' : '読込中…'}</span>
+                </li>
+              )}
+            </ul>
+          )}
+          {/* Infinite scroll sentinel — outside <ul>, always rendered, fires only when hasNextPage */}
+          <div ref={sentinelRef} className="h-1" />
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-3 border-t border-white/40 shrink-0 flex items-center justify-between">
+          <span className="text-[10px] text-warmgray-400">
+            {lang === 'en' ? `Showing ${items.length} of ${total}` : `${items.length} / ${total} 件表示中`}
+          </span>
+          <Link
+            to="/approvals"
+            onClick={onClose}
+            className="text-xs font-semibold text-ringo-500 hover:text-ringo-600 transition-colors flex items-center gap-1"
+          >
+            {lang === 'en' ? 'Open approvals page →' : '承認ページを開く →'}
+          </Link>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 export default function Dashboard() {
   const { user, loading, isAdmin } = useAuth();
   const { t, lang } = useLang();
   const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
   const perms = usePermissions(user?.role, user?.is_admin);
   const [adminView, setAdminView] = useState(false);
+  const [showAllPending, setShowAllPending] = useState(false);
 
   // ── Personal summary ───────────────────────────────────────────────────────
   interface DashboardSummary {
@@ -453,14 +600,14 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  {/* Pending approvals mini-list */}
+                  {/* Pending approvals mini-list — shows first 5 from cached summary */}
                   {perms.canApprove && pendingApprovals.length > 0 && (
                     <div>
                       <h3 className="section-title">{t('dash_require_title')}</h3>
                       <div className="card !p-0 overflow-hidden">
                         <ul className="divide-y divide-white/30">
-                          {pendingApprovals.slice(0, 3).map((app, i) => (
-                            <li key={app.id} className="animate-fade-up" style={{ animationDelay: `${i * 55}ms` }}>
+                          {pendingApprovals.map((app, i) => (
+                            <li key={app.id} className="animate-fade-up" style={{ animationDelay: `${i * 45}ms` }}>
                               <Link
                                 to="/approvals"
                                 className="block px-4 py-3 hover:bg-white/30 transition-colors"
@@ -473,13 +620,29 @@ export default function Dashboard() {
                             </li>
                           ))}
                         </ul>
-                        <div className="px-4 py-3 border-t border-white/30">
+                        <div className="px-4 py-3 border-t border-white/30 flex items-center justify-between gap-3">
                           <Link to="/approvals" className="text-xs font-semibold text-ringo-500 hover:text-ringo-600 transition-colors">
                             {t('dash_view_approvals')}
                           </Link>
+                          {pendingApprovalsTotal > 5 && (
+                            <button
+                              onClick={() => setShowAllPending(true)}
+                              className="text-xs font-semibold text-warmgray-400 hover:text-warmgray-600 transition-colors flex items-center gap-1"
+                            >
+                              {lang === 'en' ? `All ${pendingApprovalsTotal} →` : `全${pendingApprovalsTotal}件を見る →`}
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
+                  )}
+
+                  {/* Pending approvals full drawer */}
+                  {showAllPending && (
+                    <PendingApprovalsDrawer
+                      total={pendingApprovalsTotal}
+                      onClose={() => setShowAllPending(false)}
+                    />
                   )}
                 </div>
               </div>

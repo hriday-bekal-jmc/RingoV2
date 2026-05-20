@@ -72,7 +72,7 @@ async function seed(): Promise<void> {
       { email: 'soumu1@jmc-ltd.co.jp',      name: '佐藤 三郎', role: 'SOUMU',      dept: 'SOUMU', pw: false },
       { email: 'senmu@jmc-ltd.co.jp',       name: '高橋 専務', role: 'SENMU',      dept: 'SOUMU', pw: false },
       { email: 'shacho@jmc-ltd.co.jp',      name: '渡辺 社長', role: 'PRESIDENT',  dept: 'SOUMU', pw: false },
-      { email: 'keiri1@jmc-ltd.co.jp',      name: '中村 経理', role: 'ACCOUNTING', dept: 'KIKAKU', pw: false },
+      { email: 'keiri1@jmc-ltd.co.jp',      name: '中村 経理', role: 'SOUMU',      dept: 'KIKAKU', pw: false },
       // ── Admin ── login: h-bekal@jmc-ltd.co.jp / Ringo2026!
       { email: 'h-bekal@jmc-ltd.co.jp',    name: 'H. Bekal',  role: 'SOUMU',      dept: 'SOUMU', is_admin: true, pw: true  },
     ];

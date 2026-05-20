@@ -19,8 +19,9 @@
 //   - Connection cap + heartbeat + abs timeout → no leaks
 
 import { Router, Request, Response } from 'express';
+import { randomUUID } from 'node:crypto';
 import { requireAuth } from '../middlewares/authMiddleware';
-import { subscribe, BusEvent } from '../services/sseEventBus';
+import { subscribe, publish, BusEvent } from '../services/sseEventBus';
 import { replayEventsForUser, insertOutboxEvent } from '../services/eventOutbox';
 import { withTransaction } from '../config/db';
 
@@ -78,6 +79,17 @@ function installBusHandler(): void {
   busHandlerInstalled = true;
 
   subscribe((event: BusEvent) => {
+    if (event.broadcast) {
+      // Fan out to every locally-connected client (e.g. TEMPLATE_UPDATED)
+      for (const [, conns] of clients) {
+        for (const res of conns) {
+          try {
+            writeEvent(res, event.event_type, event.payload, event.id);
+          } catch { /* disconnected */ }
+        }
+      }
+      return;
+    }
     for (const userId of event.recipient_user_ids) {
       const conns = clients.get(userId);
       if (!conns) continue;
@@ -125,15 +137,22 @@ export async function publishEvent(input: {
   return withTransaction(async (client) => insertOutboxEvent(client, input));
 }
 
-// ── Backward-compat shims (will be deleted after caller migration) ──────────
-// emitAll/emitToUsers usages still in code — keep working temporarily but
-// only deliver to LOCAL clients. Wide refactor is happening — these go away.
+// ── Broadcast emit ──────────────────────────────────────────────────────────
+// Publishes through the SSE bus with broadcast=true so EVERY instance fans the
+// event out to its locally-connected clients. Use for global signals like
+// TEMPLATE_UPDATED that every user needs to receive regardless of recipient list.
+// Fire-and-forget — failures are logged but don't block the request.
 export function emitAll(event: string, data: unknown = {}): void {
-  for (const [, resSet] of clients) {
-    for (const res of resSet) {
-      try { writeEvent(res, event, data); } catch { /* disconnected */ }
-    }
-  }
+  const payload = typeof data === 'object' && data !== null
+    ? data as Record<string, unknown>
+    : { value: data };
+  publish({
+    id:                 randomUUID(),
+    event_type:         event,
+    recipient_user_ids: [],
+    payload,
+    broadcast:          true,
+  }).catch((err) => console.error('[sse] broadcast publish failed:', err));
 }
 export function emitToUsers(userIds: string[], event: string, data: unknown = {}): void {
   void emitDirectToUsers(userIds, event, typeof data === 'object' && data !== null ? data as Record<string, unknown> : { value: data });
