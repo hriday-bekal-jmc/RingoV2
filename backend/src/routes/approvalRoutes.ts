@@ -144,169 +144,204 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+// ── Shared approve logic — used by single /:id/approve and bulk /bulk-approve ──
+async function processSingleApprove(
+  appId: string,
+  userId: string,
+  isAdmin: boolean,
+  comment: string | undefined,
+): Promise<Record<string, unknown>> {
+  let recipients: string[] = [];
+  const result = await withTransaction(async (client: pg.PoolClient) => {
+    const appRow = await client.query(
+      `SELECT id, status, application_number, route_id, applicant_id FROM applications WHERE id = $1 FOR UPDATE`,
+      [appId],
+    );
+    if (appRow.rows.length === 0) throw Object.assign(new Error('Application not found'), { status: 404 });
+    if (!['PENDING_APPROVAL', 'PENDING_SETTLEMENT'].includes(appRow.rows[0].status as string)) {
+      throw Object.assign(new Error(`Cannot approve from status: ${appRow.rows[0].status}`), { status: 409 });
+    }
+
+    const currentStepRes = await client.query(
+      `SELECT id, step_order, approver_id, stage FROM approval_steps
+       WHERE application_id = $1 AND status = 'PENDING'
+       ORDER BY step_order ASC LIMIT 1`,
+      [appId],
+    );
+    if (currentStepRes.rows.length === 0) {
+      throw Object.assign(new Error('No pending approval step found — data inconsistency'), { status: 409 });
+    }
+    const currentStep = currentStepRes.rows[0] as {
+      id: string; step_order: number; approver_id: string | null; stage: string;
+    };
+
+    if (!isAdmin && currentStep.approver_id && currentStep.approver_id !== userId) {
+      throw Object.assign(
+        new Error('この承認ステップはあなたに割り当てられていません。別の承認者が担当しています。'),
+        { status: 403 },
+      );
+    }
+
+    if (!isAdmin && !currentStep.approver_id) {
+      const prevActorRes = await client.query(
+        `SELECT acted_by FROM approval_steps
+         WHERE application_id = $1 AND stage = 'RINGI' AND status = 'APPROVED'
+         ORDER BY step_order DESC LIMIT 1`,
+        [appId],
+      );
+      if (prevActorRes.rows.length > 0 && prevActorRes.rows[0].acted_by === userId) {
+        throw Object.assign(
+          new Error('直前のステップを承認した方は、次のステップを承認できません。別の承認者が必要です。'),
+          { status: 403 },
+        );
+      }
+    }
+
+    await client.query(
+      `UPDATE approval_steps
+       SET status = 'APPROVED', comment = $2, acted_at = CURRENT_TIMESTAMP, acted_by = $3
+       WHERE id = $1`,
+      [currentStep.id, comment ?? null, userId],
+    );
+
+    const nextStepRes = await client.query(
+      `SELECT id, step_order FROM approval_steps
+       WHERE application_id = $1 AND stage = $2 AND status = 'WAITING'
+       ORDER BY step_order ASC LIMIT 1`,
+      [appId, currentStep.stage],
+    );
+
+    let updatedApp: Record<string, unknown>;
+
+    if (nextStepRes.rows.length > 0) {
+      const nextStep = nextStepRes.rows[0] as { id: string; step_order: number };
+      await client.query(`UPDATE approval_steps SET status = 'PENDING' WHERE id = $1`, [nextStep.id]);
+      const appRes = await client.query(
+        `SELECT id, status, application_number FROM applications WHERE id = $1`, [appId],
+      );
+      updatedApp = { ...appRes.rows[0], advanced_to_step: nextStep.step_order };
+    } else {
+      const year = new Date().getFullYear();
+      const tmplRes = await client.query(
+        `SELECT ft.app_number_prefix, ft.app_number_digits
+         FROM applications a
+         JOIN form_templates ft ON ft.id = a.template_id
+         WHERE a.id = $1`,
+        [appId],
+      );
+      const prefix: string = tmplRes.rows[0]?.app_number_prefix ?? 'RNG';
+      const digits: number  = tmplRes.rows[0]?.app_number_digits  ?? 6;
+      const seqRes = await client.query(
+        `INSERT INTO application_number_sequences (template_id, year, prefix, last_seq)
+         SELECT a.template_id, $2, $3, 1
+         FROM applications a WHERE a.id = $1
+         ON CONFLICT (template_id, year, prefix) DO UPDATE
+           SET last_seq = application_number_sequences.last_seq + 1
+         RETURNING last_seq`,
+        [appId, year, prefix],
+      );
+      const appNumber = `${prefix}-${year}-${String(seqRes.rows[0].last_seq).padStart(digits, '0')}`;
+      const newStatus = currentStep.stage === 'SETTLEMENT' ? 'SETTLEMENT_APPROVED' : 'APPROVED';
+      const appRes = await client.query(
+        `UPDATE applications
+         SET status = $2,
+             application_number = COALESCE(application_number, $3)
+         WHERE id = $1
+         RETURNING id, status, application_number`,
+        [appId, newStatus, appNumber],
+      );
+      updatedApp = appRes.rows[0];
+    }
+
+    await client.query(
+      `INSERT INTO audit_logs (action, entity_type, entity_id, metadata)
+       VALUES ('APPROVAL_APPROVE', 'application', $1, $2::jsonb)`,
+      [appId, JSON.stringify({ step: currentStep.step_order, actor: userId, comment: comment ?? null })],
+    );
+
+    const isSettlementStage = currentStep.stage === 'SETTLEMENT';
+    const computedRecipients = await computeApplicationRecipients(client, appId, {
+      includeAccounting: isSettlementStage,
+    });
+    const isFinalForOutbox =
+      ((updatedApp as { status?: string }).status === 'APPROVED') ||
+      ((updatedApp as { status?: string }).status === 'COMPLETED') ||
+      ((updatedApp as { status?: string }).status === 'SETTLEMENT_APPROVED');
+    await insertOutboxEvent(client, {
+      event_type:         'APPROVAL_ACTION',
+      entity_type:        'application',
+      entity_id:          appId,
+      recipient_user_ids: computedRecipients,
+      payload:            { type: 'approve', applicationId: appId, final: isFinalForOutbox },
+    });
+
+    recipients = computedRecipients;
+    return updatedApp;
+  });
+
+  invalidateDashboardCache(recipients);
+  return result as Record<string, unknown>;
+}
+
+// POST /approvals/bulk-approve — approve multiple applications at once
+// Each runs in its own transaction → partial success allowed.
+// Body: { applicationIds: string[], comment?: string }
+router.post('/bulk-approve', async (req: Request, res: Response): Promise<void> => {
+  const { applicationIds, comment } = (req.body ?? {}) as {
+    applicationIds?: unknown;
+    comment?: string;
+  };
+  const { id: userId } = req.user!;
+  const isAdmin = isAdminUser(req.user);
+
+  if (!Array.isArray(applicationIds) || applicationIds.length === 0) {
+    res.status(400).json({ error: 'applicationIds (array) required' });
+    return;
+  }
+  if (applicationIds.length > 50) {
+    res.status(400).json({ error: 'Max 50 applications per bulk request' });
+    return;
+  }
+
+  try {
+    const results = await Promise.allSettled(
+      (applicationIds as string[]).map((id) =>
+        processSingleApprove(String(id), userId, isAdmin, comment),
+      ),
+    );
+
+    const succeeded: string[] = [];
+    const failed: { applicationId: string; reason: string }[] = [];
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled') {
+        succeeded.push((applicationIds as string[])[i]);
+      } else {
+        failed.push({
+          applicationId: (applicationIds as string[])[i],
+          reason: (r.reason as { message?: string })?.message ?? 'Unknown error',
+        });
+      }
+    });
+
+    res.json({ succeeded: succeeded.length, failed });
+  } catch (err) {
+    console.error('[approvals] bulk-approve failed:', err);
+    res.status(500).json({ error: '一括承認に失敗しました' });
+  }
+});
+
 // POST /approvals/:id/approve
 router.post('/:id/approve', async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
   const { comment } = (req.body ?? {}) as { comment?: string };
   const { id: userId } = req.user!;
   const isAdmin = isAdminUser(req.user);
-
-  let approveRecipients: string[] = [];
   try {
-    const result = await withTransaction(async (client: pg.PoolClient) => {
-      // Lock the application row (include applicant_id for cache invalidation)
-      const appRow = await client.query(
-        `SELECT id, status, application_number, route_id, applicant_id FROM applications WHERE id = $1 FOR UPDATE`,
-        [id],
-      );
-      if (appRow.rows.length === 0) throw Object.assign(new Error('Application not found'), { status: 404 });
-      if (!['PENDING_APPROVAL', 'PENDING_SETTLEMENT'].includes(appRow.rows[0].status as string)) {
-        throw Object.assign(new Error(`Cannot approve from status: ${appRow.rows[0].status}`), { status: 409 });
-      }
-
-      // Get the current PENDING step (any stage — RINGI or SETTLEMENT)
-      const currentStepRes = await client.query(
-        `SELECT id, step_order, approver_id, stage FROM approval_steps
-         WHERE application_id = $1 AND status = 'PENDING'
-         ORDER BY step_order ASC LIMIT 1`,
-        [id],
-      );
-      if (currentStepRes.rows.length === 0) {
-        throw Object.assign(new Error('No pending approval step found — data inconsistency'), { status: 409 });
-      }
-      const currentStep = currentStepRes.rows[0] as {
-        id: string; step_order: number; approver_id: string | null; stage: string;
-      };
-
-      // ── Authorization checks ──────────────────────────────────────────────
-
-      // 1. If step has explicit approver and it's not the current user → reject
-      if (!isAdmin && currentStep.approver_id && currentStep.approver_id !== userId) {
-        throw Object.assign(
-          new Error('この承認ステップはあなたに割り当てられていません。別の承認者が担当しています。'),
-          { status: 403 },
-        );
-      }
-
-      // 2. For unassigned steps: prevent the SAME user from approving consecutive steps
-      //    (stops one person from self-approving the entire chain)
-      if (!isAdmin && !currentStep.approver_id) {
-        const prevActorRes = await client.query(
-          `SELECT acted_by FROM approval_steps
-           WHERE application_id = $1 AND stage = 'RINGI' AND status = 'APPROVED'
-           ORDER BY step_order DESC LIMIT 1`,
-          [id],
-        );
-        if (prevActorRes.rows.length > 0 && prevActorRes.rows[0].acted_by === userId) {
-          throw Object.assign(
-            new Error('直前のステップを承認した方は、次のステップを承認できません。別の承認者が必要です。'),
-            { status: 403 },
-          );
-        }
-      }
-
-      // Mark current step approved + record who acted
-      await client.query(
-        `UPDATE approval_steps
-         SET status = 'APPROVED', comment = $2, acted_at = CURRENT_TIMESTAMP, acted_by = $3
-         WHERE id = $1`,
-        [currentStep.id, comment ?? null, userId],
-      );
-
-      const nextStepRes = await client.query(
-        `SELECT id, step_order FROM approval_steps
-         WHERE application_id = $1 AND stage = $2 AND status = 'WAITING'
-         ORDER BY step_order ASC LIMIT 1`,
-        [id, currentStep.stage],
-      );
-
-      let updatedApp: Record<string, unknown>;
-
-      if (nextStepRes.rows.length > 0) {
-        // More steps remain → advance to next
-        const nextStep = nextStepRes.rows[0] as { id: string; step_order: number };
-        await client.query(`UPDATE approval_steps SET status = 'PENDING' WHERE id = $1`, [nextStep.id]);
-        const appRes = await client.query(
-          `SELECT id, status, application_number FROM applications WHERE id = $1`, [id],
-        );
-        updatedApp = { ...appRes.rows[0], advanced_to_step: nextStep.step_order };
-      } else {
-        // Final step for this stage — assign app number using per-template per-year sequence
-        const year = new Date().getFullYear();
-        const tmplRes = await client.query(
-          `SELECT ft.app_number_prefix, ft.app_number_digits
-           FROM applications a
-           JOIN form_templates ft ON ft.id = a.template_id
-           WHERE a.id = $1`,
-          [id],
-        );
-        const prefix: string = tmplRes.rows[0]?.app_number_prefix ?? 'RNG';
-        const digits: number = tmplRes.rows[0]?.app_number_digits  ?? 6;
-        const seqRes = await client.query(
-          `INSERT INTO application_number_sequences (template_id, year, prefix, last_seq)
-           SELECT a.template_id, $2, $3, 1
-           FROM applications a WHERE a.id = $1
-           ON CONFLICT (template_id, year, prefix) DO UPDATE
-             SET last_seq = application_number_sequences.last_seq + 1
-           RETURNING last_seq`,
-          [id, year, prefix],
-        );
-        const appNumber = `${prefix}-${year}-${String(seqRes.rows[0].last_seq).padStart(digits, '0')}`;
-
-        // RINGI final → APPROVED
-        // SETTLEMENT final → SETTLEMENT_APPROVED (accounting must close with date+proof separately)
-        const newStatus = currentStep.stage === 'SETTLEMENT' ? 'SETTLEMENT_APPROVED' : 'APPROVED';
-        const appRes = await client.query(
-          `UPDATE applications
-           SET status = $2,
-               application_number = COALESCE(application_number, $3)
-           WHERE id = $1
-           RETURNING id, status, application_number`,
-          [id, newStatus, appNumber],
-        );
-        updatedApp = appRes.rows[0];
-      }
-
-      await client.query(
-        `INSERT INTO audit_logs (action, entity_type, entity_id, metadata)
-         VALUES ('APPROVAL_APPROVE', 'application', $1, $2::jsonb)`,
-        [id, JSON.stringify({ step: currentStep.step_order, actor: userId, comment: comment ?? null })],
-      );
-
-      // Targeted SSE event via outbox — atomic with business change.
-      // include accounting users for settlement-stage transitions so their
-      // dashboards refresh immediately.
-      const isSettlementStage = currentStep.stage === 'SETTLEMENT';
-      const appId = String(id);
-      const recipients = await computeApplicationRecipients(client, appId, {
-        includeAccounting: isSettlementStage,
-      });
-      const isFinalForOutbox =
-        ((updatedApp as { status?: string }).status === 'APPROVED') ||
-        ((updatedApp as { status?: string }).status === 'COMPLETED') ||
-        ((updatedApp as { status?: string }).status === 'SETTLEMENT_APPROVED');
-      await insertOutboxEvent(client, {
-        event_type:         'APPROVAL_ACTION',
-        entity_type:        'application',
-        entity_id:          appId,
-        recipient_user_ids: recipients,
-        payload:            { type: 'approve', applicationId: appId, final: isFinalForOutbox },
-      });
-
-      approveRecipients = recipients;
-      return updatedApp;
-    });
-
-    // Bust Redis dashboard cache for all affected users — must happen AFTER tx commits
-    // so the next refetch hits the DB and gets fresh data.
-    invalidateDashboardCache(approveRecipients);
-
+    const result = await processSingleApprove(String(id), userId, isAdmin, comment);
     const status = (result as { status?: string }).status;
-    // APPROVED = ringi final; SETTLEMENT_APPROVED = settlement workflow final (accounting closes separately)
     const isFinal = status === 'APPROVED' || status === 'COMPLETED' || status === 'SETTLEMENT_APPROVED';
     const isSettlementApproved = status === 'SETTLEMENT_APPROVED';
     const isCompleted = status === 'COMPLETED';
-
     res.json({
       message: isSettlementApproved
         ? '精算承認完了 — 経理担当者が振込確認後に締めます'

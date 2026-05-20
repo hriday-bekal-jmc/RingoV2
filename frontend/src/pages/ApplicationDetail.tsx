@@ -63,6 +63,28 @@ const STATUS_BADGE: Record<string, string> = {
   SETTLEMENT_APPROVED: 'badge-teal',
 };
 
+// ── File value detection ──────────────────────────────────────────────────────
+function isFileValue(v: unknown): boolean {
+  if (typeof v !== 'string' || !v) return false;
+  return v.split(',').some((s) => s.trim().startsWith('/api/files/') || s.trim().startsWith('/uploads/'));
+}
+function FileLinks({ val }: { val: unknown }) {
+  const { lang } = useLang();
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-0.5">
+      {String(val).split(',').filter(Boolean).map((url, i) => (
+        <a key={i} href={url.trim()} target="_blank" rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-xs text-ringo-600 hover:text-ringo-700 bg-ringo-50/60 border border-ringo-200/60 px-2.5 py-1 rounded-lg font-medium transition-colors">
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+          </svg>
+          {lang === 'en' ? 'File' : 'ファイル'} {i + 1}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 // ── View Mode: 申請データを綺麗に表示するコンポーネント ──
 function FormDataViewer({ app }: { app: ApplicationDetail }) {
   const { lang } = useLang();
@@ -71,13 +93,16 @@ function FormDataViewer({ app }: { app: ApplicationDetail }) {
     <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
       {fields.map((f) => {
         const val = app.form_data[f.name];
-        const isLong = f.type === 'repeat_group' || f.type === 'textarea' || (typeof val === 'string' && val.length > 40);
+        const isFile = f.type === 'file' || isFileValue(val);
+        const isLong = f.type === 'repeat_group' || f.type === 'textarea' || (typeof val === 'string' && !isFile && val.length > 40);
         return (
           <div key={f.name} className={isLong ? 'col-span-full' : ''}>
             <dt className="text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{fieldLabel(f, lang)}</dt>
             <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3.5 py-2.5 rounded-xl break-words min-h-[42px]">
               {f.type === 'repeat_group' ? (
                 <RepeatGroupDisplay field={f} value={val} />
+              ) : isFile && val ? (
+                <FileLinks val={val} />
               ) : val != null && val !== '' ? (
                 String(val)
               ) : (
@@ -113,7 +138,7 @@ function SettlementDataViewer({ app, t }: { app: ApplicationDetail; t: (k: any) 
     <div className="space-y-4">
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
         {fields
-          .filter((f) => f.type !== 'file')
+          .filter((f) => f.type !== 'file' && !isFileValue(data[f.name]))
           .map((f) => {
             const val = data[f.name];
             const displayVal = fmt(f.name, val);
@@ -137,7 +162,7 @@ function SettlementDataViewer({ app, t }: { app: ApplicationDetail; t: (k: any) 
 
       {/* Receipt files */}
       {fields
-        .filter((f) => f.type === 'file')
+        .filter((f) => f.type === 'file' || isFileValue(data[f.name]))
         .map((f) => {
           const val = data[f.name];
           if (!val) return null;
@@ -505,6 +530,15 @@ export default function ApplicationDetail() {
     return (
       <Layout title={`${t('detail_draft_prefix')}: ${app.template_name}`}>
         <div className="max-w-3xl mx-auto">
+          <button
+            onClick={() => navigate(-1)}
+            className="md:hidden flex items-center gap-1.5 text-sm font-semibold text-warmgray-500 hover:text-warmgray-800 transition-colors mb-4"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+            </svg>
+            {lang === 'en' ? 'Back' : '戻る'}
+          </button>
           <DraftEditor app={app} onSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['application', id] });
             navigate('/history');
@@ -604,7 +638,17 @@ export default function ApplicationDetail() {
 
     return (
       <Layout title={app.template_name}>
-        <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-up">
+        <div className="max-w-5xl mx-auto">
+        <button
+          onClick={() => navigate(-1)}
+          className="md:hidden flex items-center gap-1.5 text-sm font-semibold text-warmgray-500 hover:text-warmgray-800 transition-colors mb-4"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+          </svg>
+          {lang === 'en' ? 'Back' : '戻る'}
+        </button>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-up">
 
           {/* Left: return notice + editor */}
           <div className="lg:col-span-2 space-y-5">
@@ -675,12 +719,22 @@ export default function ApplicationDetail() {
           </div>
 
         </div>
+      </div>
       </Layout>
     );
   }
 
   return (
     <Layout title={t('title_history')}>
+      <button
+        onClick={() => navigate(-1)}
+        className="md:hidden flex items-center gap-1.5 text-sm font-semibold text-warmgray-500 hover:text-warmgray-800 transition-colors mb-4"
+      >
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+        </svg>
+        {lang === 'en' ? 'Back' : '戻る'}
+      </button>
       <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-up">
 
         {/* Left: main content */}

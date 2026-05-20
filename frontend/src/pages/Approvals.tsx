@@ -5,6 +5,7 @@ import { useScrollEnd } from '../hooks/useScrollEnd';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import Toast, { useToast } from '../components/common/Toast';
+import ConfirmDialog from '../components/common/ConfirmDialog';
 import { useLang } from '../context/LanguageContext';
 import { useAuth } from '../context/AuthContext';
 import RingoLoader from '../components/common/RingoLoader';
@@ -85,6 +86,30 @@ function StepBar({ current, total }: { current: number; total: number }) {
   );
 }
 
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+/** Detect file upload values — works even when schema type isn't set to 'file' */
+function isFileValue(v: unknown): boolean {
+  if (typeof v !== 'string' || !v) return false;
+  return v.split(',').some((s) => s.trim().startsWith('/api/files/'));
+}
+
+function renderFileLinks(val: unknown, attachLabel: string) {
+  return (
+    <div className="flex flex-wrap gap-2 mt-1">
+      {String(val).split(',').filter(Boolean).map((url, i) => (
+        <a key={i} href={url.trim()} target="_blank" rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-xs text-ringo-600 hover:text-ringo-700 bg-ringo-50/60 border border-ringo-200/60 px-2.5 py-1 rounded-lg font-medium transition-colors">
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+          </svg>
+          {attachLabel} {i + 1}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 // ── Form data viewer ──────────────────────────────────────────────────────────
 function FormDataViewer({ formData, schema, tFn }: {
   formData: Record<string, unknown>;
@@ -94,14 +119,21 @@ function FormDataViewer({ formData, schema, tFn }: {
   const fields = schema?.fields ?? [];
 
   if (fields.length === 0) {
+    // Schema unavailable — render raw key/value but still detect file URLs
     return (
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
-        {Object.entries(formData).map(([k, v]) => (
-          <div key={k} className={String(v ?? '').length > 40 ? 'col-span-full' : ''}>
-            <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-0.5">{k}</dt>
-            <dd className="text-sm text-warmgray-800 break-words">{String(v ?? '—')}</dd>
-          </div>
-        ))}
+        {Object.entries(formData).map(([k, v]) => {
+          const strVal = String(v ?? '');
+          const isLong = strVal.length > 40;
+          return (
+            <div key={k} className={isLong ? 'col-span-full' : ''}>
+              <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-0.5">{k}</dt>
+              <dd className="text-sm text-warmgray-800 break-words">
+                {isFileValue(v) ? renderFileLinks(v, tFn('attach_label')) : (strVal || '—')}
+              </dd>
+            </div>
+          );
+        })}
       </dl>
     );
   }
@@ -110,9 +142,10 @@ function FormDataViewer({ formData, schema, tFn }: {
     <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
       {fields.map((f) => {
         const val = formData[f.name];
-        const isFile = f.type === 'file';
+        // Treat as file if schema says 'file' OR value looks like a file URL
+        const isFile = f.type === 'file' || isFileValue(val);
         const isRepeat = f.type === 'repeat_group';
-        const isLong = isRepeat || f.type === 'textarea' || (typeof val === 'string' && val.length > 60);
+        const isLong = isRepeat || f.type === 'textarea' || (typeof val === 'string' && !isFile && val.length > 60);
 
         return (
           <div key={f.name} className={isLong ? 'col-span-full' : ''}>
@@ -121,21 +154,7 @@ function FormDataViewer({ formData, schema, tFn }: {
               {isRepeat ? (
                 <RepeatGroupDisplay field={f} value={val} compact />
               ) : isFile && val ? (
-                <div className="flex flex-wrap gap-2 mt-1">
-                  {String(val).split(',').filter(Boolean).map((url, i) => {
-                    // Same-origin (vite proxy /api in dev, reverse proxy in prod) — cookie auto-sent
-                    const fullUrl = url.startsWith('http') ? url : url;
-                    return (
-                      <a key={i} href={fullUrl} target="_blank" rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 text-xs text-ringo-600 hover:text-ringo-700 bg-ringo-50/60 border border-ringo-200/60 px-2.5 py-1 rounded-lg font-medium transition-colors">
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                        </svg>
-                        {tFn('attach_label')} {i + 1}
-                      </a>
-                    );
-                  })}
-                </div>
+                renderFileLinks(val, tFn('attach_label'))
               ) : val != null && val !== '' ? (
                 <span className={isLong ? 'block whitespace-pre-wrap leading-relaxed' : ''}>{String(val)}</span>
               ) : (
@@ -243,14 +262,17 @@ function AppDetailPanel({ appId, onClose, tFn, lang }: {
     if (fields.length === 0) {
       return (
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
-          {Object.entries(formData).map(([k, v]) => (
-            <div key={k} className={String(v ?? '').length > 40 ? 'col-span-full' : ''}>
-              <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{k}</dt>
-              <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3 py-2.5 rounded-xl break-words min-h-[38px]">
-                {String(v ?? '') || <span className="text-warmgray-300">—</span>}
-              </dd>
-            </div>
-          ))}
+          {Object.entries(formData).map(([k, v]) => {
+            const strVal = String(v ?? '');
+            return (
+              <div key={k} className={strVal.length > 40 ? 'col-span-full' : ''}>
+                <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{k}</dt>
+                <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3 py-2.5 rounded-xl break-words min-h-[38px]">
+                  {isFileValue(v) ? renderFileLinks(v, tFn('attach_label')) : (strVal || <span className="text-warmgray-300">—</span>)}
+                </dd>
+              </div>
+            );
+          })}
         </dl>
       );
     }
@@ -259,8 +281,8 @@ function AppDetailPanel({ appId, onClose, tFn, lang }: {
         {fields.map((f) => {
           const val = formData[f.name];
           const isRepeat = f.type === 'repeat_group';
-          const isLong = isRepeat || f.type === 'textarea' || (typeof val === 'string' && val.length > 50);
-          const isFile = f.type === 'file';
+          const isFile = f.type === 'file' || isFileValue(val);
+          const isLong = isRepeat || f.type === 'textarea' || (typeof val === 'string' && !isFile && val.length > 50);
           return (
             <div key={f.name} className={isLong ? 'col-span-full' : ''}>
               <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{f.label}</dt>
@@ -268,17 +290,7 @@ function AppDetailPanel({ appId, onClose, tFn, lang }: {
                 {isRepeat ? (
                   <RepeatGroupDisplay field={f} value={val} compact />
                 ) : isFile && val ? (
-                  <div className="flex flex-wrap gap-1.5">
-                    {String(val).split(',').filter(Boolean).map((url, i) => {
-                      const full = url.startsWith('http') ? url : url;
-                      return (
-                        <a key={i} href={full} target="_blank" rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-xs text-ringo-600 hover:text-ringo-700 bg-ringo-50/60 border border-ringo-200/60 px-2 py-0.5 rounded-lg font-medium">
-                          📎 {tFn('attach_label')} {i + 1}
-                        </a>
-                      );
-                    })}
-                  </div>
+                  renderFileLinks(val, tFn('attach_label'))
                 ) : val != null && val !== '' ? (
                   <span className={isLong ? 'block whitespace-pre-wrap leading-relaxed' : ''}>{String(val)}</span>
                 ) : (
@@ -697,6 +709,11 @@ export default function Approvals() {
   const { toast, show: showToast, dismiss } = useToast();
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
   const [systemView, setSystemView] = useState(false);
+  // ── Selection / bulk-approve state ────────────────────────────────────────
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkComment, setBulkComment] = useState('');
+  const [showBulkConfirm, setShowBulkConfirm] = useState(false);
   const { t, lang } = useLang();
   const { isAdmin } = useAuth();
   const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
@@ -742,6 +759,7 @@ export default function Approvals() {
   function toggleSystemView() {
     setSystemView(v => !v);
     setSelectedApp(null);
+    exitSelectionMode();
   }
 
   const approveMutation = useMutation({
@@ -781,6 +799,44 @@ export default function Approvals() {
 
   const isMutating = approveMutation.isPending || returnMutation.isPending || rejectMutation.isPending;
 
+  // ── Bulk approve ──────────────────────────────────────────────────────────
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const exitSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+    setBulkComment('');
+    setShowBulkConfirm(false);
+  };
+
+  const selectAll = () => {
+    setSelectedIds(new Set(applications.map((a) => a.id)));
+  };
+
+  const bulkApproveMutation = useMutation({
+    mutationFn: async ({ applicationIds, comment }: { applicationIds: string[]; comment?: string }) =>
+      (await apiClient.post('/approvals/bulk-approve', { applicationIds, comment })).data,
+    onSuccess: (data: { succeeded: number; failed: { applicationId: string; reason: string }[] }) => {
+      if (data.failed.length === 0) {
+        showToast(`✅ ${data.succeeded}件を承認しました`);
+      } else {
+        showToast(
+          `✅ ${data.succeeded}件承認 / ⚠ ${data.failed.length}件失敗: ${data.failed.map((f) => f.reason).join(', ')}`,
+          'error',
+        );
+      }
+      exitSelectionMode();
+      invalidate();
+    },
+    onError: (err: any) => showToast(`一括承認に失敗しました: ${err.message}`, 'error'),
+  });
+
   return (
     <Layout title={t('title_approvals')}>
       {toast && <Toast message={toast.message} type={toast.type} onDismiss={dismiss} />}
@@ -795,8 +851,32 @@ export default function Approvals() {
             <p className="text-sm text-warmgray-400 mt-1">{t('approvals_subtitle')}</p>
           </div>
           <div className="flex items-center gap-2 shrink-0 mt-1">
-            {totalCount > 0 && (
+            {totalCount > 0 && !selectionMode && (
               <span className="badge-pending px-3 py-1.5 text-sm">{totalCount} {t('approvals_pending_badge')}</span>
+            )}
+            {/* Bulk-select toggle — shown when there are apps to select */}
+            {applications.length > 0 && (
+              selectionMode ? (
+                <button
+                  onClick={exitSelectionMode}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all duration-150 bg-ringo-500 text-white border-ringo-500 shadow-sm"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                  {lang === 'en' ? 'Cancel' : 'キャンセル'}
+                </button>
+              ) : (
+                <button
+                  onClick={() => { setSelectionMode(true); setSelectedIds(new Set()); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all duration-150 bg-white/60 text-warmgray-500 border-white/80 hover:bg-white/90 hover:text-warmgray-800"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  {lang === 'en' ? 'Select' : '選択'}
+                </button>
+              )
             )}
             {/* Admin-only system-wide toggle */}
             {isAdmin && (
@@ -905,13 +985,26 @@ export default function Approvals() {
                   return (
                   <tr
                     key={app.id}
-                    className={`cursor-pointer hover:bg-white/50 transition-colors duration-100 group animate-fade-up${hasDiff ? ' bg-amber-50/80' : ''}`}
+                    className={`cursor-pointer hover:bg-white/50 transition-colors duration-100 group animate-fade-up
+                      ${hasDiff && !selectedIds.has(app.id) ? ' bg-amber-50/80' : ''}
+                      ${selectedIds.has(app.id) ? ' !bg-ringo-50/80' : ''}`}
                     style={{ animationDelay: `${Math.min(i, 14) * 30}ms` }}
-                    onClick={() => setSelectedApp(app)}
+                    onClick={() => selectionMode ? toggleSelect(app.id) : setSelectedApp(app)}
                   >
-                    <td data-label={t('approvals_col_app')} className={hasDiff ? 'border-l-[3px] border-amber-500' : ''}>
+                    <td data-label={t('approvals_col_app')} className={hasDiff && !selectedIds.has(app.id) ? 'border-l-[3px] border-amber-500' : selectedIds.has(app.id) ? 'border-l-[3px] border-ringo-400' : ''}>
                       <div className="flex items-center gap-3 md:justify-start justify-end min-w-0">
-                        <UserAvatar name={app.applicant_name ?? '?'} avatarUrl={app.applicant_avatar} size={8} />
+                        {selectionMode ? (
+                          <div className="w-8 h-8 flex items-center justify-center shrink-0">
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(app.id)}
+                              readOnly
+                              className="w-5 h-5 accent-ringo-500 pointer-events-none rounded"
+                            />
+                          </div>
+                        ) : (
+                          <UserAvatar name={app.applicant_name ?? '?'} avatarUrl={app.applicant_avatar} size={8} />
+                        )}
                         <div className="min-w-0 md:text-left text-right">
                           <div className="flex items-center gap-2 md:justify-start justify-end">
                             <p className="text-sm font-semibold text-warmgray-800 truncate">{app.template_name}</p>
@@ -1004,6 +1097,100 @@ export default function Approvals() {
           onAction={handleAction}
           isMutating={isMutating}
         />
+      )}
+
+      {/* Bulk approve confirm dialog */}
+      <ConfirmDialog
+        isOpen={showBulkConfirm}
+        title={lang === 'en' ? 'Bulk Approve' : '一括承認'}
+        message={
+          lang === 'en'
+            ? `Approve ${selectedIds.size} application${selectedIds.size > 1 ? 's' : ''}? This cannot be undone.`
+            : `${selectedIds.size}件の申請をまとめて承認します。この操作は取り消せません。`
+        }
+        confirmLabel={lang === 'en' ? `✓ Approve ${selectedIds.size}` : `✓ ${selectedIds.size}件を承認`}
+        confirmClass="btn-primary"
+        onConfirm={() => {
+          setShowBulkConfirm(false);
+          bulkApproveMutation.mutate({
+            applicationIds: Array.from(selectedIds),
+            comment: bulkComment.trim() || undefined,
+          });
+        }}
+        onCancel={() => setShowBulkConfirm(false)}
+      />
+
+      {/* Bulk-select floating action bar — portal so it overlays everything */}
+      {selectionMode && createPortal(
+        <div className="fixed bottom-0 left-0 right-0 z-40 p-3 sm:p-4 pointer-events-none">
+          <div className="max-w-2xl mx-auto pointer-events-auto">
+            <div className="glass rounded-2xl shadow-2xl border border-white/40 overflow-hidden animate-scale-in">
+              {/* Top: count + select-all + close */}
+              <div className="flex items-center gap-3 px-4 pt-3 pb-2">
+                <span className="text-sm font-bold text-warmgray-800 flex-1">
+                  {selectedIds.size > 0
+                    ? (lang === 'en' ? `${selectedIds.size} selected` : `${selectedIds.size}件選択中`)
+                    : (lang === 'en' ? 'Tap rows to select' : '行をタップして選択')}
+                </span>
+                {applications.length > 0 && selectedIds.size < applications.length && (
+                  <button
+                    onClick={selectAll}
+                    className="text-xs font-semibold text-ringo-500 hover:text-ringo-700 transition-colors"
+                  >
+                    {lang === 'en' ? 'Select all' : 'すべて選択'}
+                  </button>
+                )}
+                {selectedIds.size > 0 && (
+                  <button
+                    onClick={() => setSelectedIds(new Set())}
+                    className="text-xs text-warmgray-400 hover:text-warmgray-600 transition-colors"
+                  >
+                    {lang === 'en' ? 'Clear' : 'クリア'}
+                  </button>
+                )}
+              </div>
+              {/* Comment input */}
+              <div className="px-4 pb-2">
+                <input
+                  type="text"
+                  value={bulkComment}
+                  onChange={(e) => setBulkComment(e.target.value)}
+                  placeholder={lang === 'en' ? 'Comment (optional, applied to all)' : 'コメント（任意・全件に適用）'}
+                  className="input text-xs w-full"
+                />
+              </div>
+              {/* Action buttons */}
+              <div className="flex items-center gap-2 px-4 pb-4">
+                <button
+                  onClick={exitSelectionMode}
+                  className="btn-outline text-xs sm:text-sm"
+                >
+                  {lang === 'en' ? 'Cancel' : 'キャンセル'}
+                </button>
+                <button
+                  onClick={() => setShowBulkConfirm(true)}
+                  disabled={selectedIds.size === 0 || bulkApproveMutation.isPending}
+                  className="btn-primary text-xs sm:text-sm flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {bulkApproveMutation.isPending ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                      </svg>
+                      {lang === 'en' ? 'Approving…' : '承認中…'}
+                    </span>
+                  ) : (
+                    `✓ ${selectedIds.size > 0
+                      ? (lang === 'en' ? `Approve ${selectedIds.size}` : `${selectedIds.size}件を承認`)
+                      : (lang === 'en' ? 'Approve selected' : '選択して承認')}`
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body,
       )}
     </Layout>
   );

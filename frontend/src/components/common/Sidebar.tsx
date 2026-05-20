@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
@@ -44,7 +43,6 @@ const ICONS: Record<string, JSX.Element> = {
   ),
 };
 
-// Collapse toggle icon
 function CollapseIcon({ collapsed }: { collapsed: boolean }) {
   return (
     <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 transition-transform duration-200" style={{ transform: collapsed ? 'rotate(180deg)' : 'none' }}>
@@ -53,7 +51,6 @@ function CollapseIcon({ collapsed }: { collapsed: boolean }) {
   );
 }
 
-// Map permissions nav key to i18n key
 const NAV_I18N: Record<string, string> = {
   '/dashboard':        'nav_dashboard',
   '/approvals':        'nav_approvals',
@@ -63,27 +60,29 @@ const NAV_I18N: Record<string, string> = {
   '/approval-history': 'nav_approval_history',
 };
 
+// Compact labels for the floating pill (space-limited)
+const NAV_SHORT: Record<string, { ja: string; en: string }> = {
+  '/dashboard':        { ja: 'ホーム',   en: 'Home'    },
+  '/approvals':        { ja: '承認',     en: 'Approve' },
+  '/accounting':       { ja: '経理',     en: 'Finance' },
+  '/history':          { ja: '履歴',     en: 'History' },
+  '/approval-history': { ja: '承認履歴', en: 'Log'     },
+  '/admin':            { ja: '管理',     en: 'Admin'   },
+};
+
+// px width per tab cell inside the pill (fixed so sliding pill math is exact)
+const ITEM_W = 58;
+// px — the p-1.5 inset (6px) on each side of the pill container
+const PILL_INSET = 6;
+
 export default function Sidebar() {
   const { user } = useAuth();
-  const { collapsed, toggle, mobileOpen, closeMobile } = useSidebar();
-  const { t } = useLang();
+  const { collapsed, toggle } = useSidebar();
+  const { t, lang } = useLang();
   const navigate = useNavigate();
   const location = useLocation();
   const perms = usePermissions(user?.role, user?.is_admin);
 
-  // Auto-close mobile drawer when route changes
-  useEffect(() => { closeMobile(); }, [location.pathname, closeMobile]);
-
-  // Lock body scroll while mobile drawer is open
-  useEffect(() => {
-    if (!mobileOpen) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
-  }, [mobileOpen]);
-
-  // Lightweight COUNT-only endpoint (no JOINs, no rows). Sub-ms vs ~11ms before.
-  // Separate key suffix 'badge' avoids conflict with Approvals page's infinite query.
   const { data: pendingRes } = useQuery<{ total: number }>({
     queryKey: ['pendingApprovals', 'badge'],
     queryFn: async () => (await apiClient.get('/approvals/pending/count')).data,
@@ -93,159 +92,258 @@ export default function Sidebar() {
   });
   const pendingCount = pendingRes?.total ?? 0;
 
+  // Active index for the sliding pill indicator
+  const activeIndex = perms.navItems.findIndex((item) =>
+    item.to === '/dashboard'
+      ? location.pathname === '/dashboard'
+      : location.pathname.startsWith(item.to),
+  );
+
   return (
     <>
-      {/* Mobile backdrop — only visible when drawer is open on small screens.
-          Click anywhere outside drawer to close. */}
-      {mobileOpen && (
-        <div
-          className="md:hidden fixed inset-0 z-40 bg-warmgray-900/50 backdrop-blur-sm animate-fade-in"
-          onClick={closeMobile}
-        />
-      )}
-
+      {/* ══════════════════════════════════════════════════════════════════════
+          DESKTOP sidebar rail (md+) — unchanged
+          ══════════════════════════════════════════════════════════════════════ */}
       <aside
         className={`
-          flex flex-col select-none glass-dark overflow-hidden
-          /* ─ Desktop (md+): static rail, width toggles via collapsed state */
-          md:relative md:h-screen md:shrink-0 md:transition-[width] md:duration-200 md:ease-in-out
+          hidden
+          md:flex md:flex-col select-none glass-dark overflow-hidden
+          md:relative md:h-screen md:shrink-0
+          md:transition-[width] md:duration-200 md:ease-in-out
           ${collapsed ? 'md:w-[60px]' : 'md:w-60'}
-          /* ─ Mobile (<md): fixed drawer that slides in from left */
-          fixed inset-y-0 left-0 z-50 w-64 h-screen
-          transition-transform duration-200 ease-in-out
-          ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
-          md:translate-x-0
         `}
       >
         <div className="relative flex flex-col flex-1 overflow-hidden">
-      {/* Decorative blobs */}
-      <div className="absolute -top-16 -left-16 w-48 h-48 rounded-full bg-ringo-400/20 blur-3xl pointer-events-none" />
-      <div className="absolute bottom-0 -right-8 w-32 h-32 rounded-full bg-mustard-500/10 blur-2xl pointer-events-none" />
+          <div className="absolute -top-16 -left-16 w-48 h-48 rounded-full bg-ringo-400/20 blur-3xl pointer-events-none" />
+          <div className="absolute bottom-0 -right-8 w-32 h-32 rounded-full bg-mustard-500/10 blur-2xl pointer-events-none" />
 
-      {/* Logo */}
-      <div className={`relative border-b border-white/10 shrink-0 flex items-center ${collapsed ? 'px-3.5 py-4 justify-center' : 'px-5 py-5'}`}>
-        <button
-          onClick={() => navigate('/dashboard')}
-          className="flex items-center gap-3 min-w-0 hover:opacity-80 transition-opacity"
-        >
-          {/*
-            New RINGO logo (mark only) — rendered as CSS mask so the dark
-            sidebar can tint it white via currentColor on bg-white. SVG file
-            has fill="currentColor" but <img> wouldn't honor that; mask-image
-            uses the SVG as a stencil + the box's background-color shows
-            through. Result: same mark, sidebar-themed white.
-          */}
-          <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
-            <span
-              className="w-5 h-5 bg-white"
-              style={{
-                WebkitMaskImage:    'url(/ringo-mark.svg)',
-                maskImage:          'url(/ringo-mark.svg)',
-                WebkitMaskRepeat:   'no-repeat',
-                maskRepeat:         'no-repeat',
-                WebkitMaskPosition: 'center',
-                maskPosition:       'center',
-                WebkitMaskSize:     'contain',
-                maskSize:           'contain',
-              }}
-              aria-label="RINGO"
-            />
+          {/* Logo */}
+          <div className={`relative border-b border-white/10 shrink-0 flex items-center ${collapsed ? 'px-3.5 py-4 justify-center' : 'px-5 py-5'}`}>
+            <button
+              onClick={() => navigate('/dashboard')}
+              className="flex items-center gap-3 min-w-0 hover:opacity-80 transition-opacity"
+            >
+              <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
+                <span
+                  className="w-5 h-5 bg-white"
+                  style={{
+                    WebkitMaskImage:    'url(/ringo-mark.svg)',
+                    maskImage:          'url(/ringo-mark.svg)',
+                    WebkitMaskRepeat:   'no-repeat',
+                    maskRepeat:         'no-repeat',
+                    WebkitMaskPosition: 'center',
+                    maskPosition:       'center',
+                    WebkitMaskSize:     'contain',
+                    maskSize:           'contain',
+                  }}
+                  aria-label="RINGO"
+                />
+              </div>
+              {!collapsed && (
+                <div className="min-w-0">
+                  <div className="text-[15px] font-bold tracking-[0.08em] text-white leading-tight">RINGO</div>
+                  <div className="text-[9px] text-white/40 font-semibold tracking-[0.18em] uppercase mt-0.5">Workflow</div>
+                </div>
+              )}
+            </button>
           </div>
-          {!collapsed && (
-            <div className="min-w-0">
-              <div className="text-[15px] font-bold tracking-[0.08em] text-white leading-tight">RINGO</div>
-              <div className="text-[9px] text-white/40 font-semibold tracking-[0.18em] uppercase mt-0.5">Workflow</div>
-            </div>
-          )}
-        </button>
-      </div>
 
-      {/* Nav — flex-1 prevents overflow, overflow-hidden clips */}
-      <nav className="relative flex-1 overflow-hidden flex flex-col py-3 px-2 space-y-0.5">
-        {perms.navItems.map((item) => {
-          const i18nKey = NAV_I18N[item.to] as any;
-          const label = i18nKey ? t(i18nKey) : item.label;
-          return (
+          {/* Nav */}
+          <nav className="relative flex-1 overflow-hidden flex flex-col py-3 px-2 space-y-0.5">
+            {perms.navItems.map((item) => {
+              const i18nKey = NAV_I18N[item.to] as any;
+              const label = i18nKey ? t(i18nKey) : item.label;
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.to === '/dashboard'}
+                  title={collapsed ? label : undefined}
+                  className={({ isActive }) =>
+                    `relative group flex items-center gap-3 rounded-xl text-sm font-medium
+                     transition-all duration-150
+                     ${collapsed ? 'px-0 py-2.5 justify-center' : 'px-3 py-2.5'}
+                     ${isActive
+                       ? 'bg-white/15 text-white shadow-sm'
+                       : 'text-white/60 hover:bg-white/10 hover:text-white/90'
+                     }`
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      {isActive && !collapsed && (
+                        <span className="absolute left-0 w-0.5 h-6 bg-gradient-to-b from-ringo-300 to-mustard-400 rounded-r-full" />
+                      )}
+                      <span className={`transition-colors shrink-0 ${isActive ? 'text-white' : 'text-white/50 group-hover:text-white/80'}`}>
+                        {ICONS[item.to] ?? <span className="w-[18px] h-[18px] text-xs flex items-center justify-center">{item.icon}</span>}
+                      </span>
+                      {!collapsed && <span className="flex-1 truncate">{label}</span>}
+                      {item.to === '/approvals' && pendingCount > 0 && (
+                        <span className={`flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-gradient-to-r from-ringo-500 to-ringo-400 text-white text-[10px] font-bold shadow-sm ${collapsed ? 'absolute -top-0.5 -right-0.5 scale-75' : ''}`}>
+                          {pendingCount > 99 ? '99+' : pendingCount}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </NavLink>
+              );
+            })}
+          </nav>
+
+          {/* User footer */}
+          <div className={`relative border-t border-white/10 shrink-0 ${collapsed ? 'px-2 py-3' : 'px-4 py-4'}`}>
             <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === '/dashboard'}
-              title={collapsed ? label : undefined}
+              to="/profile"
+              title={collapsed ? t('nav_profile') : undefined}
               className={({ isActive }) =>
-                `relative group flex items-center gap-3 rounded-xl text-sm font-medium
-                 transition-all duration-150
-                 ${collapsed ? 'px-0 py-2.5 justify-center' : 'px-3 py-2.5'}
-                 ${isActive
-                   ? 'bg-white/15 text-white shadow-sm'
-                   : 'text-white/60 hover:bg-white/10 hover:text-white/90'
-                 }`
+                `flex items-center gap-3 rounded-xl transition-all duration-150 mb-2
+                 ${collapsed ? 'px-0 py-2 justify-center' : 'px-2 py-2'}
+                 ${isActive ? 'bg-white/15' : 'hover:bg-white/10'}`
               }
             >
-              {({ isActive }) => (
-                <>
-                  {isActive && !collapsed && (
-                    <span className="absolute left-0 w-0.5 h-6 bg-gradient-to-b from-ringo-300 to-mustard-400 rounded-r-full" />
-                  )}
-                  <span className={`transition-colors shrink-0 ${isActive ? 'text-white' : 'text-white/50 group-hover:text-white/80'}`}>
-                    {ICONS[item.to] ?? <span className="w-[18px] h-[18px] text-xs flex items-center justify-center">{item.icon}</span>}
+              <UserAvatar
+                name={user?.full_name ?? ''}
+                avatarUrl={user?.avatar_url}
+                size={7}
+                ring="ring-2 ring-white/20"
+                className="flex-shrink-0 shadow-md"
+              />
+              {!collapsed && (
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-semibold text-white/90 truncate">{user?.full_name ?? '—'}</div>
+                  <div className="text-[10px] text-white/40">
+                    {perms.label}
+                    {user?.is_admin ? ' / Admin' : ''}
+                  </div>
+                </div>
+              )}
+            </NavLink>
+
+            <button
+              onClick={toggle}
+              className="hidden md:flex w-full items-center justify-center gap-2 py-1.5 rounded-xl
+                         text-white/40 hover:text-white/70 hover:bg-white/10
+                         transition-all duration-150 text-[11px] font-medium"
+              title={collapsed ? '展開' : '折りたたむ'}
+            >
+              <CollapseIcon collapsed={collapsed} />
+              {!collapsed && <span>折りたたむ</span>}
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          MOBILE floating pill tab bar (<md)
+          Apple-style: centered, floating, frosted glass, sliding indicator
+          ══════════════════════════════════════════════════════════════════════ */}
+      <div
+        className="md:hidden fixed z-50 left-1/2 -translate-x-1/2"
+        style={{ bottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
+      >
+        {/* Outer pill container */}
+        <div
+          className="relative flex items-center"
+          style={{
+            background: 'rgba(30, 24, 22, 0.82)',
+            backdropFilter: 'blur(24px) saturate(1.8)',
+            WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
+            borderRadius: '9999px',
+            border: '1px solid rgba(255,255,255,0.10)',
+            boxShadow: '0 8px 40px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.08)',
+            padding: `${PILL_INSET}px`,
+          }}
+        >
+          {/* ── Sliding active indicator pill ── */}
+          {activeIndex >= 0 && (
+            <div
+              aria-hidden
+              style={{
+                position:   'absolute',
+                top:        `${PILL_INSET}px`,
+                bottom:     `${PILL_INSET}px`,
+                width:      `${ITEM_W}px`,
+                left:       `${activeIndex * ITEM_W + PILL_INSET}px`,
+                borderRadius: '9999px',
+                background: 'linear-gradient(135deg, #c0392b 0%, #e55039 100%)',
+                boxShadow:  '0 2px 12px rgba(192,57,43,0.5)',
+                transition: 'left 380ms cubic-bezier(0.34, 1.45, 0.64, 1)',
+                pointerEvents: 'none',
+                zIndex: 0,
+              }}
+            />
+          )}
+
+          {/* ── Tab items ── */}
+          {perms.navItems.map((item, idx) => {
+            const short = NAV_SHORT[item.to];
+            const label = short
+              ? (lang === 'en' ? short.en : short.ja)
+              : (NAV_I18N[item.to] ? t(NAV_I18N[item.to] as any) : item.label);
+            const isActive = idx === activeIndex;
+
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.to === '/dashboard'}
+                style={{ width: `${ITEM_W}px`, position: 'relative', zIndex: 1 }}
+                className="flex flex-col items-center justify-center gap-[3px] py-2 select-none
+                           transition-opacity duration-150 active:opacity-60"
+              >
+                {/* Icon with badge */}
+                <span className="relative flex items-center justify-center">
+                  <span
+                    className="transition-all duration-200"
+                    style={{
+                      color: isActive ? '#fff' : 'rgba(255,255,255,0.42)',
+                      transform: isActive ? 'scale(1.1)' : 'scale(1)',
+                    }}
+                  >
+                    {ICONS[item.to] ?? (
+                      <span className="w-[18px] h-[18px] text-xs flex items-center justify-center">
+                        {item.icon}
+                      </span>
+                    )}
                   </span>
-                  {!collapsed && <span className="flex-1 truncate">{label}</span>}
+                  {/* Approval badge */}
                   {item.to === '/approvals' && pendingCount > 0 && (
-                    <span className={`flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-gradient-to-r from-ringo-500 to-ringo-400 text-white text-[10px] font-bold shadow-sm ${collapsed ? 'absolute -top-0.5 -right-0.5 scale-75' : ''}`}>
+                    <span
+                      className="absolute flex items-center justify-center leading-none font-bold"
+                      style={{
+                        top: '-6px',
+                        right: '-8px',
+                        minWidth: '16px',
+                        height: '16px',
+                        padding: '0 3px',
+                        borderRadius: '9999px',
+                        background: isActive ? 'rgba(255,255,255,0.9)' : '#c0392b',
+                        color: isActive ? '#c0392b' : '#fff',
+                        fontSize: '9px',
+                        boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+                        transition: 'background 200ms, color 200ms',
+                      }}
+                    >
                       {pendingCount > 99 ? '99+' : pendingCount}
                     </span>
                   )}
-                </>
-              )}
-            </NavLink>
-          );
-        })}
-      </nav>
+                </span>
 
-      {/* User footer */}
-      <div className={`relative border-t border-white/10 shrink-0 ${collapsed ? 'px-2 py-3' : 'px-4 py-4'}`}>
-        {/* Profile link */}
-        <NavLink
-          to="/profile"
-          title={collapsed ? t('nav_profile') : undefined}
-          className={({ isActive }) =>
-            `flex items-center gap-3 rounded-xl transition-all duration-150 mb-2
-             ${collapsed ? 'px-0 py-2 justify-center' : 'px-2 py-2'}
-             ${isActive ? 'bg-white/15' : 'hover:bg-white/10'}`
-          }
-        >
-          <UserAvatar
-            name={user?.full_name ?? ''}
-            avatarUrl={user?.avatar_url}
-            size={7}
-            ring="ring-2 ring-white/20"
-            className="flex-shrink-0 shadow-md"
-          />
-          {!collapsed && (
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-semibold text-white/90 truncate">{user?.full_name ?? '—'}</div>
-              <div className="text-[10px] text-white/40">
-                {perms.label}
-                {user?.is_admin ? ' / Admin' : ''}
-              </div>
-            </div>
-          )}
-        </NavLink>
-
-        {/* Collapse toggle — desktop only; mobile users tap backdrop to close */}
-        <button
-          onClick={toggle}
-          className={`hidden md:flex w-full items-center justify-center gap-2 py-1.5 rounded-xl
-                      text-white/40 hover:text-white/70 hover:bg-white/10
-                      transition-all duration-150 text-[11px] font-medium`}
-          title={collapsed ? '展開' : '折りたたむ'}
-        >
-          <CollapseIcon collapsed={collapsed} />
-          {!collapsed && <span>折りたたむ</span>}
-        </button>
-      </div>
+                {/* Label */}
+                <span
+                  className="font-semibold leading-none tracking-tight transition-all duration-200"
+                  style={{
+                    fontSize: '9px',
+                    color: isActive ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.38)',
+                  }}
+                >
+                  {label}
+                </span>
+              </NavLink>
+            );
+          })}
         </div>
-      </aside>
+      </div>
     </>
   );
 }

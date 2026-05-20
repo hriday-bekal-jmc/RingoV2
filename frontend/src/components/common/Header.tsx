@@ -1,33 +1,20 @@
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLang } from '../../context/LanguageContext';
-import { useSidebar } from '../../context/SidebarContext';
 import UserAvatar from './UserAvatar';
 
 interface HeaderProps { title: string }
 
-
 export default function Header({ title }: HeaderProps) {
   const { user, logout } = useAuth();
   const { t } = useLang();
-  const { openMobile } = useSidebar();
   const displayName = user?.full_name || 'Guest';
   const dept = user?.department_name || '';
 
   return (
     <header className="glass border-b border-white/40 px-4 md:px-6 py-0 flex items-center justify-between h-14 shrink-0 sticky top-0 z-30">
-      {/* Title + mobile hamburger */}
+      {/* Title */}
       <div className="flex items-center gap-2 md:gap-3 min-w-0">
-        {/* Hamburger — mobile only. Opens the sidebar drawer. */}
-        <button
-          onClick={openMobile}
-          className="md:hidden -ml-1 p-2 rounded-lg text-warmgray-500 hover:text-warmgray-800 hover:bg-white/60 transition-colors"
-          aria-label="メニューを開く"
-        >
-          <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
-          </svg>
-        </button>
         <div className="accent-bar shrink-0 hidden md:block" />
         <h1 className="text-sm font-bold text-warmgray-800 truncate">{title}</h1>
       </div>

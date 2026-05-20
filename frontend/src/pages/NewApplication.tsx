@@ -36,7 +36,7 @@ export default function NewApplication() {
   const { templateCode } = useParams<{ templateCode: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [selectedRouteId, setSelectedRouteId] = useState<string>('');
 
   const { data: template, isLoading: templateLoading, isError: templateError } = useQuery({
@@ -101,6 +101,17 @@ export default function NewApplication() {
   return (
     <Layout title={t('title_new_app')}>
       <div className="max-w-3xl mx-auto space-y-5">
+        {/* Mobile back */}
+        <button
+          onClick={() => navigate(-1)}
+          className="md:hidden flex items-center gap-1.5 text-sm font-semibold text-warmgray-500 hover:text-warmgray-800 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+          </svg>
+          {lang === 'en' ? 'Back' : '戻る'}
+        </button>
+
         {/* Loading / Error */}
         {templateLoading && (
           <div className="card flex items-center gap-3 text-warmgray-400 py-10 justify-center">

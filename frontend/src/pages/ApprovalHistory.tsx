@@ -13,6 +13,27 @@ import RingoLoader from '../components/common/RingoLoader';
 import { Sk } from '../components/common/Skeleton';
 import UserAvatar from '../components/common/UserAvatar';
 
+// ── File helpers ──────────────────────────────────────────────────────────────
+function isFileValue(v: unknown): boolean {
+  if (typeof v !== 'string' || !v) return false;
+  return v.split(',').some((s) => s.trim().startsWith('/api/files/'));
+}
+function renderFileLinks(val: unknown, lang: string) {
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-0.5">
+      {String(val).split(',').filter(Boolean).map((url, i) => (
+        <a key={i} href={url.trim()} target="_blank" rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-ringo-600 hover:text-ringo-700 bg-ringo-50/60 border border-ringo-200/60 px-2 py-0.5 rounded-lg font-medium transition-colors">
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+          </svg>
+          {lang === 'en' ? 'File' : 'ファイル'} {i + 1}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface HistoryItem {
@@ -89,14 +110,14 @@ function DetailPanel({ applicationId, onClose, lang }: { applicationId: string; 
       <div className="relative glass rounded-3xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col animate-scale-in overflow-hidden">
 
         {/* Header */}
-        <div className="px-7 pt-6 pb-5 border-b border-white/30 shrink-0 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            {app && <UserAvatar name={app.applicant_name ?? '?'} avatarUrl={app.applicant_avatar} size={10} />}
+        <div className="px-4 md:px-7 pt-5 md:pt-6 pb-4 md:pb-5 border-b border-white/30 shrink-0 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            {app && <UserAvatar name={app.applicant_name ?? '?'} avatarUrl={app.applicant_avatar} size={9} />}
             <div className="min-w-0">
               {app ? (
                 <>
-                  <h3 className="text-lg font-bold text-warmgray-800 leading-tight">{app.template_name}</h3>
-                  <p className="text-xs text-warmgray-500 mt-0.5">{lang === 'en' ? 'Applicant' : '申請者'}: {app.applicant_name}</p>
+                  <h3 className="text-base md:text-lg font-bold text-warmgray-800 leading-tight truncate">{app.template_name}</h3>
+                  <p className="text-xs text-warmgray-500 mt-0.5 truncate">{lang === 'en' ? 'Applicant' : '申請者'}: {app.applicant_name}</p>
                   <p className="text-[11px] text-warmgray-400 mt-0.5 font-mono">{app.application_number ?? '—'}</p>
                 </>
               ) : (
@@ -108,10 +129,10 @@ function DetailPanel({ applicationId, onClose, lang }: { applicationId: string; 
             {app && (
               <Link
                 to={`/applications/${applicationId}`}
-                className="btn-outline btn-sm text-xs"
+                className="hidden sm:inline-flex btn-outline btn-sm text-xs"
                 onClick={onClose}
               >
-                {lang === 'en' ? 'Open full page →' : 'ページで開く →'}
+                {lang === 'en' ? 'Full page →' : '詳細ページ →'}
               </Link>
             )}
             <button
@@ -126,7 +147,7 @@ function DetailPanel({ applicationId, onClose, lang }: { applicationId: string; 
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden px-7 py-5 space-y-6">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 md:px-7 py-4 md:py-5 space-y-6">
           {isLoading && (
             <div className="space-y-3">
               {[...Array(6)].map((_, i) => <div key={i} className="h-12 rounded-xl bg-white/40 animate-pulse" />)}
@@ -146,13 +167,16 @@ function DetailPanel({ applicationId, onClose, lang }: { applicationId: string; 
                   {(app.schema_definition?.fields ?? []).map((f: any) => {
                     const val = app.form_data[f.name];
                     const isRepeat = f.type === 'repeat_group';
-                    const isLong = isRepeat || f.type === 'textarea' || (typeof val === 'string' && val.length > 40);
+                    const isFile = f.type === 'file' || isFileValue(val);
+                    const isLong = isRepeat || f.type === 'textarea' || (typeof val === 'string' && !isFile && val.length > 40);
                     return (
                       <div key={f.name} className={isLong ? 'col-span-full' : ''}>
                         <dt className="text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{f.label}</dt>
                         <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3.5 py-2.5 rounded-xl break-words min-h-[42px]">
                           {isRepeat ? (
                             <RepeatGroupDisplay field={f} value={val} compact />
+                          ) : isFile && val ? (
+                            renderFileLinks(val, lang)
                           ) : val != null && val !== '' ? (
                             String(val)
                           ) : (
@@ -173,13 +197,16 @@ function DetailPanel({ applicationId, onClose, lang }: { applicationId: string; 
                     {(app.settlement_schema.fields ?? []).map((f: any) => {
                       const val = app.settlement_data![f.name];
                       const isRepeat = f.type === 'repeat_group';
-                      const isLong = isRepeat || f.type === 'textarea' || (typeof val === 'string' && val.length > 40);
+                      const isFile = f.type === 'file' || isFileValue(val);
+                      const isLong = isRepeat || f.type === 'textarea' || (typeof val === 'string' && !isFile && val.length > 40);
                       return (
                         <div key={f.name} className={isLong ? 'col-span-full' : ''}>
                           <dt className="text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{f.label}</dt>
                           <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3.5 py-2.5 rounded-xl break-words min-h-[42px]">
                             {isRepeat ? (
                               <RepeatGroupDisplay field={f} value={val} compact />
+                            ) : isFile && val ? (
+                              renderFileLinks(val, lang)
                             ) : val != null && val !== '' ? (
                               String(val)
                             ) : (
@@ -478,46 +505,56 @@ export default function ApprovalHistory() {
           )}
 
           {isLoading ? (
-            <div className="md:overflow-x-auto">
-              <table className="table-base table-responsive">
-                <thead>
-                  <tr>
-                    <th>{lang === 'en' ? 'Application' : '申請'}</th>
-                    <th>{lang === 'en' ? 'Applicant' : '申請者'}</th>
-                    <th>{lang === 'en' ? 'Step' : 'ステップ'}</th>
-                    <th>{lang === 'en' ? 'Stage' : 'ステージ'}</th>
-                    <th>{lang === 'en' ? 'Action' : 'アクション'}</th>
-                    <th>{lang === 'en' ? 'App Status' : '申請状態'}</th>
-                    <th>{lang === 'en' ? 'Date' : '日時'}</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...Array(9)].map((_, i) => (
-                    <tr key={i}>
-                      <td>
-                        <div className="space-y-1.5">
-                          <Sk.Line w={i % 3 === 0 ? 'w-32' : i % 3 === 1 ? 'w-28' : 'w-40'} h="h-3.5" />
-                          <Sk.Line w="w-20" h="h-2.5" />
-                        </div>
-                      </td>
-                      <td>
-                        <div className="space-y-1.5">
-                          <Sk.Line w={i % 2 === 0 ? 'w-24' : 'w-28'} h="h-3.5" />
-                          <Sk.Line w="w-16" h="h-2.5" />
-                        </div>
-                      </td>
-                      <td><Sk.Line w={i % 2 === 0 ? 'w-28' : 'w-24'} h="h-3" /></td>
-                      <td><Sk.Badge w="w-16" /></td>
-                      <td><Sk.Badge w={i % 2 === 0 ? 'w-16' : 'w-20'} /></td>
-                      <td><Sk.Badge w="w-20" /></td>
-                      <td><Sk.Line w="w-24" h="h-3" /></td>
-                      <td />
+            <>
+              {/* Mobile skeleton */}
+              <div className="md:hidden space-y-3">
+                {[...Array(6)].map((_, i) => (
+                  <div key={i} className="rounded-2xl border border-white/40 bg-white/30 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Sk.Line w={i % 2 === 0 ? 'w-32' : 'w-40'} h="h-3.5" />
+                      <Sk.Badge w="w-16" />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Sk.Dot /> <Sk.Line w="w-24" h="h-3" />
+                    </div>
+                    <div className="flex gap-2">
+                      <Sk.Badge w="w-14" /> <Sk.Badge w="w-20" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* Desktop skeleton */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="table-base">
+                  <thead>
+                    <tr>
+                      <th>{lang === 'en' ? 'Application' : '申請'}</th>
+                      <th>{lang === 'en' ? 'Applicant' : '申請者'}</th>
+                      <th>{lang === 'en' ? 'Step' : 'ステップ'}</th>
+                      <th>{lang === 'en' ? 'Stage' : 'ステージ'}</th>
+                      <th>{lang === 'en' ? 'Action' : 'アクション'}</th>
+                      <th>{lang === 'en' ? 'App Status' : '申請状態'}</th>
+                      <th>{lang === 'en' ? 'Date' : '日時'}</th>
+                      <th />
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {[...Array(9)].map((_, i) => (
+                      <tr key={i}>
+                        <td><div className="space-y-1.5"><Sk.Line w={i % 3 === 0 ? 'w-32' : i % 3 === 1 ? 'w-28' : 'w-40'} h="h-3.5" /><Sk.Line w="w-20" h="h-2.5" /></div></td>
+                        <td><div className="space-y-1.5"><Sk.Line w={i % 2 === 0 ? 'w-24' : 'w-28'} h="h-3.5" /><Sk.Line w="w-16" h="h-2.5" /></div></td>
+                        <td><Sk.Line w={i % 2 === 0 ? 'w-28' : 'w-24'} h="h-3" /></td>
+                        <td><Sk.Badge w="w-16" /></td>
+                        <td><Sk.Badge w={i % 2 === 0 ? 'w-16' : 'w-20'} /></td>
+                        <td><Sk.Badge w="w-20" /></td>
+                        <td><Sk.Line w="w-24" h="h-3" /></td>
+                        <td />
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           ) : items.length === 0 ? (
             <div className="py-16 text-center">
               <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-surface-100/60 flex items-center justify-center">
@@ -533,100 +570,145 @@ export default function ApprovalHistory() {
               </p>
             </div>
           ) : (
-            <div className={`md:overflow-x-auto transition-opacity duration-200 ${isFetching && !isFetchingNextPage ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
-              <table className="table-base table-responsive">
-                <thead>
-                  <tr>
-                    <th>{lang === 'en' ? 'Application' : '申請'}</th>
-                    <th>{lang === 'en' ? 'Applicant' : '申請者'}</th>
-                    <th>{lang === 'en' ? 'Step' : 'ステップ'}</th>
-                    <th>{lang === 'en' ? 'Stage' : 'ステージ'}</th>
-                    <th>{lang === 'en' ? 'Action' : 'アクション'}</th>
-                    <th>{lang === 'en' ? 'App Status' : '申請状態'}</th>
-                    <th>{lang === 'en' ? 'Date' : '日時'}</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item, i) => {
-                    const act = ACTION_STYLES[item.action];
-                    const appSt = APP_STATUS_LABEL[item.app_status];
-                    return (
-                      <tr
-                        key={item.step_id}
-                        className="animate-fade-up cursor-pointer"
-                        style={{ animationDelay: `${i * 20}ms` }}
-                        onClick={() => setSelectedId(item.application_id)}
-                      >
-                        <td data-label={lang === 'en' ? 'Application' : '申請'}>
-                          <div className="font-semibold text-warmgray-800 text-sm md:text-left text-right">{item.template_name}</div>
-                          <div className="font-mono text-xs text-warmgray-400 md:text-left text-right">{item.application_number ?? '—'}</div>
-                        </td>
+            <div className={`transition-opacity duration-200 ${isFetching && !isFetchingNextPage ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
 
-                        <td data-label={lang === 'en' ? 'Applicant' : '申請者'}>
-                          <div className="flex items-center gap-2 md:justify-start justify-end">
-                            <UserAvatar name={item.applicant_name ?? '?'} avatarUrl={item.applicant_avatar} size={7} />
-                            <span className="text-sm text-warmgray-700">{item.applicant_name ?? '—'}</span>
-                          </div>
-                        </td>
+              {/* ── Mobile card list ────────────────────────────────────────── */}
+              <div className="md:hidden space-y-3">
+                {items.map((item, i) => {
+                  const act = ACTION_STYLES[item.action];
+                  const appSt = APP_STATUS_LABEL[item.app_status];
+                  return (
+                    <div
+                      key={item.step_id}
+                      className="rounded-2xl border border-white/50 bg-white/40 backdrop-blur-sm px-4 py-3.5 space-y-2.5 cursor-pointer active:bg-white/60 transition-colors animate-fade-up"
+                      style={{ animationDelay: `${i * 20}ms` }}
+                      onClick={() => setSelectedId(item.application_id)}
+                    >
+                      {/* Row 1: template + date */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-warmgray-800 truncate">{item.template_name}</p>
+                          <p className="text-[11px] font-mono text-warmgray-400 mt-0.5">{item.application_number ?? '—'}</p>
+                        </div>
+                        <span className="text-[11px] text-warmgray-400 tabular-nums whitespace-nowrap shrink-0 mt-0.5">
+                          {new Date(item.acted_at).toLocaleDateString(dateLocale, { month: 'short', day: 'numeric' })}
+                        </span>
+                      </div>
 
-                        <td data-label={lang === 'en' ? 'Step' : 'ステップ'}>
-                          <span className="text-sm text-warmgray-600">{item.step_label}</span>
-                        </td>
+                      {/* Row 2: applicant */}
+                      <div className="flex items-center gap-2">
+                        <UserAvatar name={item.applicant_name ?? '?'} avatarUrl={item.applicant_avatar} size={6} />
+                        <span className="text-xs text-warmgray-600 truncate">{item.applicant_name ?? '—'}</span>
+                        <span className="text-[10px] text-warmgray-400 ml-auto shrink-0">{item.step_label}</span>
+                      </div>
 
-                        <td data-label={lang === 'en' ? 'Stage' : 'ステージ'}>
-                          {item.stage === 'SETTLEMENT' ? (
-                            <span className="badge-teal">{lang === 'en' ? 'Settlement' : '精算'}</span>
-                          ) : (
-                            <span className="badge-ringo">{lang === 'en' ? 'Ringi' : '稟議'}</span>
-                          )}
-                        </td>
+                      {/* Row 3: badges */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {item.stage === 'SETTLEMENT' ? (
+                          <span className="badge-teal text-[10px]">{lang === 'en' ? 'Settlement' : '精算'}</span>
+                        ) : (
+                          <span className="badge-ringo text-[10px]">{lang === 'en' ? 'Ringi' : '稟議'}</span>
+                        )}
+                        <span className={`${act.badge} text-[10px]`}>
+                          {act.icon} {lang === 'en' ? act.label_en : act.label_ja}
+                        </span>
+                        <span className={`${APP_STATUS_BADGE[item.app_status] ?? 'badge-draft'} text-[10px] ml-auto`}>
+                          {lang === 'en' ? (appSt?.en ?? item.app_status) : (appSt?.ja ?? item.app_status)}
+                        </span>
+                      </div>
 
-                        <td data-label={lang === 'en' ? 'Action' : 'アクション'}>
-                          <div className="md:text-left text-right">
+                      {/* Comment if present */}
+                      {item.comment && (
+                        <p className="text-[11px] text-warmgray-500 italic truncate">"{item.comment}"</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* ── Desktop table ───────────────────────────────────────────── */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="table-base">
+                  <thead>
+                    <tr>
+                      <th>{lang === 'en' ? 'Application' : '申請'}</th>
+                      <th>{lang === 'en' ? 'Applicant' : '申請者'}</th>
+                      <th>{lang === 'en' ? 'Step' : 'ステップ'}</th>
+                      <th>{lang === 'en' ? 'Stage' : 'ステージ'}</th>
+                      <th>{lang === 'en' ? 'Action' : 'アクション'}</th>
+                      <th>{lang === 'en' ? 'App Status' : '申請状態'}</th>
+                      <th>{lang === 'en' ? 'Date' : '日時'}</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((item, i) => {
+                      const act = ACTION_STYLES[item.action];
+                      const appSt = APP_STATUS_LABEL[item.app_status];
+                      return (
+                        <tr
+                          key={item.step_id}
+                          className="animate-fade-up cursor-pointer"
+                          style={{ animationDelay: `${i * 20}ms` }}
+                          onClick={() => setSelectedId(item.application_id)}
+                        >
+                          <td>
+                            <div className="font-semibold text-warmgray-800 text-sm">{item.template_name}</div>
+                            <div className="font-mono text-xs text-warmgray-400">{item.application_number ?? '—'}</div>
+                          </td>
+                          <td>
+                            <div className="flex items-center gap-2">
+                              <UserAvatar name={item.applicant_name ?? '?'} avatarUrl={item.applicant_avatar} size={7} />
+                              <span className="text-sm text-warmgray-700">{item.applicant_name ?? '—'}</span>
+                            </div>
+                          </td>
+                          <td><span className="text-sm text-warmgray-600">{item.step_label}</span></td>
+                          <td>
+                            {item.stage === 'SETTLEMENT' ? (
+                              <span className="badge-teal">{lang === 'en' ? 'Settlement' : '精算'}</span>
+                            ) : (
+                              <span className="badge-ringo">{lang === 'en' ? 'Ringi' : '稟議'}</span>
+                            )}
+                          </td>
+                          <td>
                             <span className={act.badge}>
                               {act.icon} {lang === 'en' ? act.label_en : act.label_ja}
                             </span>
                             {item.comment && (
-                              <div className="text-[11px] text-warmgray-400 mt-0.5 md:max-w-[180px] truncate" title={item.comment}>
+                              <div className="text-[11px] text-warmgray-400 mt-0.5 max-w-[180px] truncate" title={item.comment}>
                                 "{item.comment}"
                               </div>
                             )}
-                          </div>
-                        </td>
-
-                        <td data-label={lang === 'en' ? 'App Status' : '申請状態'}>
-                          <span className={APP_STATUS_BADGE[item.app_status] ?? 'badge-draft'}>
-                            {lang === 'en' ? (appSt?.en ?? item.app_status) : (appSt?.ja ?? item.app_status)}
-                          </span>
-                        </td>
-
-                        <td data-label={lang === 'en' ? 'Date' : '日時'}>
-                          <div className="md:text-left text-right">
+                          </td>
+                          <td>
+                            <span className={APP_STATUS_BADGE[item.app_status] ?? 'badge-draft'}>
+                              {lang === 'en' ? (appSt?.en ?? item.app_status) : (appSt?.ja ?? item.app_status)}
+                            </span>
+                          </td>
+                          <td>
                             <span className="text-xs text-warmgray-500 tabular-nums whitespace-nowrap">
                               {new Date(item.acted_at).toLocaleDateString(dateLocale)}
                             </span>
                             <div className="text-[11px] text-warmgray-400 tabular-nums">
                               {new Date(item.acted_at).toLocaleTimeString(dateLocale, { hour: '2-digit', minute: '2-digit' })}
                             </div>
-                          </div>
-                        </td>
+                          </td>
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <button
+                              className="btn-ghost btn-sm text-ringo-500 hover:text-ringo-600 whitespace-nowrap"
+                              onClick={() => setSelectedId(item.application_id)}
+                            >
+                              {lang === 'en' ? 'View →' : '詳細 →'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
 
-                        <td onClick={(e) => e.stopPropagation()}>
-                          <button
-                            className="btn-ghost btn-sm text-ringo-500 hover:text-ringo-600 whitespace-nowrap"
-                            onClick={() => setSelectedId(item.application_id)}
-                          >
-                            {lang === 'en' ? 'View →' : '詳細 →'}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-
-              {/* Sentinel — invisible; observer fires early via rootMargin */}
+              {/* Sentinel */}
               <div ref={sentinelRef} className="h-px" />
               {(isFetchingNextPage || (!hasNextPage && items.length >= PAGE)) && (
                 <div className="px-5 py-3 flex items-center justify-center gap-2 text-warmgray-400 text-xs border-t border-white/20">
