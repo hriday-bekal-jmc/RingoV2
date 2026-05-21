@@ -17,6 +17,14 @@ import { useLang } from '../../context/LanguageContext';
 import ConfirmDialog from '../common/ConfirmDialog';
 import InlineConfirm from '../common/InlineConfirm';
 
+// ── No-op pass-through (EN inputs hidden in builder; EN stays blank until dev fills it) ──
+// Renderers (fieldLabel, t()) already fall back to JA when EN is missing, so
+// non-dev users toggling English see JA strings until the dev adds a real EN
+// translation via /dev/i18n. This lets the dev page detect "missing EN" cleanly.
+function mirrorFields(fields: FormField[]): FormField[] {
+  return fields;
+}
+
 // ── Types ───────────────────────────────────────────────────────────────────
 interface FieldOption {
   value:   string;
@@ -251,7 +259,6 @@ export default function FormsTab({ showToast }: { showToast: (m: string, t?: 'su
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-bold text-warmgray-800 truncate">{t.title_ja}</p>
-                  <p className="text-[11px] text-warmgray-400 font-mono mt-0.5">{t.code}</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
                   {!t.is_active && (
@@ -352,6 +359,13 @@ function FormBuilder({
   const queryClient = useQueryClient();
   const isNew = templateId === null;
 
+  // Auto-generated unique code for new forms — admin never sees/types it.
+  // Format: TMPL_<8 uppercase hex> (URL-safe, fits VARCHAR(50)).
+  function genCode(): string {
+    const rand = (crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2)).replace(/-/g, '');
+    return `TMPL_${rand.slice(0, 8).toUpperCase()}`;
+  }
+
   // Load existing template + versions
   const { data: detail } = useQuery<TemplateDetail>({
     queryKey: ['form-templates', templateId],
@@ -385,6 +399,9 @@ function FormBuilder({
     queryFn:  async () => (await apiClient.get('/admin/departments')).data,
     staleTime: 5 * 60_000,
   });
+
+  // Auto-assign code for new templates on first mount (admin never sees it)
+  if (isNew && code === '') setCode(genCode());
 
   // Hydrate state from loaded data
   const hydrated = useState(false);
@@ -426,20 +443,20 @@ function FormBuilder({
   const create = useMutation({
     mutationFn: async () => (await apiClient.post('/admin/form-templates', {
       code: code.trim(),
-      title:    titleEn || titleJa,
+      title:    titleEn || titleJa,                       // legacy `title` col — keep JA fallback for non-null
       title_ja: titleJa,
       pattern_id: patternId,
       icon, gradient,
       description_ja: descJa || null,
-      description_en: descEn || null,
+      description_en: descEn || null,                       // leave blank — dev fills via /dev/i18n
       app_number_prefix: appNumberPrefix.trim().toUpperCase() || 'RNG',
       app_number_digits: appNumberDigits,
       // Pattern 2 (settlement-only) treats settlement schema as primary:
       // sync it to schema_definition too so frontend that reads either field works.
       // Custom renderers have independent header (fields) + settlement (settleFields).
       // Plain pattern 2: single schema synced to both.
-      schema_definition: (hasRingi || isCustomRenderer) ? { fields } : { fields: settleFields },
-      settlement_schema: hasSettlement ? { fields: settleFields } : null,
+      schema_definition: (hasRingi || isCustomRenderer) ? { fields: mirrorFields(fields) } : { fields: mirrorFields(settleFields) },
+      settlement_schema: hasSettlement ? { fields: mirrorFields(settleFields) } : null,
       notes: notes || 'Initial version',
     })).data,
     onSuccess: () => {
@@ -453,8 +470,8 @@ function FormBuilder({
 
   const saveVersion = useMutation({
     mutationFn: async () => (await apiClient.post(`/admin/form-templates/${templateId}/versions`, {
-      schema_definition: (hasRingi || isCustomRenderer) ? { fields } : { fields: settleFields },
-      settlement_schema: hasSettlement ? { fields: settleFields } : null,
+      schema_definition: (hasRingi || isCustomRenderer) ? { fields: mirrorFields(fields) } : { fields: mirrorFields(settleFields) },
+      settlement_schema: hasSettlement ? { fields: mirrorFields(settleFields) } : null,
       notes,
     })).data,
     onSuccess: () => {
@@ -469,10 +486,11 @@ function FormBuilder({
 
   const saveMeta = useMutation({
     mutationFn: async () => (await apiClient.patch(`/admin/form-templates/${templateId}`, {
-      title: titleEn, title_ja: titleJa, pattern_id: patternId,
+      title: titleEn || titleJa,                          // legacy `title` col — JA fallback for not-null
+      title_ja: titleJa, pattern_id: patternId,
       icon, gradient,
       description_ja: descJa || null,
-      description_en: descEn || null,
+      description_en: descEn || null,                     // leave blank — dev fills via /dev/i18n
       app_number_prefix: appNumberPrefix.trim().toUpperCase() || 'RNG',
       app_number_digits: appNumberDigits,
     })).data,
@@ -661,21 +679,8 @@ function FormBuilder({
             />
           ) : (
             <>
-              {/* Metadata */}
+              {/* Metadata — code field hidden, auto-generated for new forms */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400">
-                    {lang === 'en' ? 'Code (no spaces)' : 'コード（識別子）'} *
-                  </label>
-                  <input
-                    type="text"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''))}
-                    disabled={!isNew}
-                    placeholder="BUSINESS_TRIP"
-                    className="input mt-1 font-mono text-xs disabled:opacity-50"
-                  />
-                </div>
                 <div>
                   <label className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400">
                     Pattern ID *
@@ -705,16 +710,7 @@ function FormBuilder({
                     placeholder="出張稟議書"
                   />
                 </div>
-                <div>
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400">English title</label>
-                  <input
-                    type="text"
-                    value={titleEn}
-                    onChange={(e) => setTitleEn(e.target.value)}
-                    className="input mt-1"
-                    placeholder="Business Trip Request"
-                  />
-                </div>
+                {/* English title input hidden — see mirrorFields. Re-enable for i18n maintenance only. */}
               </div>
 
               {/* Display meta — dashboard tile appearance */}
@@ -772,23 +768,14 @@ function FormBuilder({
                   </div>
                 </div>
 
-                {/* Descriptions */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <input
-                    type="text"
-                    value={descJa}
-                    onChange={(e) => setDescJa(e.target.value)}
-                    className="input"
-                    placeholder={lang === 'en' ? 'Japanese description' : '日本語説明'}
-                  />
-                  <input
-                    type="text"
-                    value={descEn}
-                    onChange={(e) => setDescEn(e.target.value)}
-                    className="input"
-                    placeholder="English description"
-                  />
-                </div>
+                {/* Description (JA only — EN mirrored on save) */}
+                <input
+                  type="text"
+                  value={descJa}
+                  onChange={(e) => setDescJa(e.target.value)}
+                  className="input"
+                  placeholder="日本語説明"
+                />
 
                 {/* Application number prefix */}
                 <div className="space-y-1.5">
@@ -1107,25 +1094,14 @@ function FieldEditor({
         </div>
       </div>
 
-      {/* Labels */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-        <input
-          type="text"
-          value={field.label}
-          onChange={(e) => onUpdate({ label: e.target.value })}
-          className="input text-sm"
-          placeholder={lang === 'en' ? 'Japanese label' : '日本語ラベル'}
-        />
-        {!isHeader && (
-          <input
-            type="text"
-            value={field.label_en ?? ''}
-            onChange={(e) => onUpdate({ label_en: e.target.value })}
-            className="input text-sm"
-            placeholder="English label"
-          />
-        )}
-      </div>
+      {/* Label (JA only — EN mirrored on save via mirrorFields) */}
+      <input
+        type="text"
+        value={field.label}
+        onChange={(e) => onUpdate({ label: e.target.value })}
+        className="input text-sm w-full"
+        placeholder="日本語ラベル"
+      />
 
       {/* Options — ALWAYS visible when type uses choices (core, not advanced) */}
       {(isSelect || field.type === 'checkbox') && (
@@ -1649,14 +1625,7 @@ function RepeatGroupFieldsEditor({
           value={field.add_label ?? ''}
           onChange={(e) => onUpdate({ add_label: e.target.value || undefined })}
           className="input text-xs"
-          placeholder={lang === 'en' ? 'JA add button label' : '追加ボタン名'}
-        />
-        <input
-          type="text"
-          value={field.add_label_en ?? ''}
-          onChange={(e) => onUpdate({ add_label_en: e.target.value || undefined })}
-          className="input text-xs"
-          placeholder="EN add button label"
+          placeholder="追加ボタン名"
         />
       </div>
 
@@ -1693,22 +1662,13 @@ function RepeatGroupFieldsEditor({
                 {duplicate && (
                   <p className="text-[10px] text-red-500 pl-8">{lang === 'en' ? 'Duplicate row field name' : '行項目名が重複しています'}</p>
                 )}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  <input
-                    type="text"
-                    value={child.label}
-                    onChange={(e) => updateChild(idx, { label: e.target.value })}
-                    className="input text-xs"
-                    placeholder={lang === 'en' ? 'Japanese label' : '日本語ラベル'}
-                  />
-                  <input
-                    type="text"
-                    value={child.label_en ?? ''}
-                    onChange={(e) => updateChild(idx, { label_en: e.target.value })}
-                    className="input text-xs"
-                    placeholder="English label"
-                  />
-                </div>
+                <input
+                  type="text"
+                  value={child.label}
+                  onChange={(e) => updateChild(idx, { label: e.target.value })}
+                  className="input text-xs w-full"
+                  placeholder="日本語ラベル"
+                />
                 <div className="flex items-center gap-4 flex-wrap">
                   <label className="flex items-center gap-1.5 text-xs font-semibold text-warmgray-600">
                     <input
@@ -1795,10 +1755,19 @@ function OptionsEditor({
   hint?: string;
 }) {
   const { lang } = useLang();
-  const add = () => onChange([...options, { value: '', label_ja: '', label_en: '' }]);
+  // Auto-gen stable random value so admin only types the label.
+  // Stable = renaming label never breaks existing form_data references.
+  const genValue = (): string => {
+    const rand = (crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2)).replace(/-/g, '');
+    return `opt_${rand.slice(0, 8)}`;
+  };
+  const add = () => onChange([...options, { value: genValue(), label_ja: '', label_en: '' }]);
   const update = (i: number, p: Partial<FieldOption>) =>
     onChange(options.map((o, j) => j === i ? { ...o, ...p } : o));
   const remove = (i: number) => onChange(options.filter((_, j) => j !== i));
+
+  // Backfill missing values on render for options created before auto-gen existed.
+  // (Edits any blank-value option to a fresh value next time onChange fires.)
 
   return (
     <div className="space-y-2 bg-teal-50/40 border border-teal-200/40 rounded-xl p-3">
@@ -1814,26 +1783,17 @@ function OptionsEditor({
       ) : (
         options.map((o, i) => (
           <div key={i} className="flex items-center gap-1.5">
-            <input
-              type="text"
-              value={o.value}
-              onChange={(e) => update(i, { value: e.target.value })}
-              className="input text-xs font-mono w-24"
-              placeholder="value"
-            />
+            {/* Value input hidden — auto-generated stable key. Admin only edits label. */}
             <input
               type="text"
               value={o.label_ja}
-              onChange={(e) => update(i, { label_ja: e.target.value })}
+              onChange={(e) => update(i, {
+                label_ja: e.target.value,
+                // Backfill missing value (legacy options created before auto-gen)
+                ...(o.value ? {} : { value: genValue() }),
+              })}
               className="input text-xs flex-1"
               placeholder="日本語"
-            />
-            <input
-              type="text"
-              value={o.label_en}
-              onChange={(e) => update(i, { label_en: e.target.value })}
-              className="input text-xs flex-1"
-              placeholder="English"
             />
             <button onClick={() => remove(i)} className="text-red-400 hover:text-red-600 text-sm px-1.5">✕</button>
           </div>

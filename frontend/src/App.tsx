@@ -5,6 +5,7 @@ import { usePermissions } from './hooks/usePermissions';
 import type { RolePermissions } from './config/permissions';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import RingoLoader from './components/common/RingoLoader';
+import Layout from './components/common/Layout';
 
 // ─── Eager imports (small, used on initial load) ─────────────────────────────
 import Login from './pages/Login';
@@ -21,10 +22,17 @@ const Admin            = lazy(() => import('./pages/Admin'));
 const Accounting       = lazy(() => import('./pages/Accounting'));
 const ApprovalHistory  = lazy(() => import('./pages/ApprovalHistory'));
 const Settlement       = lazy(() => import('./pages/Settlement'));
+// DEV-ONLY: i18n editor. Email-gated inside the page. Remove on prod cleanup.
+const DevI18n          = lazy(() => import('./pages/DevI18n'));
 
-// Fallback shown while a lazy chunk downloads — branded line-draw loader
-function RouteLoading() {
-  return <RingoLoader.Page />;
+// Per-route Suspense wrapper. Renders Layout shell so Sidebar stays mounted
+// while the lazy chunk downloads — no sidebar blink on first nav to a lazy page.
+function LazyRoute({ children, title = '' }: { children: ReactNode; title?: string }) {
+  return (
+    <Suspense fallback={<Layout title={title}><RingoLoader.Block /></Layout>}>
+      {children}
+    </Suspense>
+  );
 }
 
 // ─── ログイン認証ガード ───
@@ -53,81 +61,86 @@ function RequirePermission({
 export default function App() {
   return (
     <ErrorBoundary>
-      <Suspense fallback={<RouteLoading />}>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-          {/* ダッシュボード */}
-          <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
+        {/* ダッシュボード */}
+        <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
 
-          {/* 申請履歴 */}
-          <Route path="/history" element={<RequireAuth><History /></RequireAuth>} />
+        {/* 申請履歴 */}
+        <Route path="/history" element={<RequireAuth><History /></RequireAuth>} />
 
-          {/* 新規申請 */}
-          <Route path="/applications/new/:templateCode" element={
-            <RequireAuth>
-              <RequirePermission check={(p) => p.canSubmit}>
-                <NewApplication />
-              </RequirePermission>
-            </RequireAuth>
-          } />
+        {/* 新規申請 */}
+        <Route path="/applications/new/:templateCode" element={
+          <RequireAuth>
+            <RequirePermission check={(p) => p.canSubmit}>
+              <NewApplication />
+            </RequirePermission>
+          </RequireAuth>
+        } />
 
-          {/* 申請詳細 */}
-          <Route path="/applications/:id" element={<RequireAuth><ApplicationDetail /></RequireAuth>} />
+        {/* 申請詳細 */}
+        <Route path="/applications/:id" element={<RequireAuth><ApplicationDetail /></RequireAuth>} />
 
-          {/* 精算入力 (lazy) */}
-          <Route path="/applications/:id/settlement" element={
-            <RequireAuth>
-              <RequirePermission check={(p) => p.canSubmit}>
-                <Settlement />
-              </RequirePermission>
-            </RequireAuth>
-          } />
+        {/* 精算入力 (lazy) — per-route Suspense keeps Sidebar mounted */}
+        <Route path="/applications/:id/settlement" element={
+          <RequireAuth>
+            <RequirePermission check={(p) => p.canSubmit}>
+              <LazyRoute><Settlement /></LazyRoute>
+            </RequirePermission>
+          </RequireAuth>
+        } />
 
-          {/* 承認待ち */}
-          <Route path="/approvals" element={
-            <RequireAuth>
-              <RequirePermission check={(p) => p.canApprove}>
-                <Approvals />
-              </RequirePermission>
-            </RequireAuth>
-          } />
+        {/* 承認待ち */}
+        <Route path="/approvals" element={
+          <RequireAuth>
+            <RequirePermission check={(p) => p.canApprove}>
+              <Approvals />
+            </RequirePermission>
+          </RequireAuth>
+        } />
 
-          {/* プロフィール */}
-          <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />
+        {/* プロフィール */}
+        <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />
 
-          {/* 精算管理 (lazy — 経理・総務・管理者) */}
-          <Route path="/accounting" element={
-            <RequireAuth>
-              <RequirePermission check={(p) => p.canSettle}>
-                <Accounting />
-              </RequirePermission>
-            </RequireAuth>
-          } />
+        {/* 精算管理 (lazy — 経理・総務・管理者) */}
+        <Route path="/accounting" element={
+          <RequireAuth>
+            <RequirePermission check={(p) => p.canSettle}>
+              <LazyRoute><Accounting /></LazyRoute>
+            </RequirePermission>
+          </RequireAuth>
+        } />
 
-          {/* 承認履歴 (lazy) */}
-          <Route path="/approval-history" element={
-            <RequireAuth>
-              <RequirePermission check={(p) => p.canApprove}>
-                <ApprovalHistory />
-              </RequirePermission>
-            </RequireAuth>
-          } />
+        {/* 承認履歴 (lazy) */}
+        <Route path="/approval-history" element={
+          <RequireAuth>
+            <RequirePermission check={(p) => p.canApprove}>
+              <LazyRoute><ApprovalHistory /></LazyRoute>
+            </RequirePermission>
+          </RequireAuth>
+        } />
 
-          {/* 管理画面 (lazy) */}
-          <Route path="/admin" element={
-            <RequireAuth>
-              <RequirePermission check={(p) => p.canAdmin}>
-                <Admin />
-              </RequirePermission>
-            </RequireAuth>
-          } />
+        {/* 管理画面 (lazy) */}
+        <Route path="/admin" element={
+          <RequireAuth>
+            <RequirePermission check={(p) => p.canAdmin}>
+              <LazyRoute><Admin /></LazyRoute>
+            </RequirePermission>
+          </RequireAuth>
+        } />
 
-          {/* 404 Not Found */}
-          <Route path="*" element={<div className="p-8 text-warmgray-800">404 — Not Found</div>} />
-        </Routes>
-      </Suspense>
+        {/* DEV-ONLY: i18n editor (email-gated inside page). Remove on prod cleanup. */}
+        <Route path="/dev/i18n" element={
+          <RequireAuth>
+            <LazyRoute><DevI18n /></LazyRoute>
+          </RequireAuth>
+        } />
+
+        {/* 404 Not Found */}
+        <Route path="*" element={<div className="p-8 text-warmgray-800">404 — Not Found</div>} />
+      </Routes>
     </ErrorBoundary>
   );
 }

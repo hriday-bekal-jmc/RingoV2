@@ -7,6 +7,7 @@ import Layout from '../components/common/Layout';
 import Toast, { useToast } from '../components/common/Toast';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import { useLang } from '../context/LanguageContext';
+import { optionLabel, type Lang } from '../i18n';
 import { useAuth } from '../context/AuthContext';
 import RingoLoader from '../components/common/RingoLoader';
 import { Sk } from '../components/common/Skeleton';
@@ -117,6 +118,7 @@ function FormDataViewer({ formData, schema, tFn }: {
   schema: { fields: FormField[] } | null;
   tFn: (k: any) => string;
 }) {
+  const { lang } = useLang();
   const fields = schema?.fields ?? [];
 
   if (fields.length === 0) {
@@ -157,7 +159,7 @@ function FormDataViewer({ formData, schema, tFn }: {
               ) : isFile && val ? (
                 renderFileLinks(val, tFn('attach_label'))
               ) : val != null && val !== '' ? (
-                <span className={isLong ? 'block whitespace-pre-wrap leading-relaxed' : ''}>{String(val)}</span>
+                <span className={isLong ? 'block whitespace-pre-wrap leading-relaxed' : ''}>{optionLabel(f, val, lang) || String(val)}</span>
               ) : (
                 <span className="text-warmgray-300 text-xs">{tFn('not_entered')}</span>
               )}
@@ -295,7 +297,7 @@ function AppDetailPanel({ appId, onClose, tFn, lang }: {
                 ) : isFile && val ? (
                   renderFileLinks(val, tFn('attach_label'))
                 ) : val != null && val !== '' ? (
-                  <span className={isLong ? 'block whitespace-pre-wrap leading-relaxed' : ''}>{String(val)}</span>
+                  <span className={isLong ? 'block whitespace-pre-wrap leading-relaxed' : ''}>{optionLabel(f, val, lang as Lang) || String(val)}</span>
                 ) : (
                   <span className="text-warmgray-300 text-xs">—</span>
                 )}

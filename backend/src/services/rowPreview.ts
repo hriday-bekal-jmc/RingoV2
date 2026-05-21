@@ -40,6 +40,7 @@ interface FieldDef {
   type:              string;
   show_in_row?:      boolean;
   row_compare_with?: string;
+  options?:          { value: string; label_ja?: string; label_en?: string }[];
   fields?:           FieldDef[]; // repeat_group children (skip for row preview)
 }
 
@@ -67,10 +68,17 @@ function processField(
   if (TEXT_TYPES.has(f.type) && !out.text) {
     const raw = data[f.name];
     if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+      // For select fields, resolve opaque value (opt_xxx) → label_ja for display.
+      // Falls back to raw value if no options or no match (legacy data).
+      let display = String(raw);
+      if (f.type === 'select' && Array.isArray(f.options)) {
+        const opt = f.options.find((o) => o.value === String(raw));
+        if (opt?.label_ja) display = opt.label_ja;
+      }
       out.text = {
         label:    f.label,
         label_en: f.label_en ?? f.label,
-        value:    String(raw),
+        value:    display,
       };
     }
     return;

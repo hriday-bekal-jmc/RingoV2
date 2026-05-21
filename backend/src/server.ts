@@ -31,6 +31,8 @@ import accountingRoutes from './routes/accountingRoutes';
 import dashboardRoutes from './routes/dashboardRoutes';
 import avatarRoutes from './routes/avatarRoutes';
 import allowanceRoutes from './routes/allowanceRoutes';
+// DEV-ONLY: i18n overrides editor (gated by email). Remove on prod cleanup.
+import devRoutes from './routes/devRoutes';
 
 const app: Application = express();
 const PORT = env.PORT;
@@ -104,6 +106,8 @@ app.use('/api/accounting',   accountingRoutes);
 app.use('/api/dashboard',    dashboardRoutes);
 app.use('/api/avatars',          avatarRoutes);
 app.use('/api/allowance-rates',  allowanceRoutes);
+// DEV-ONLY: remove on prod cleanup.
+app.use('/api/dev',              devRoutes);
 
 app.use(errorHandler);
 

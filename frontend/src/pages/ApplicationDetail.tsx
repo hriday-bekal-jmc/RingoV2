@@ -10,7 +10,7 @@ import TransportationDetail from '../components/forms/TransportationDetail';
 import type { TransportFormData } from '../components/forms/TransportationForm';
 import Toast, { useToast } from '../components/common/Toast';
 import { useLang } from '../context/LanguageContext';
-import { fieldLabel } from '../i18n';
+import { fieldLabel, optionLabel } from '../i18n';
 import CustomSelect from '../components/forms/CustomSelect';
 import RouteTimeline from '../components/common/RouteTimeline';
 import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
@@ -100,6 +100,7 @@ function FormDataViewer({ app }: { app: ApplicationDetail }) {
         const val = app.form_data[f.name];
         const isFile = f.type === 'file' || isFileValue(val);
         const isLong = f.type === 'repeat_group' || f.type === 'textarea' || (typeof val === 'string' && !isFile && val.length > 40);
+        const displayVal = optionLabel(f, val, lang);
         return (
           <div key={f.name} className={isLong ? 'col-span-full' : ''}>
             <dt className="text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{fieldLabel(f, lang)}</dt>
@@ -109,7 +110,7 @@ function FormDataViewer({ app }: { app: ApplicationDetail }) {
               ) : isFile && val ? (
                 <FileLinks val={val} />
               ) : val != null && val !== '' ? (
-                String(val)
+                displayVal
               ) : (
                 <span className="text-warmgray-300">—</span>
               )}
@@ -120,6 +121,8 @@ function FormDataViewer({ app }: { app: ApplicationDetail }) {
     </dl>
   );
 }
+
+// (optionLabel moved to ../i18n for reuse across viewers)
 
 // ── Settlement Data Viewer ─────────────────────────────────────────────────────
 function SettlementDataViewer({ app, t }: { app: ApplicationDetail; t: (k: any) => string }) {
@@ -136,6 +139,12 @@ function SettlementDataViewer({ app, t }: { app: ApplicationDetail; t: (k: any) 
     }
     // File URLs — show as links (modern: /api/files/<id>, legacy: /uploads/<file>)
     if (typeof val === 'string' && (val.includes('/uploads/') || val.includes('/api/files/'))) return val;
+    // Resolve select/checkbox option value → label
+    const f = fields.find((x: any) => x.name === name);
+    if (f) {
+      const label = optionLabel(f, val, lang);
+      if (label) return label;
+    }
     return String(val);
   };
 

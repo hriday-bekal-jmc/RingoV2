@@ -16,6 +16,7 @@ import { useQuery } from '@tanstack/react-query';
 import apiClient from '../../services/apiClient';
 import { templateLabel } from '../../config/templateLabels';
 import { useLang } from '../../context/LanguageContext';
+import { optionLabel } from '../../i18n';
 import RepeatGroupDisplay from '../forms/RepeatGroupDisplay';
 import CollapsibleComment from '../common/CollapsibleComment';
 import { Sk } from '../common/Skeleton';
@@ -328,8 +329,7 @@ function MetaCard({ d, lang, dateLocale }: { d: AdminAppDetailResponse; lang: 'j
                 </span>
               </>
             )}
-            <span>·</span>
-            <span className="font-mono text-warmgray-300" title="Template code">{a.template_code}</span>
+            {/* Template code hidden — auto-generated, not user-meaningful */}
           </div>
         </div>
 
@@ -484,7 +484,7 @@ function FormDataCard({ title, accent, data, schema, files, lang }: {
               <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{f.label}</dt>
               <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3 py-2 rounded-xl break-words min-h-[36px]">
                 {f.value != null && f.value !== ''
-                  ? <span className={isLong ? 'whitespace-pre-wrap' : ''}>{String(f.value)}</span>
+                  ? <span className={isLong ? 'whitespace-pre-wrap' : ''}>{optionLabel(f as any, f.value, lang) || String(f.value)}</span>
                   : <span className="text-warmgray-300 text-xs">—</span>}
               </dd>
             </div>
