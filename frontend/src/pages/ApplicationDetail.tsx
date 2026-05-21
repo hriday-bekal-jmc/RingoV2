@@ -5,6 +5,9 @@ import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import RingoLoader from '../components/common/RingoLoader';
 import DynamicForm from '../components/forms/DynamicForm';
+import TransportationForm from '../components/forms/TransportationForm';
+import TransportationDetail from '../components/forms/TransportationDetail';
+import type { TransportFormData } from '../components/forms/TransportationForm';
 import Toast, { useToast } from '../components/common/Toast';
 import { useLang } from '../context/LanguageContext';
 import { fieldLabel } from '../i18n';
@@ -41,6 +44,8 @@ interface ApplicationDetail {
   settlement_schema: { fields: any[] } | null;
   steps: Step[];
   created_at: string;
+  component_type?: string | null;
+  applicant_daily_rate?: number | null;
   // Accounting fields (from settlements JOIN)
   transfer_date: string | null;
   transfer_proof_url: string | null;
@@ -356,12 +361,20 @@ function SettlementReturnEditor({ app, onSuccess }: { app: ApplicationDetail; on
     }
   };
 
+  const isTransport = app.component_type === 'transportation';
+
   const template = {
     id: app.template_id,
     title_ja: app.template_name,
     schema_definition: app.schema_definition,
     settlement_schema: app.settlement_schema ?? { fields: [] },
+    component_type: app.component_type,
   };
+
+  // For transportation (pattern_id=2), data lives in form_data, not settlement_data
+  const settlementDefaults = isTransport
+    ? (app.form_data as unknown as Partial<TransportFormData>)
+    : (app.settlement_data ?? {});
 
   return (
     <div className="space-y-5 animate-fade-up">
@@ -378,14 +391,23 @@ function SettlementReturnEditor({ app, onSuccess }: { app: ApplicationDetail; on
         />
       )}
 
-      <DynamicForm
-        template={template}
-        defaultValues={app.settlement_data ?? {}}
-        isSettlementPhase={true}
-        onSubmit={handleSubmit}
-        disabled={resubmitSettlement.isPending}
-        submitLabel={t('btn_resubmit')}
-      />
+      {isTransport ? (
+        <TransportationForm
+          template={template}
+          defaultValues={settlementDefaults}
+          onSubmit={handleSubmit}
+          disabled={resubmitSettlement.isPending}
+        />
+      ) : (
+        <DynamicForm
+          template={template}
+          defaultValues={app.settlement_data ?? {}}
+          isSettlementPhase={true}
+          onSubmit={handleSubmit}
+          disabled={resubmitSettlement.isPending}
+          submitLabel={t('btn_resubmit')}
+        />
+      )}
     </div>
   );
 }
@@ -464,11 +486,14 @@ function DraftEditor({
     }
   };
 
+  const isDraftTransport = app.component_type === 'transportation';
+
   const template = {
     id: app.template_id,
     title_ja: app.template_name,
     schema_definition: app.schema_definition,
     settlement_schema: app.settlement_schema ?? { fields: [] },
+    component_type: app.component_type,
   };
 
   return (
@@ -483,14 +508,24 @@ function DraftEditor({
         t={t}
       />
 
-      <DynamicForm
-        template={template}
-        defaultValues={app.form_data}
-        onSubmit={handleFormSubmit}
-        onDraft={mode === 'draft' ? handleDraftSave : undefined}
-        disabled={routePreview?.department_has_route === false}
-        submitLabel={mode === 'resubmit' ? t('btn_resubmit') : undefined}
-      />
+      {isDraftTransport ? (
+        <TransportationForm
+          template={template}
+          defaultValues={app.form_data as unknown as Partial<TransportFormData>}
+          onSubmit={handleFormSubmit}
+          onDraft={mode === 'draft' ? handleDraftSave : undefined}
+          disabled={routePreview?.department_has_route === false}
+        />
+      ) : (
+        <DynamicForm
+          template={template}
+          defaultValues={app.form_data}
+          onSubmit={handleFormSubmit}
+          onDraft={mode === 'draft' ? handleDraftSave : undefined}
+          disabled={routePreview?.department_has_route === false}
+          submitLabel={mode === 'resubmit' ? t('btn_resubmit') : undefined}
+        />
+      )}
     </div>
   );
 }
@@ -772,7 +807,15 @@ export default function ApplicationDetail() {
 
             <div>
               <p className="section-title mb-4">{t('detail_content')}</p>
-              <FormDataViewer app={app} />
+              {app.component_type === 'transportation' ? (
+                <TransportationDetail
+                  formData={app.form_data}
+                  dailyAllowanceRate={app.applicant_daily_rate}
+                  schema={app.schema_definition ?? undefined}
+                />
+              ) : (
+                <FormDataViewer app={app} />
+              )}
             </div>
           </div>
 
@@ -811,15 +854,17 @@ export default function ApplicationDetail() {
         <div className="space-y-4">
           <p className="section-title ml-2">{t('detail_timeline')}</p>
 
-          {/* RINGI steps */}
-          <div className="card pt-6 pb-2">
-            {app.has_settlement && (
-              <p className="text-[10px] font-bold uppercase tracking-widest text-ringo-400 mb-4 ml-4">{t('phase_ringi')}</p>
-            )}
-            <div className="relative border-l-2 border-ringo-200 ml-4 space-y-8 pb-4">
-              {renderStepsWithDividers(ringiSteps)}
+          {/* RINGI steps — hidden for pattern_id=2 (direct settlement, no ringi phase) */}
+          {ringiSteps.length > 0 && (
+            <div className="card pt-6 pb-2">
+              {app.has_settlement && (
+                <p className="text-[10px] font-bold uppercase tracking-widest text-ringo-400 mb-4 ml-4">{t('phase_ringi')}</p>
+              )}
+              <div className="relative border-l-2 border-ringo-200 ml-4 space-y-8 pb-4">
+                {renderStepsWithDividers(ringiSteps)}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* SETTLEMENT steps (only shown if they exist) */}
           {settleSteps.length > 0 && (
@@ -827,6 +872,15 @@ export default function ApplicationDetail() {
               <p className="text-[10px] font-bold uppercase tracking-widest text-teal-500 mb-4 ml-4">{t('phase_settlement')}</p>
               <div className="relative border-l-2 border-teal-200 ml-4 space-y-8 pb-4">
                 {renderStepsWithDividers(settleSteps)}
+              </div>
+            </div>
+          )}
+
+          {/* Fallback: transportation apps with no steps yet (auto-approved edge case) */}
+          {ringiSteps.length === 0 && settleSteps.length === 0 && (
+            <div className="card pt-6 pb-2">
+              <div className="relative border-l-2 border-warmgray-200 ml-4 pb-4 text-sm text-warmgray-400">
+                {lang === 'ja' ? 'ステップなし（自動承認）' : 'No steps (auto-approved)'}
               </div>
             </div>
           )}

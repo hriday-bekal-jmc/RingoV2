@@ -11,6 +11,7 @@ export interface User {
   department_id?: string;
   department_name?: string;
   avatar_url?: string | null;
+  daily_allowance_rate?: number | null;
 }
 
 interface AuthContextType {

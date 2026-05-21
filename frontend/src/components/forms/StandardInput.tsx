@@ -508,11 +508,179 @@ export default function StandardInput({
         </div>
       )}
 
+      {field.type === 'allowance_days' && (
+        <AllowanceDaysInput field={field} setValue={setValue} watch={watch} isDraft={isDraft} />
+      )}
+
+      {field.type === 'route_entry' && (
+        <RouteEntryInput field={field} setValue={setValue} watch={watch} isDraft={isDraft} />
+      )}
+
       {error && !isDraft && (
         <p className="text-xs text-ringo-500 flex items-center gap-1">
           <span>⚠</span> {typeof error.message === 'string' && error.message ? error.message : 'この項目は必須です'}
         </p>
       )}
+    </div>
+  );
+}
+
+// ── AllowanceDaysInput ────────────────────────────────────────────────────────
+// Reusable 0 / 半日 / 1日 picker. Syncs value (0 | 0.5 | 1) to react-hook-form.
+// Add to any form schema with type: 'allowance_days'.
+function AllowanceDaysInput({
+  field,
+  setValue,
+  watch,
+}: {
+  field: FormField;
+  setValue?: UseFormSetValue<Record<string, unknown>>;
+  watch?: UseFormWatch<Record<string, unknown>>;
+  isDraft?: boolean;
+}) {
+  const { lang } = useLang();
+  const rawVal = watch?.(field.name);
+  const current = rawVal !== undefined && rawVal !== null ? Number(rawVal) : 0;
+
+  const set = (v: 0 | 0.5 | 1) => {
+    setValue?.(field.name, v, { shouldDirty: true, shouldTouch: false, shouldValidate: false });
+  };
+
+  const OPTIONS: { value: 0 | 0.5 | 1; label_ja: string; label_en: string }[] = [
+    { value: 0,   label_ja: '0日',  label_en: '0 days' },
+    { value: 0.5, label_ja: '半日', label_en: 'Half day' },
+    { value: 1,   label_ja: '1日',  label_en: '1 day' },
+  ];
+
+  return (
+    <div className="flex gap-2">
+      {OPTIONS.map(({ value, label_ja, label_en }) => (
+        <button
+          key={value}
+          type="button"
+          onClick={() => set(value)}
+          className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-all ${
+            current === value
+              ? 'bg-ringo-600 text-white border-ringo-600 shadow-sm'
+              : 'bg-white border-warmgray-200 text-warmgray-700 hover:border-ringo-300 hover:bg-ringo-50'
+          }`}
+        >
+          {lang === 'en' ? label_en : label_ja}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── RouteEntryInput ────────────────────────────────────────────────────────────
+// Reusable transport route picker. Stores array of {id,from_station,to_station,fare}
+// in form field value. Add to any schema with type: 'route_entry'.
+// Total displayed as yen × 2 (round-trip assumption).
+interface RouteRow { id: string; from_station: string; to_station: string; fare: number }
+
+function RouteEntryInput({
+  field,
+  setValue,
+  watch,
+}: {
+  field: FormField;
+  setValue?: UseFormSetValue<Record<string, unknown>>;
+  watch?: UseFormWatch<Record<string, unknown>>;
+  isDraft?: boolean;
+}) {
+  const { lang } = useLang();
+  const rawVal = watch?.(field.name);
+
+  const [routes, setRoutes] = useState<RouteRow[]>(() => {
+    if (Array.isArray(rawVal)) {
+      return (rawVal as RouteRow[]).map((r) => ({
+        id: r.id ?? crypto.randomUUID(),
+        from_station: r.from_station ?? '',
+        to_station:   r.to_station ?? '',
+        fare:         Number(r.fare) || 0,
+      }));
+    }
+    return [{ id: crypto.randomUUID(), from_station: '', to_station: '', fare: 0 }];
+  });
+
+  useEffect(() => {
+    setValue?.(field.name, routes, { shouldDirty: true, shouldTouch: false, shouldValidate: false });
+  }, [routes, field.name, setValue]);
+
+  const update = (i: number, patch: Partial<RouteRow>) =>
+    setRoutes((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const add    = () => setRoutes((prev) => [...prev, { id: crypto.randomUUID(), from_station: '', to_station: '', fare: 0 }]);
+  const remove = (i: number) => setRoutes((prev) => prev.filter((_, j) => j !== i));
+  const swap   = (i: number) =>
+    setRoutes((prev) => prev.map((r, j) => j === i ? { ...r, from_station: r.to_station, to_station: r.from_station } : r));
+
+  const total = routes.reduce((s, r) => s + (Number(r.fare) || 0), 0) * 2;
+
+  return (
+    <div className="space-y-2 rounded-xl border border-ringo-100 bg-ringo-50/40 p-3">
+      {routes.map((r, i) => (
+        <div key={r.id} className="flex items-center gap-1.5">
+          <input
+            type="text"
+            value={r.from_station}
+            onChange={(e) => update(i, { from_station: e.target.value })}
+            placeholder={lang === 'ja' ? '乗車駅' : 'From station'}
+            className="input flex-1 min-w-0 text-sm"
+          />
+          <button
+            type="button"
+            onClick={() => swap(i)}
+            title={lang === 'ja' ? '乗降駅を入替' : 'Swap stations'}
+            className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg border border-warmgray-200 bg-white text-warmgray-400 hover:text-ringo-600 hover:border-ringo-300 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+            </svg>
+          </button>
+          <input
+            type="text"
+            value={r.to_station}
+            onChange={(e) => update(i, { to_station: e.target.value })}
+            placeholder={lang === 'ja' ? '降車駅' : 'To station'}
+            className="input flex-1 min-w-0 text-sm"
+          />
+          <div className="relative shrink-0 w-20">
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-warmgray-400 pointer-events-none">¥</span>
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={r.fare || ''}
+              onChange={(e) => update(i, { fare: Number(e.target.value) || 0 })}
+              className="input pl-5 text-sm"
+            />
+          </div>
+          {routes.length > 1 && (
+            <button
+              type="button"
+              onClick={() => remove(i)}
+              className="shrink-0 text-warmgray-300 hover:text-red-400 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+      ))}
+
+      <div className="flex items-center justify-between pt-1">
+        <button
+          type="button"
+          onClick={add}
+          className="text-xs text-ringo-600 hover:text-ringo-700 font-medium"
+        >
+          + {lang === 'ja' ? '経路追加' : 'Add route'}
+        </button>
+        <span className="text-xs font-semibold text-warmgray-600 tabular-nums">
+          {lang === 'ja' ? '合計（往復）' : 'Total (round-trip)'}: ¥{total.toLocaleString('ja-JP')}
+        </span>
+      </div>
     </div>
   );
 }

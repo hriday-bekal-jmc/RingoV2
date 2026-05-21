@@ -11,6 +11,7 @@ import morgan from 'morgan';
 import { pool, warmPgPool } from './config/db';
 import { redis } from './config/redis';
 import { errorHandler } from './middlewares/errorHandler';
+import { invalidateCachePattern } from './services/cache';
 
 
 import { scheduleOrphanCleanup } from './services/orphanCleanup';
@@ -29,6 +30,7 @@ import sseRoutes from './routes/sseRoutes';
 import accountingRoutes from './routes/accountingRoutes';
 import dashboardRoutes from './routes/dashboardRoutes';
 import avatarRoutes from './routes/avatarRoutes';
+import allowanceRoutes from './routes/allowanceRoutes';
 
 const app: Application = express();
 const PORT = env.PORT;
@@ -100,7 +102,8 @@ app.use('/api/files',        fileRoutes);
 app.use('/api/events',       sseRoutes);
 app.use('/api/accounting',   accountingRoutes);
 app.use('/api/dashboard',    dashboardRoutes);
-app.use('/api/avatars',      avatarRoutes);
+app.use('/api/avatars',          avatarRoutes);
+app.use('/api/allowance-rates',  allowanceRoutes);
 
 app.use(errorHandler);
 
@@ -113,6 +116,10 @@ async function start(): Promise<void> {
   }
 
   scheduleOrphanCleanup();
+
+  // Bust all admin reference caches on startup — ensures templates/routes/depts
+  // reflect the latest migration output without waiting for TTL expiry.
+  void invalidateCachePattern('admin:ref:*');
 
   app.listen(PORT, () => {
     console.log(`[ringo] backend listening on port ${PORT}`);

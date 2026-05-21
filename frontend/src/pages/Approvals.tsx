@@ -11,6 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import RingoLoader from '../components/common/RingoLoader';
 import { Sk } from '../components/common/Skeleton';
 import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
+import TransportationDetail from '../components/forms/TransportationDetail';
 import CollapsibleComment from '../components/common/CollapsibleComment';
 import UserAvatar from '../components/common/UserAvatar';
 
@@ -182,6 +183,8 @@ interface AppDetailData {
   applicant_name: string;
   applicant_avatar?: string | null;
   created_at: string;
+  component_type?: string | null;
+  applicant_daily_rate?: number | null;
   transfer_date?: string | null;
   transfer_proof_url?: string | null;
   accounting_note?: string | null;
@@ -595,7 +598,15 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
               <p className="section-title mb-4">
                 {app.current_stage === 'SETTLEMENT' ? t('approvals_original') : t('approvals_content')}
               </p>
-              <FormDataViewer formData={viewApp.form_data} schema={viewApp.schema_definition ?? null} tFn={t} />
+              {(viewApp as AppDetailData).component_type === 'transportation' ? (
+                <TransportationDetail
+                  formData={viewApp.form_data as Record<string, unknown>}
+                  dailyAllowanceRate={(viewApp as AppDetailData).applicant_daily_rate}
+                  schema={(viewApp as AppDetailData).schema_definition ?? undefined}
+                />
+              ) : (
+                <FormDataViewer formData={viewApp.form_data} schema={viewApp.schema_definition ?? null} tFn={t} />
+              )}
             </div>
             )}
           </div>

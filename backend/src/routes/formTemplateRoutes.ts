@@ -28,6 +28,7 @@ router.get('/form-templates', async (_req: Request, res: Response): Promise<void
     const r = await query(
       `SELECT
          t.id, t.code, t.title, t.title_ja, t.pattern_id, t.is_active,
+         t.is_protected, t.component_type,
          t.icon, t.gradient, t.description_ja, t.description_en,
          t.app_number_prefix, t.app_number_digits,
          t.created_at, t.updated_at,
@@ -54,6 +55,7 @@ router.get('/form-templates/:id', async (req: Request, res: Response): Promise<v
   try {
     const tmpl = await query(
       `SELECT id, code, title, title_ja, pattern_id, is_active,
+              is_protected, component_type,
               icon, gradient, description_ja, description_en,
               app_number_prefix, app_number_digits,
               created_at, updated_at
@@ -432,6 +434,18 @@ router.delete('/form-templates/:id/versions/:vid', async (req: Request, res: Res
 router.delete('/form-templates/:id', async (req: Request, res: Response): Promise<void> => {
   const hard = req.query.hard === 'true';
   try {
+    // Protected templates cannot be hard-deleted (only deactivated)
+    if (hard) {
+      const protCheck = await query(
+        `SELECT is_protected FROM form_templates WHERE id = $1`,
+        [req.params.id],
+      );
+      if (protCheck.rows[0]?.is_protected) {
+        res.status(403).json({ error: 'このフォームは保護されており削除できません。無効化のみ可能です。' });
+        return;
+      }
+    }
+
     if (!hard) {
       const r = await query(
         `UPDATE form_templates SET is_active = FALSE WHERE id = $1 RETURNING id`,

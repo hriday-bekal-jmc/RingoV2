@@ -730,6 +730,14 @@ router.post('/:id/resubmit-settlement', async (req: Request, res: Response): Pro
         template_version_id: string | null;
         route_id: string | null;
       };
+
+      // Fetch pattern_id — determines where submitted data lives (form_data vs settlement_data)
+      const tmplPatternRes = await client.query(
+        `SELECT pattern_id FROM form_templates WHERE id = $1`,
+        [template_id],
+      );
+      const isDirectSettlement = (tmplPatternRes.rows[0]?.pattern_id ?? 1) === 2;
+
       const schemaRes = await client.query(
         `SELECT COALESCE(v.settlement_schema, active_v.settlement_schema) AS settlement_schema
          FROM form_templates t
@@ -745,7 +753,8 @@ router.post('/:id/resubmit-settlement', async (req: Request, res: Response): Pro
       );
       const settlementSchema = schemaRes.rows[0]?.settlement_schema;
       const normalizedSettlementData = applyComputedFormData(settlementSchema, settlement_data);
-      if (settlementSchema) {
+      // Skip schema validation for direct-settlement (pattern_id=2) — custom form, no settlement_schema
+      if (settlementSchema && !isDirectSettlement) {
         const errors = validateFormData(settlementSchema, normalizedSettlementData);
         if (errors.length > 0) {
           throw Object.assign(new Error(errors.map(e => e.message).join(' / ')), { status: 400 });
@@ -795,24 +804,43 @@ router.post('/:id/resubmit-settlement', async (req: Request, res: Response): Pro
         [req.params.id],
       );
 
-      // Update application status + settlement_data
-      await client.query(
-        `UPDATE applications
-         SET status = 'PENDING_SETTLEMENT', settlement_data = $2::jsonb,
-             settlement_submitted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $1`,
-        [req.params.id, JSON.stringify(normalizedSettlementData)],
-      );
-
-      // Update settlements table row
-      const rawActual = normalizedSettlementData?.actual_amount;
-      const actualAmount = typeof rawActual === 'number' ? rawActual : parseFloat(String(rawActual ?? 0)) || 0;
-      await client.query(
-        `UPDATE settlements
-         SET actual_amount = $2, settlement_data = $3::jsonb, updated_at = CURRENT_TIMESTAMP
-         WHERE application_id = $1`,
-        [req.params.id, actualAmount, JSON.stringify(normalizedSettlementData)],
-      );
+      // Update application status.
+      // pattern_id=2 (direct settlement): data lives in form_data, not settlement_data.
+      // pattern_id=1/3: data goes into settlement_data as usual.
+      if (isDirectSettlement) {
+        const grandTotal = Number((normalizedSettlementData as Record<string, unknown>).grand_total) || 0;
+        await client.query(
+          `UPDATE applications
+           SET status = 'PENDING_SETTLEMENT', form_data = $2::jsonb,
+               settlement_submitted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1`,
+          [req.params.id, JSON.stringify(normalizedSettlementData)],
+        );
+        // Sync settlements expected_amount with updated grand_total
+        await client.query(
+          `UPDATE settlements
+           SET expected_amount = $2, actual_amount = $2, updated_at = CURRENT_TIMESTAMP
+           WHERE application_id = $1`,
+          [req.params.id, grandTotal],
+        );
+      } else {
+        await client.query(
+          `UPDATE applications
+           SET status = 'PENDING_SETTLEMENT', settlement_data = $2::jsonb,
+               settlement_submitted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1`,
+          [req.params.id, JSON.stringify(normalizedSettlementData)],
+        );
+        // Update settlements table row
+        const rawActual = normalizedSettlementData?.actual_amount;
+        const actualAmount = typeof rawActual === 'number' ? rawActual : parseFloat(String(rawActual ?? 0)) || 0;
+        await client.query(
+          `UPDATE settlements
+           SET actual_amount = $2, settlement_data = $3::jsonb, updated_at = CURRENT_TIMESTAMP
+           WHERE application_id = $1`,
+          [req.params.id, actualAmount, JSON.stringify(normalizedSettlementData)],
+        );
+      }
 
       let finalApp: { id: string; status: string; application_number: string | null } | null = null;
       if (resolvedSteps.length > 0) {
@@ -879,9 +907,23 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       const department_id = req.user!.department_id;
 
       if (!department_id) {
-        const err = Object.assign(new Error('あなたの部署が設定されていません。管理者にお問い合わせください。'), { status: 422 });
-        throw err;
+        throw Object.assign(new Error('あなたの部署が設定されていません。管理者にお問い合わせください。'), { status: 422 });
       }
+
+      // Determine flow based on template pattern_id:
+      //   pattern_id = 1  → RINGI only  → PENDING_APPROVAL + RINGI steps
+      //   pattern_id = 2  → SETTLEMENT only (e.g. transportation) → PENDING_SETTLEMENT + SETTLEMENT steps
+      //   pattern_id = 3  → RINGI + SETTLEMENT → same as 1 (settlement added later via start-settlement)
+      const tmplRes = await client.query(
+        `SELECT pattern_id FROM form_templates WHERE id = $1`,
+        [template_id],
+      );
+      const pattern_id = (tmplRes.rows[0]?.pattern_id ?? 1) as number;
+      const isDirectSettlement = pattern_id === 2;
+      const routeStage  = isDirectSettlement ? 'SETTLEMENT' : 'RINGI';
+      const missingRouteErr = isDirectSettlement
+        ? '精算承認ルートが設定されていません。管理者にお問い合わせください。'
+        : 'この部署にはこのテンプレートの承認ルートが設定されていません。管理者にお問い合わせください。';
 
       let route_id: string = chosen_route_id || '';
 
@@ -889,22 +931,20 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         const routeRes = await client.query(
           `SELECT r.id FROM approval_routes r
            WHERE r.template_id = $1 AND r.department_id = $2
-             AND r.stage = 'RINGI' AND r.is_active = TRUE AND r.is_default = TRUE
+             AND r.stage = $3 AND r.is_active = TRUE AND r.is_default = TRUE
            LIMIT 1`,
-          [template_id, department_id],
+          [template_id, department_id, routeStage],
         );
         if (routeRes.rows.length === 0) {
-          throw Object.assign(
-            new Error('この部署にはこのテンプレートの承認ルートが設定されていません。管理者にお問い合わせください。'),
-            { status: 422 },
-          );
+          throw Object.assign(new Error(missingRouteErr), { status: 422 });
         }
         route_id = routeRes.rows[0].id as string;
       } else {
         const verify = await client.query(
           `SELECT id FROM approval_routes
-           WHERE id = $1 AND template_id = $2 AND department_id = $3 AND is_active = TRUE`,
-          [route_id, template_id, department_id],
+           WHERE id = $1 AND template_id = $2 AND department_id = $3
+             AND stage = $4 AND is_active = TRUE`,
+          [route_id, template_id, department_id, routeStage],
         );
         if (verify.rows.length === 0) {
           throw Object.assign(
@@ -915,11 +955,11 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       }
 
       // Resolve route → concrete steps (single batched role lookup)
-      const ringiRoutePolicy = skipStepsThroughApplicant(
-        await resolveApprovalSteps(client, route_id, '承認ルート'),
+      const routePolicy = skipStepsThroughApplicant(
+        await resolveApprovalSteps(client, route_id, isDirectSettlement ? '精算ルート' : '承認ルート'),
         applicant_id,
       );
-      const ringiResolvedSteps = ringiRoutePolicy.steps;
+      const resolvedSteps = routePolicy.steps;
 
       // Capture active form template version — locks schema to what user submitted
       const verRes = await client.query(
@@ -931,29 +971,52 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       const normalizedFormData = applyComputedFormData(versionSchema, form_data);
 
       // Server-side schema validation — honours conditional_on (hidden fields exempt)
-      if (versionSchema) {
+      // Skip for transportation (custom form; schema validation doesn't cover entries array)
+      if (versionSchema && !isDirectSettlement) {
         const errors = validateFormData(versionSchema, normalizedFormData);
         if (errors.length > 0) {
           throw Object.assign(new Error(errors.map(e => e.message).join(' / ')), { status: 400 });
         }
       }
 
+      // Initial status + settlement_submitted_at for direct-settlement forms
+      const initialStatus = isDirectSettlement ? 'PENDING_SETTLEMENT' : 'PENDING_APPROVAL';
+
       const appRes = await client.query(
-        `INSERT INTO applications (applicant_id, template_id, template_version_id, route_id, form_data, status, submitted_at)
-         VALUES ($1, $2, $3, $4, $5::jsonb, 'PENDING_APPROVAL', CURRENT_TIMESTAMP)
+        `INSERT INTO applications
+           (applicant_id, template_id, template_version_id, route_id, form_data, status,
+            submitted_at, settlement_submitted_at)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6, CURRENT_TIMESTAMP, $7)
          RETURNING id, status`,
-        [applicant_id, template_id, versionId, route_id, JSON.stringify(normalizedFormData)],
+        [
+          applicant_id, template_id, versionId, route_id,
+          JSON.stringify(normalizedFormData), initialStatus,
+          isDirectSettlement ? new Date() : null,
+        ],
       );
       let app = appRes.rows[0] as { id: string; status: string; application_number?: string | null };
 
-      // Assign application_number immediately on submit (not on final approval)
+      // Assign application_number immediately on submit
       const assignedNumber = await ensureApplicationNumber(client, app.id);
       app.application_number = assignedNumber;
 
-      if (ringiResolvedSteps.length > 0) {
-        await insertApprovalSteps(client, app.id, 'RINGI', ringiResolvedSteps);
+      if (resolvedSteps.length > 0) {
+        await insertApprovalSteps(client, app.id, routeStage as ApprovalStage, resolvedSteps);
       } else {
-        app = await finalizeStageWithoutApprovalSteps(client, app.id, 'RINGI');
+        app = await finalizeStageWithoutApprovalSteps(client, app.id, routeStage as ApprovalStage);
+      }
+
+      // Auto-create settlements record for pattern_id=2 so the accounting page can
+      // list the app, set transfer_date, upload proof, and close it — same as pattern 3.
+      if (isDirectSettlement) {
+        const grandTotal = Number((normalizedFormData as Record<string, unknown>).grand_total) || 0;
+        await client.query(
+          `INSERT INTO settlements
+             (application_id, expected_amount, actual_amount, settlement_data, status)
+           VALUES ($1, $2, $2, '{}'::jsonb, 'PENDING_VERIFICATION')
+           ON CONFLICT (application_id) DO NOTHING`,
+          [app.id, grandTotal],
+        );
       }
 
       await client.query(
@@ -961,11 +1024,12 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
          VALUES ('APPLICATION_SUBMIT', 'application', $1, $2::jsonb)`,
         [app.id, JSON.stringify({
           template_id,
-          stage,
-          steps: ringiResolvedSteps.length,
-          skipped_steps: ringiRoutePolicy.skipped_steps,
-          skipped_through_step_order: ringiRoutePolicy.skipped_through_step_order,
-          auto_approved: ringiResolvedSteps.length === 0,
+          stage: isDirectSettlement ? 'SETTLEMENT' : (stage ?? 'RINGI'),
+          pattern_id,
+          steps: resolvedSteps.length,
+          skipped_steps: routePolicy.skipped_steps,
+          skipped_through_step_order: routePolicy.skipped_through_step_order,
+          auto_approved: resolvedSteps.length === 0,
         })],
       );
 
@@ -978,7 +1042,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         payload:            { type: 'submit', applicationId: app.id },
       });
 
-      return { ...app, total_steps: ringiResolvedSteps.length, skipped_steps: ringiRoutePolicy.skipped_steps };
+      return { ...app, total_steps: resolvedSteps.length, skipped_steps: routePolicy.skipped_steps };
     });
 
     res.status(201).json({ message: '申請が完了しました！', application: result });
@@ -1109,8 +1173,10 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
               COALESCE(v.settlement_schema, t.settlement_schema) AS settlement_schema,
               v.version_number AS template_version_number,
               t.settlement_schema IS NOT NULL AS has_settlement,
+              t.component_type,
               u.full_name AS applicant_name,
               u.avatar_url AS applicant_avatar,
+              u.daily_allowance_rate AS applicant_daily_rate,
               s.transfer_date, s.transfer_proof_url, s.accounting_note,
               s.expected_amount, s.actual_amount AS settled_actual_amount,
               s.processed_at AS settlement_processed_at,

@@ -72,8 +72,10 @@ router.post('/users', async (req: Request, res: Response): Promise<void> => {
   try {
     const hash = password ? await argon2.hash(password) : null;
     await query(
-      `INSERT INTO users (full_name, email, role, is_admin, department_id, password_hash, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      `INSERT INTO users (full_name, email, role, is_admin, department_id, password_hash, is_active,
+                          daily_allowance_rate)
+       VALUES ($1, $2, $3, $4, $5, $6, $7,
+               (SELECT daily_rate_yen FROM allowance_rates WHERE role = $3 LIMIT 1))`,
       [full_name, email.toLowerCase().trim(), role, is_admin ?? false, department_id ?? null, hash, is_active ?? true],
     );
     void invalidateAdminReferenceCache('routes');
@@ -163,6 +165,18 @@ router.patch('/users/:id', async (req: Request, res: Response): Promise<void> =>
     params.push(id);
 
     await query(q, params);
+
+    // Sync daily_allowance_rate when role changes — keeps cached rate current
+    if (roleChanged) {
+      await query(
+        `UPDATE users u
+         SET daily_allowance_rate = ar.daily_rate_yen
+         FROM allowance_rates ar
+         WHERE ar.role = $1 AND u.id = $2`,
+        [role ?? before.role, id],
+      );
+    }
+
     await invalidateUserStateCache(String(id));
     if (bumpTokenVersion) {
       await invalidateUserStateCache(String(id));

@@ -65,6 +65,25 @@ interface FormField {
   /** Show this field's value in the application list row (Approvals + History). */
   show_in_row?: boolean;
   /**
+   * For custom-renderer forms (e.g. transportation): field renders inside the
+   * per-entry section instead of the top-level header section.
+   */
+  entry_field?: boolean;
+  /**
+   * allowance_days type: where to pull the per-day rate.
+   * 'user_role' (default) = user's daily_allowance_rate from allowance_rates table.
+   * 'custom' = flat custom_rate defined on this field (¥/day).
+   */
+  rate_source?: 'user_role' | 'custom';
+  custom_rate?: number;
+  /**
+   * route_entry type: whether to show the "copy return route" button.
+   * Default true when undefined.
+   */
+  show_copy_return?: boolean;
+  /** route_entry: show transport-mode selector per route row. Options = selectable modes */
+  show_mode?: boolean;
+  /**
    * For number fields with show_in_row: name of the counterpart field in the
    * OTHER schema (ringi↔settlement) to compare against. When both values
    * exist and differ, the row is highlighted amber.
@@ -83,6 +102,8 @@ interface TemplateListItem {
   title_ja:                    string;
   pattern_id:                  number;
   is_active:                   boolean;
+  is_protected?:               boolean;
+  component_type?:             string | null;
   icon:                        string | null;
   gradient:                    string | null;
   description_ja:              string | null;
@@ -116,6 +137,8 @@ interface TemplateDetail {
     title_ja:           string;
     pattern_id:         number;
     is_active:          boolean;
+    is_protected?:      boolean;
+    component_type?:    string | null;
     icon:               string | null;
     gradient:           string | null;
     description_ja:     string | null;
@@ -147,16 +170,19 @@ const GRADIENT_OPTIONS = [
 ];
 
 const FIELD_TYPES = [
-  { value: 'text',     label_ja: 'テキスト',         label_en: 'Text' },
-  { value: 'textarea', label_ja: 'テキスト（複数行）', label_en: 'Textarea' },
-  { value: 'number',   label_ja: '数値',            label_en: 'Number' },
-  { value: 'date',     label_ja: '日付',            label_en: 'Date' },
-  { value: 'time',     label_ja: '時刻',            label_en: 'Time' },
-  { value: 'select',   label_ja: 'プルダウン',       label_en: 'Select' },
-  { value: 'checkbox', label_ja: 'チェックボックス', label_en: 'Checkbox' },
-  { value: 'file',     label_ja: 'ファイル',         label_en: 'File upload' },
-  { value: 'repeat_group', label_ja: '繰り返しグループ', label_en: 'Repeatable group' },
-  { value: 'header',   label_ja: 'セクション見出し', label_en: 'Section header' },
+  { value: 'text',           label_ja: 'テキスト',             label_en: 'Text' },
+  { value: 'textarea',       label_ja: 'テキスト（複数行）',   label_en: 'Textarea' },
+  { value: 'number',         label_ja: '数値',                label_en: 'Number' },
+  { value: 'date',           label_ja: '日付',                label_en: 'Date' },
+  { value: 'time',           label_ja: '時刻',                label_en: 'Time' },
+  { value: 'select',         label_ja: 'プルダウン',           label_en: 'Select' },
+  { value: 'checkbox',       label_ja: 'チェックボックス',     label_en: 'Checkbox' },
+  { value: 'file',           label_ja: 'ファイル',             label_en: 'File upload' },
+  { value: 'repeat_group',   label_ja: '繰り返しグループ',     label_en: 'Repeatable group' },
+  { value: 'header',         label_ja: 'セクション見出し',     label_en: 'Section header' },
+  // Reusable transport types — usable in any form via DynamicForm
+  { value: 'allowance_days', label_ja: '日当支給日数（0/半日/1日）', label_en: 'Allowance days (0/half/1)' },
+  { value: 'route_entry',    label_ja: '交通経路（乗車駅→降車駅・運賃）', label_en: 'Transport route (from/to/fare)' },
 ];
 
 const REPEAT_CHILD_FIELD_TYPES = FIELD_TYPES.filter((ft) => !['repeat_group', 'header'].includes(ft.value));
@@ -227,9 +253,14 @@ export default function FormsTab({ showToast }: { showToast: (m: string, t?: 'su
                   <p className="text-sm font-bold text-warmgray-800 truncate">{t.title_ja}</p>
                   <p className="text-[11px] text-warmgray-400 font-mono mt-0.5">{t.code}</p>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
                   {!t.is_active && (
                     <span className="badge-draft text-[10px]">{lang === 'en' ? 'Inactive' : '無効'}</span>
+                  )}
+                  {t.is_protected && (
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200/60" title={lang === 'en' ? 'Protected — deactivate only, cannot be deleted' : '保護されたテンプレート — 無効化のみ可能'}>
+                      🔒 {lang === 'en' ? 'Protected' : '保護'}
+                    </span>
                   )}
                   <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200/60">
                     v{t.active_version_number ?? '?'}
@@ -264,8 +295,8 @@ export default function FormsTab({ showToast }: { showToast: (m: string, t?: 'su
                 >
                   {t.is_active ? (lang === 'en' ? 'Deactivate' : '無効化') : (lang === 'en' ? 'Activate' : '有効化')}
                 </button>
-                {/* Hard delete only when zero apps reference this template */}
-                {t.application_count === 0 && (
+                {/* Hard delete only when zero apps reference this template AND not protected */}
+                {t.application_count === 0 && !t.is_protected && (
                   <InlineConfirm
                     isActive={confirmingDeleteId === t.id}
                     onTrigger={() => setConfirmingDeleteId(t.id)}
@@ -377,9 +408,16 @@ function FormBuilder({
   // Pattern 1 = ringi only. Pattern 2 = settlement only. Pattern 3 = both.
   const hasSettlement = patternId === 2 || patternId === 3;
   const hasRingi      = patternId === 1 || patternId === 3;
-  // For pattern 2 (settlement-only) force the editor into settlement view
-  // so the user never sees an empty "ringi schema" they can't use.
-  if (patternId === 2 && !editingSettle) setEditingSettle(true);
+
+  // Custom-renderer forms (component_type set, e.g. 'transportation') have TWO independent
+  // schemas: schema_definition = admin-editable header fields shown above the custom section;
+  // settlement_schema = accounting-stage fields. Treat them like pattern 3 in the builder.
+  const isCustomRenderer = !!(detail?.template?.component_type);
+
+  // For plain pattern 2 (no custom renderer): force settle mode (single schema).
+  // For pattern 1: force ringi mode.
+  // For custom renderer or pattern 3: allow toggle.
+  if (patternId === 2 && !isCustomRenderer && !editingSettle) setEditingSettle(true);
   if (patternId === 1 && editingSettle)  setEditingSettle(false);
   const currentFields = editingSettle ? settleFields : fields;
   const setCurrentFields = editingSettle ? setSettleFields : setFields;
@@ -398,8 +436,10 @@ function FormBuilder({
       app_number_digits: appNumberDigits,
       // Pattern 2 (settlement-only) treats settlement schema as primary:
       // sync it to schema_definition too so frontend that reads either field works.
-      schema_definition:  hasRingi ? { fields } : { fields: settleFields },
-      settlement_schema:  hasSettlement ? { fields: settleFields } : null,
+      // Custom renderers have independent header (fields) + settlement (settleFields).
+      // Plain pattern 2: single schema synced to both.
+      schema_definition: (hasRingi || isCustomRenderer) ? { fields } : { fields: settleFields },
+      settlement_schema: hasSettlement ? { fields: settleFields } : null,
       notes: notes || 'Initial version',
     })).data,
     onSuccess: () => {
@@ -413,7 +453,7 @@ function FormBuilder({
 
   const saveVersion = useMutation({
     mutationFn: async () => (await apiClient.post(`/admin/form-templates/${templateId}/versions`, {
-      schema_definition: hasRingi ? { fields } : { fields: settleFields },
+      schema_definition: (hasRingi || isCustomRenderer) ? { fields } : { fields: settleFields },
       settlement_schema: hasSettlement ? { fields: settleFields } : null,
       notes,
     })).data,
@@ -851,28 +891,44 @@ function FormBuilder({
                 </div>
               </div>
 
-              {/* Schema phase toggle — ONLY pattern 3 (both phases) shows toggle.
-                  Pattern 1 = ringi only (no toggle). Pattern 2 = settlement only (no toggle). */}
-              {hasRingi && hasSettlement && (
-                <div className="flex items-center gap-2 bg-white/40 border border-white/60 rounded-xl p-1 w-fit">
-                  <button
-                    onClick={() => setEditingSettle(false)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                      !editingSettle ? 'bg-warmgray-800 text-white shadow-sm' : 'text-warmgray-500'
-                    }`}
-                  >
-                    {lang === 'en' ? 'Ringi schema' : '稟議スキーマ'}
-                  </button>
-                  <button
-                    onClick={() => setEditingSettle(true)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                      editingSettle ? 'bg-teal-600 text-white shadow-sm' : 'text-warmgray-500'
-                    }`}
-                  >
-                    {lang === 'en' ? 'Settlement schema' : '精算スキーマ'}
-                  </button>
+              {/* Schema phase toggle:
+                  - Pattern 3 (ringi + settle): toggle between 稟議 / 精算
+                  - Custom renderer (component_type set): toggle between フォーム項目 / 精算項目
+                  - Pattern 1 / plain pattern 2: no toggle */}
+              {(hasRingi && hasSettlement) || (isCustomRenderer && hasSettlement) ? (
+                <div className="space-y-2">
+                  {isCustomRenderer && (
+                    <div className="flex items-start gap-2 text-xs text-blue-700 bg-blue-50 border border-blue-200/60 rounded-xl px-3 py-2">
+                      <span className="shrink-0 mt-0.5">🔧</span>
+                      <span>
+                        {lang === 'ja'
+                          ? 'カスタムフォーム。「フォーム項目」はカスタムセクション上部に表示される管理者設定フィールド（例：件名）です。「精算項目」は会計担当者が記入する項目です。'
+                          : 'Custom renderer form. "Form fields" are admin-configurable header fields shown above the custom section (e.g. subject). "Settlement fields" are filled by accounting.'}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2 bg-white/40 border border-white/60 rounded-xl p-1 w-fit">
+                    <button
+                      onClick={() => setEditingSettle(false)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        !editingSettle ? 'bg-warmgray-800 text-white shadow-sm' : 'text-warmgray-500'
+                      }`}
+                    >
+                      {isCustomRenderer
+                        ? (lang === 'en' ? 'Form fields' : 'フォーム項目')
+                        : (lang === 'en' ? 'Ringi schema' : '稟議スキーマ')}
+                    </button>
+                    <button
+                      onClick={() => setEditingSettle(true)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        editingSettle ? 'bg-teal-600 text-white shadow-sm' : 'text-warmgray-500'
+                      }`}
+                    >
+                      {lang === 'en' ? 'Settlement fields' : '精算項目'}
+                    </button>
+                  </div>
                 </div>
-              )}
+              ) : null}
 
               {/* Fields */}
               <div>
@@ -880,7 +936,9 @@ function FormBuilder({
                   <h3 className="section-title mb-0">
                     {editingSettle
                       ? (lang === 'en' ? 'Settlement fields' : '精算項目')
-                      : (lang === 'en' ? 'Fields' : '入力項目')}
+                      : isCustomRenderer
+                        ? (lang === 'en' ? 'Form fields (header)' : 'フォーム項目（ヘッダー）')
+                        : (lang === 'en' ? 'Fields' : '入力項目')}
                   </h3>
                   <button onClick={addField} className="btn-outline text-xs">+ {lang === 'en' ? 'Add field' : '項目追加'}</button>
                 </div>
@@ -900,6 +958,7 @@ function FormBuilder({
                         siblingNames={currentFields.filter((_, j) => j !== i).map(x => x.name)}
                         // Numeric fields in same schema that could receive sum totals
                         computedFieldNames={currentFields.filter(x => x.computed && x.type === 'number').map(x => x.name)}
+                        isCustomRenderer={isCustomRenderer}
                         onUpdate={(p) => updateField(i, p)}
                         onCreateRepeatGroupTotal={(childIdx) => createRepeatGroupTotal(i, childIdx)}
                         onRemove={() => removeField(i)}
@@ -957,6 +1016,7 @@ function FormBuilder({
 // ─────────────────────────────────────────────────────────────────────────────
 function FieldEditor({
   field, index, total, siblingNames, computedFieldNames, otherSchemaFields,
+  isCustomRenderer,
   onUpdate, onCreateRepeatGroupTotal, onRemove, onMove,
 }: {
   field: FormField;
@@ -966,6 +1026,8 @@ function FieldEditor({
   computedFieldNames: string[];
   /** Fields from the OTHER schema (ringi↔settlement). Used for row_compare_with dropdown. */
   otherSchemaFields?: FormField[];
+  /** True when editing a custom-renderer form (e.g. transportation). Enables entry_field toggle. */
+  isCustomRenderer?: boolean;
   onUpdate: (patch: Partial<FormField>) => void;
   onCreateRepeatGroupTotal: (childIndex: number) => void;
   onRemove: () => void;
@@ -1135,6 +1197,135 @@ function FieldEditor({
               {lang === 'en' ? 'Show in list row' : '一覧行に表示'}
             </label>
           </div>
+
+          {/* route_entry settings: copy-return + per-route mode */}
+          {field.type === 'route_entry' && (
+            <div className="bg-emerald-50/60 border border-emerald-200/60 rounded-xl p-3 space-y-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-700">
+                {lang === 'en' ? 'Route options' : 'ルートオプション'}
+              </p>
+              <label className="flex items-center gap-2 text-xs font-semibold text-emerald-800 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={field.show_copy_return !== false}
+                  onChange={(e) => onUpdate({ show_copy_return: e.target.checked ? undefined : false })}
+                  className="w-4 h-4 accent-emerald-500"
+                />
+                {lang === 'en' ? 'Show "copy return route" button' : '「復路コピー」ボタンを表示'}
+              </label>
+              <label className="flex items-center gap-2 text-xs font-semibold text-emerald-800 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={!!field.show_mode}
+                  onChange={(e) => onUpdate({ show_mode: e.target.checked || undefined })}
+                  className="w-4 h-4 accent-emerald-500"
+                />
+                {lang === 'en' ? 'Show transport mode per route row' : '各経路に交通手段を表示'}
+              </label>
+              {field.show_mode && (
+                <div className="pl-6 space-y-1.5">
+                  <p className="text-[10px] text-emerald-600">
+                    {lang === 'en'
+                      ? 'Options below = selectable modes on each route row (e.g. train, taxi, car).'
+                      : '以下の選択肢が各経路行の交通手段ドロップダウンに表示されます。'}
+                  </p>
+                  <OptionsEditor
+                    options={field.options ?? []}
+                    onChange={(opts) => onUpdate({ options: opts })}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* allowance_days settings: rate source + custom step options */}
+          {field.type === 'allowance_days' && (
+            <div className="bg-sky-50/60 border border-sky-200/60 rounded-xl p-3 space-y-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-sky-700">
+                {lang === 'en' ? 'Allowance settings' : '日当設定'}
+              </p>
+              {/* Rate source */}
+              <div className="space-y-2">
+                <p className="text-[10px] font-semibold text-sky-700 uppercase tracking-widest">
+                  {lang === 'en' ? 'Rate source' : 'レート参照元'}
+                </p>
+                <div className="flex items-center gap-4 flex-wrap">
+                  <label className="flex items-center gap-1.5 text-xs text-sky-800 cursor-pointer select-none">
+                    <input
+                      type="radio"
+                      name={`rate_source_${field.name}`}
+                      checked={!field.rate_source || field.rate_source === 'user_role'}
+                      onChange={() => onUpdate({ rate_source: 'user_role', custom_rate: undefined })}
+                    />
+                    {lang === 'en' ? "User's role rate" : 'ユーザー役職レート（日当テーブル）'}
+                  </label>
+                  <label className="flex items-center gap-1.5 text-xs text-sky-800 cursor-pointer select-none">
+                    <input
+                      type="radio"
+                      name={`rate_source_${field.name}`}
+                      checked={field.rate_source === 'custom'}
+                      onChange={() => onUpdate({ rate_source: 'custom' })}
+                    />
+                    {lang === 'en' ? 'Custom flat rate' : 'カスタムレート（固定）'}
+                  </label>
+                </div>
+                {field.rate_source === 'custom' && (
+                  <div className="flex items-center gap-2">
+                    <div className="relative w-36">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-sky-400 pointer-events-none">¥</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={field.custom_rate ?? ''}
+                        onChange={(e) => onUpdate({ custom_rate: e.target.value ? Number(e.target.value) : undefined })}
+                        className="input pl-6 text-xs"
+                        placeholder="3000"
+                      />
+                    </div>
+                    <span className="text-xs text-sky-600">/日</span>
+                  </div>
+                )}
+              </div>
+              {/* Selectable step options */}
+              <div className="space-y-1.5">
+                <p className="text-[10px] font-semibold text-sky-700 uppercase tracking-widest">
+                  {lang === 'en' ? 'Selectable steps' : '選択ステップ'}
+                </p>
+                <p className="text-[10px] text-sky-600">
+                  {lang === 'en'
+                    ? 'Each option: label shown on pill button, value = numeric multiplier (0.5 = half day, 2 = double day, etc.). Empty = use default 0 / 0.5 / 1.'
+                    : 'ラベル＝ボタン表示テキスト、値＝数値倍率（0.5＝半日、2＝2日分など）。空欄＝デフォルト 0/0.5/1。'}
+                </p>
+                <OptionsEditor
+                  options={field.options ?? []}
+                  onChange={(opts) => onUpdate({ options: opts })}
+                  hint={lang === 'en'
+                    ? 'Value must be numeric (e.g. 0, 0.5, 1, 1.5, 2). Label = button text.'
+                    : '値は数値（例: 0, 0.5, 1, 1.5, 2）。ラベルはボタンに表示されるテキスト。'}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Entry field toggle — only for custom-renderer forms (e.g. transportation) */}
+          {isCustomRenderer && (
+            <div className="bg-amber-50/60 border border-amber-200/60 rounded-xl p-3 space-y-1.5">
+              <label className="flex items-center gap-2 text-xs font-semibold text-amber-800 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={field.entry_field ?? false}
+                  onChange={(e) => onUpdate({ entry_field: e.target.checked || undefined })}
+                  className="w-4 h-4 accent-amber-500"
+                />
+                {lang === 'en' ? 'Per-entry field (renders inside each daily entry row)' : '明細フィールド（1日ごとの入力行に表示）'}
+              </label>
+              <p className="text-[10px] text-amber-700 pl-6">
+                {lang === 'en'
+                  ? 'Unchecked = renders once in the header section above the entry list.'
+                  : 'オフ = 明細リスト上部のヘッダー欄に1回だけ表示されます。'}
+              </p>
+            </div>
+          )}
           {field.show_in_row && isNumber && otherSchemaFields && otherSchemaFields.filter((x) => x.type === 'number').length > 0 && (
             <div className="flex items-center gap-2.5">
               <span className="text-[10px] font-bold uppercase tracking-widest text-warmgray-500 shrink-0">

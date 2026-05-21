@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import DynamicForm from '../components/forms/DynamicForm';
+import TransportationForm from '../components/forms/TransportationForm';
 import { useLang } from '../context/LanguageContext';
 import CustomSelect from '../components/forms/CustomSelect';
 import RouteTimeline from '../components/common/RouteTimeline';
@@ -52,10 +53,13 @@ export default function NewApplication() {
     gcTime:    30 * 60_000,
   });
 
+  // pattern_id=2 (e.g. transportation) → direct settlement, no ringi phase → show SETTLEMENT routes
+  const routeStage = template?.pattern_id === 2 ? 'SETTLEMENT' : 'RINGI';
+
   const { data: routePreview, isLoading: routeLoading } = useQuery<RoutePreview>({
-    queryKey: ['route-preview', template?.id],
+    queryKey: ['route-preview', template?.id, routeStage],
     queryFn: async (): Promise<RoutePreview> => {
-      const res = await apiClient.get(`/applications/route-preview?template_id=${template.id}`);
+      const res = await apiClient.get(`/applications/route-preview?template_id=${template.id}&stage=${routeStage}`);
       return res.data as RoutePreview;
     },
     enabled: !!template?.id,
@@ -76,7 +80,8 @@ export default function NewApplication() {
     try {
       await apiClient.post('/applications', {
         ...payload,
-        route_id: selectedRouteId || undefined,
+        // pattern_id=2: backend auto-selects default SETTLEMENT route — don't pass route_id
+        route_id: template?.pattern_id === 2 ? undefined : (selectedRouteId || undefined),
       });
       queryClient.invalidateQueries({ queryKey: ['myApplications'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard', 'summary'] });
@@ -128,12 +133,15 @@ export default function NewApplication() {
           </div>
         )}
 
-        {/* Route preview panel */}
-        {template && (
+        {/* Route preview panel — hidden for pattern_id=2 (direct settlement, backend auto-selects route)
+            unless no settlement route exists (show error) */}
+        {template && (template.pattern_id !== 2 || routePreview?.department_has_route === false) && (
           <div className="card space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="section-title mb-0">{t('route_approval')}</p>
+                <p className="section-title mb-0">
+                  {template.pattern_id === 2 ? (lang === 'ja' ? '精算承認ルート' : 'Settlement Route') : t('route_approval')}
+                </p>
                 {routePreview?.routes.find(r => r.id === selectedRouteId)?.name && (
                   <p className="text-xs text-warmgray-500 mt-0.5">
                     {routePreview?.routes.find(r => r.id === selectedRouteId)?.name}
@@ -154,11 +162,15 @@ export default function NewApplication() {
             {routePreview && !routePreview.department_has_route && (
               <div className="flex items-start gap-2.5 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
                 <span className="text-base">⚠️</span>
-                <p>{t('route_no_route_warn')}</p>
+                <p>
+                  {template.pattern_id === 2
+                    ? (lang === 'ja' ? 'この部署の精算承認ルートが設定されていません。管理者にお問い合わせください。' : 'No settlement approval route configured for your department. Contact your admin.')
+                    : t('route_no_route_warn')}
+                </p>
               </div>
             )}
 
-            {routePreview && routePreview.routes.length > 1 && (
+            {routePreview && routePreview.routes.length > 1 && template.pattern_id !== 2 && (
               <div className="space-y-1.5">
                 <label className="label">{t('route_select')}</label>
                 <CustomSelect
@@ -172,7 +184,7 @@ export default function NewApplication() {
               </div>
             )}
 
-            {selectedRoute && (
+            {selectedRoute && template.pattern_id !== 2 && (
               <div className="bg-white/40 backdrop-blur-sm rounded-xl border border-white/60 p-4">
                 <RouteTimeline
                   steps={selectedRoute.steps}
@@ -186,8 +198,8 @@ export default function NewApplication() {
           </div>
         )}
 
-        {/* Two-stage flow banner for 立替精算申請 */}
-        {template?.settlement_schema && (
+        {/* Two-stage flow banner for 立替精算申請 — hidden for transportation (pattern_id=2 direct settlement) */}
+        {template?.settlement_schema && template?.component_type !== 'transportation' && (
           <div className="card !py-3 !px-4 border border-teal-200/60 bg-teal-50/40 space-y-2">
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold uppercase tracking-widest text-teal-600">{t('two_stage_flow_label')}</span>
@@ -228,13 +240,21 @@ export default function NewApplication() {
           </div>
         )}
 
-        {template && (
+        {template && template.component_type === 'transportation' && (
+          <TransportationForm
+            template={template}
+            onSubmit={handleFormSubmit}
+            onDraft={handleDraft}
+            disabled={routePreview?.department_has_route === false}
+          />
+        )}
+        {template && template.component_type !== 'transportation' && (
           <DynamicForm
             template={template}
             onSubmit={handleFormSubmit}
             onDraft={handleDraft}
             isSettlementPhase={false}
-            disabled={routePreview?.department_has_route === false}
+            disabled={template.pattern_id !== 2 && routePreview?.department_has_route === false}
           />
         )}
       </div>

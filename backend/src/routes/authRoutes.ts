@@ -70,8 +70,12 @@ async function loadAuthProfile(userId: string): Promise<Record<string, unknown> 
 
   const loadPromise = (async (): Promise<Record<string, unknown> | null> => {
     const result = await query(
-      `SELECT u.id, u.full_name, u.email, u.role, u.is_admin, u.department_id, u.avatar_url, d.name AS department_name
-       FROM users u LEFT JOIN departments d ON u.department_id = d.id
+      `SELECT u.id, u.full_name, u.email, u.role, u.is_admin, u.department_id, u.avatar_url,
+              COALESCE(u.daily_allowance_rate, ar.daily_rate_yen) AS daily_allowance_rate,
+              d.name AS department_name
+       FROM users u
+       LEFT JOIN departments d ON u.department_id = d.id
+       LEFT JOIN allowance_rates ar ON ar.role = u.role
        WHERE u.id = $1 AND u.is_active = TRUE`,
       [userId],
     );

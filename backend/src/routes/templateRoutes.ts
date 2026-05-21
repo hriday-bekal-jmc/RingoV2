@@ -32,9 +32,9 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
     //   (a) no row in template_permissions (= unrestricted), OR
     //   (b) template_permissions has a row matching user's department_id
     const sql = isAdmin
-      ? `SELECT id, code, title, title_ja, pattern_id, icon, gradient, description_ja, description_en
+      ? `SELECT id, code, title, title_ja, pattern_id, icon, gradient, description_ja, description_en, component_type
          FROM form_templates WHERE is_active = TRUE ORDER BY title_ja`
-      : `SELECT t.id, t.code, t.title, t.title_ja, t.pattern_id, t.icon, t.gradient, t.description_ja, t.description_en
+      : `SELECT t.id, t.code, t.title, t.title_ja, t.pattern_id, t.icon, t.gradient, t.description_ja, t.description_en, t.component_type
          FROM form_templates t
          WHERE t.is_active = TRUE
            AND (
@@ -58,7 +58,7 @@ router.get('/:code', async (req: Request, res: Response): Promise<void> => {
   try {
     const code = req.params['code'] as string;
     const result = await query(
-      `SELECT id, code, title, title_ja, schema_definition, settlement_schema
+      `SELECT id, code, title, title_ja, schema_definition, settlement_schema, component_type
        FROM form_templates WHERE code = $1 AND is_active = TRUE`,
       [code.toUpperCase()],
     );
