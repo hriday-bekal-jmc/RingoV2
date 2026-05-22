@@ -188,7 +188,7 @@ export default function TimePicker({
             className={`w-full ${rowPy} ${rowText} text-center font-medium
               transition-colors duration-100 select-none
               ${isSelected
-                ? 'bg-ringo-500 text-white font-bold shadow-[0_1px_4px_rgba(199,91,71,0.30)]'
+                ? 'bg-ringo-500 text-white font-bold shadow-[0_1px_4px_rgba(154,46,34,0.32)]'
                 : 'text-warmgray-700 hover:bg-ringo-50 hover:text-ringo-600 active:bg-ringo-100'
               }`}
           >
@@ -218,7 +218,7 @@ export default function TimePicker({
             className={`w-full ${rowPy} ${rowText} text-center font-medium
               transition-colors duration-100 select-none
               ${isSelected
-                ? 'bg-ringo-500 text-white font-bold shadow-[0_1px_4px_rgba(199,91,71,0.30)]'
+                ? 'bg-ringo-500 text-white font-bold shadow-[0_1px_4px_rgba(154,46,34,0.32)]'
                 : isDisabled
                 ? 'text-warmgray-300 cursor-not-allowed'
                 : 'text-warmgray-700 hover:bg-ringo-50 hover:text-ringo-600 active:bg-ringo-100'

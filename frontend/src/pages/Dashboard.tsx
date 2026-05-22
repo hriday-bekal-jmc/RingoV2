@@ -485,7 +485,7 @@ export default function Dashboard() {
                 />
                 <StatCard
                   label={t('dash_stat_returned')} value={returnedCount} icon="↩"
-                  color="from-orange-200/50 to-transparent"
+                  color="from-amber-200/60 to-transparent"
                   to="/history?filter=RETURNED"
                 />
                 <StatCard

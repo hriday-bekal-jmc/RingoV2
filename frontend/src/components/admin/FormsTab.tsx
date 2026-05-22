@@ -170,8 +170,8 @@ const GRADIENT_OPTIONS = [
   { val: 'from-rose-400 to-pink-500',        label: 'Rose' },
   { val: 'from-violet-400 to-purple-500',    label: 'Violet' },
   { val: 'from-emerald-400 to-teal-500',     label: 'Emerald' },
-  { val: 'from-amber-400 to-orange-500',     label: 'Amber' },
-  { val: 'from-red-400 to-rose-500',         label: 'Red' },
+  { val: 'from-amber-400 to-mustard-600',    label: 'Amber' },
+  { val: 'from-ringo-400 to-ringo-600',      label: 'Ringo' },
   { val: 'from-teal-400 to-cyan-500',        label: 'Teal' },
   { val: 'from-slate-400 to-zinc-500',       label: 'Slate' },
   { val: 'from-indigo-400 to-violet-600',    label: 'Indigo' },
@@ -293,7 +293,7 @@ export default function FormsTab({ showToast }: { showToast: (m: string, t?: 'su
                   disabled={toggleActive.isPending}
                   className={`text-xs px-3 py-1.5 rounded-lg font-semibold border transition-colors ${
                     t.is_active
-                      ? 'bg-white/60 text-amber-600 border-amber-200/60 hover:bg-amber-50'
+                      ? 'bg-white/60 text-warmgray-600 border-warmgray-300/70 hover:bg-warmgray-100 hover:text-warmgray-800'
                       : 'bg-emerald-50 text-emerald-700 border-emerald-200/60 hover:bg-emerald-100'
                   }`}
                   title={t.is_active

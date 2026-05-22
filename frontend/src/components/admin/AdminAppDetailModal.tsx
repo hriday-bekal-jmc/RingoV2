@@ -126,7 +126,7 @@ const STATUS_BADGE: Record<string, string> = {
   PENDING_APPROVAL:    'bg-amber-100 text-amber-700 border border-amber-200',
   APPROVED:            'bg-emerald-100 text-emerald-700 border border-emerald-200',
   REJECTED:            'bg-red-100 text-red-700 border border-red-200',
-  RETURNED:            'bg-orange-100 text-orange-700 border border-orange-200',
+  RETURNED:            'bg-amber-100 text-amber-800 border border-amber-300',
   CANCELLED:           'bg-surface-100 text-warmgray-500 border border-surface-200',
   PENDING_SETTLEMENT:  'bg-mustard-100 text-mustard-700 border border-mustard-200',
   SETTLEMENT_APPROVED: 'bg-teal-100 text-teal-700 border border-teal-200',

@@ -4,16 +4,20 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Terracotta/coral red — primary brand color
+        // Deep wine / oxblood red — primary brand color
+        // Tuned to match Login.tsx hero gradient (#2a1512 → #4a1e18 → #7a2d24)
+        // for a darker, more premium feel than the previous orange-terracotta.
         ringo: {
-          50:  '#FDF4F1',
-          100: '#FBE8E2',
-          200: '#F4C9BD',
-          300: '#EDA290',
-          400: '#DC7460',
-          500: '#C75B47',
-          600: '#A0432B',
-          700: '#7A3220',
+          50:  '#FBF1EF',
+          100: '#F4DAD4',
+          200: '#E8B0A4',
+          300: '#D67C6B',
+          400: '#BB4A3B',
+          500: '#9A2E22',   // primary — deep terracotta, low chroma
+          600: '#7A2D24',   // login gradient end
+          700: '#5A2018',
+          800: '#3A1812',   // oxblood — dark surfaces (sidebar)
+          900: '#2A1512',   // login gradient start
         },
         // Warm mustard — accent color
         mustard: {
@@ -82,7 +86,7 @@ export default {
         sm:           '0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)',
         card:         '0 1px 4px rgba(60,40,20,0.07), 0 0 0 1px rgba(60,40,20,0.05)',
         'card-hover': '0 4px 16px rgba(60,40,20,0.11), 0 0 0 1px rgba(60,40,20,0.07)',
-        focus:        '0 0 0 3px rgba(199,91,71,0.18)',
+        focus:        '0 0 0 3px rgba(154,46,34,0.20)',
       },
       borderRadius: {
         xl:   '0.75rem',

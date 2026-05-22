@@ -528,7 +528,7 @@ function ApproverPicker({ users, departments, value, onChange }: ApproverPickerP
                   className={`relative flex flex-col items-center gap-1.5 p-3 rounded-xl text-center
                     transition-all duration-150 border
                     ${isSelected
-                      ? 'border-ringo-400/70 bg-ringo-50/80 shadow-[0_0_0_2px_rgba(199,91,71,0.15)] scale-[1.02]'
+                      ? 'border-ringo-400/70 bg-ringo-50/80 shadow-[0_0_0_2px_rgba(154,46,34,0.18)] scale-[1.02]'
                       : 'border-warmgray-200/50 bg-white/50 hover:bg-white/80 hover:border-warmgray-300/60 hover:scale-[1.01]'
                     }`}
                 >

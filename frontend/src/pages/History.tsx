@@ -311,7 +311,7 @@ export default function History() {
                       app.status === 'PENDING_SETTLEMENT' ? 'bg-teal-400' :
                       app.status === 'APPROVED' || app.status === 'COMPLETED' ? 'bg-emerald-400' :
                       app.status === 'REJECTED' ? 'bg-red-400' :
-                      app.status === 'RETURNED' ? 'bg-orange-400' :
+                      app.status === 'RETURNED' ? 'bg-amber-500' :
                       'bg-warmgray-300'
                     }`} />
 

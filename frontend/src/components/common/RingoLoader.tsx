@@ -38,7 +38,7 @@ interface Props {
 
 export default function RingoLoader({
   size        = 64,
-  color       = '#D23F3F',
+  color       = 'var(--ringo-500)',
   strokeWidth = 5,
   duration    = 2.4,
   label       = '読み込み中',
@@ -166,7 +166,7 @@ RingoLoader.Inline = function RingoLoaderInline({ label = '読み込み中...' }
 RingoLoader.Page = function RingoLoaderPage({ label = '読み込み中...' }: { label?: string }) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-cream-100">
-      <RingoLoader size={88} color="#D23F3F" strokeWidth={4} />
+      <RingoLoader size={88} color="var(--ringo-500)" strokeWidth={4} />
       <p className="text-warmgray-500 text-sm font-medium">{label}</p>
     </div>
   );
@@ -176,7 +176,7 @@ RingoLoader.Page = function RingoLoaderPage({ label = '読み込み中...' }: { 
 RingoLoader.Block = function RingoLoaderBlock({ label = '読み込み中...', size = 56 }: { label?: string; size?: number }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-12 text-warmgray-400">
-      <RingoLoader size={size} color="#D23F3F" />
+      <RingoLoader size={size} color="var(--ringo-500)" />
       <p className="text-xs font-medium">{label}</p>
     </div>
   );

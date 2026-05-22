@@ -57,7 +57,7 @@ export default function CustomSelect({
         disabled={disabled}
         onClick={() => setOpen(o => !o)}
         className={`input flex items-center gap-2 text-left w-full transition-all duration-150 ${
-          open ? 'ring-2 ring-ringo-400/40 border-ringo-300 bg-white shadow-[0_0_0_3px_rgba(199,91,71,0.10)]' : 'hover:border-warmgray-300 hover:bg-white/90'
+          open ? 'ring-2 ring-ringo-400/40 border-ringo-300 bg-white shadow-[0_0_0_3px_rgba(154,46,34,0.12)]' : 'hover:border-warmgray-300 hover:bg-white/90'
         } ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
       >
         <span className={`flex-1 text-sm truncate ${value ? 'text-warmgray-800 font-medium' : 'text-warmgray-400'}`}>
