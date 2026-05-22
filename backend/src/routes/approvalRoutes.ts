@@ -59,7 +59,7 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
       `SELECT
          a.id, a.application_number, a.status, a.created_at,
          a.form_data, a.settlement_data, a.template_id,
-         t.title_ja AS template_name,
+         t.title_ja AS template_name, t.title AS template_title_en,
          t.pattern_id,
          u.full_name AS applicant_name,
          u.avatar_url AS applicant_avatar,
@@ -551,7 +551,7 @@ router.get('/history', async (req: Request, res: Response): Promise<void> => {
         s.id AS step_id,
         s.application_id,
         a.application_number,
-        t.title_ja AS template_name,
+        t.title_ja AS template_name, t.title AS template_title_en,
         t.id AS template_id,
         s.stage,
         s.label AS step_label,

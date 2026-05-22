@@ -40,6 +40,8 @@ interface FieldDef {
   type:              string;
   show_in_row?:      boolean;
   row_compare_with?: string;
+  computed?:         boolean;
+  sum_target?:       string;
   options?:          { value: string; label_ja?: string; label_en?: string }[];
   fields?:           FieldDef[]; // repeat_group children (skip for row preview)
 }
@@ -80,6 +82,20 @@ function processField(
         label_en: f.label_en ?? f.label,
         value:    display,
       };
+    }
+    return;
+  }
+
+  if (f.type === 'route_entry' && out.numbers.length < 2) {
+    const routes = Array.isArray(data[f.name]) ? (data[f.name] as { fare?: unknown }[]) : [];
+    const total = routes.reduce((s, r) => s + (Number(r.fare) || 0), 0) * 2;
+    if (total > 0) {
+      out.numbers.push({
+        label:        f.label,
+        label_en:     f.label_en ?? f.label,
+        value:        total,
+        is_different: false,
+      });
     }
     return;
   }
@@ -138,6 +154,30 @@ export function extractRowPreview(
   for (const f of settleFields) {
     processField(f, settleData, ringiData, ringiFields, out);
     if (out.text && out.numbers.length >= 2) break;
+  }
+
+  // Fallback: if no number extracted via show_in_row, check for grand_total key
+  // (saved automatically by TransportationForm and other computed-total forms).
+  // Runs for both ringi and settlement data.
+  if (out.numbers.length === 0) {
+    for (const [data, fields, label] of [
+      [ringiData,  ringiFields,  '合計金額'] as const,
+      [settleData, settleFields, '合計金額'] as const,
+    ]) {
+      if (data.grand_total != null) {
+        const val = toNum(data.grand_total);
+        if (val !== null && val > 0) {
+          const f = (fields as FieldDef[]).find((x) => x.name === 'grand_total');
+          out.numbers.push({
+            label:        f?.label    ?? label,
+            label_en:     f?.label_en ?? 'Total',
+            value:        val,
+            is_different: false,
+          });
+          break;
+        }
+      }
+    }
   }
 
   return { text: out.text, numbers: out.numbers };

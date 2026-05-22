@@ -327,7 +327,7 @@ function MetaCard({ d, lang, dateLocale }: { d: AdminAppDetailResponse; lang: 'j
             </span>
           </div>
           <h3 className="text-xl font-bold text-warmgray-800 mt-2 leading-tight">
-            {templateLabel(a.template_code, lang, a.template_name)}
+            {templateLabel(a.template_code, lang, a.template_name, a.template_title_en)}
           </h3>
           <div className="flex items-center gap-2 mt-1.5 text-xs text-warmgray-400 flex-wrap">
             {a.application_number && <span className="font-mono">{a.application_number}</span>}

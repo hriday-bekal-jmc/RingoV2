@@ -176,7 +176,7 @@ function PendingApprovalsDrawer({
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-warmgray-800 truncate">
-                        {templateLabel(item.template_code, lang, item.template_name)}
+                        {templateLabel(item.template_code, lang, item.template_name, item.template_title_en)}
                       </p>
                       <p className="text-[11px] text-warmgray-400 mt-0.5">
                         {item.applicant_name}
@@ -448,7 +448,7 @@ export default function Dashboard() {
                             <li key={app.id} className="flex items-center gap-3 px-4 py-2.5 animate-fade-up" style={{ animationDelay: `${i * 40}ms` }}>
                               <div className="flex-1 min-w-0">
                                 <p className="text-xs font-semibold text-warmgray-800 truncate">
-                                  {templateLabel(app.template_code, lang, app.template_name)}
+                                  {templateLabel(app.template_code, lang, app.template_name, app.template_title_en)}
                                 </p>
                                 <p className="text-[10px] text-warmgray-400 truncate">
                                   {app.applicant_name} · {app.dept_name} · {new Date(app.created_at).toLocaleDateString(dateLocale)}
@@ -575,7 +575,7 @@ export default function Dashboard() {
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-1.5 flex-wrap">
                                     <p className="text-sm font-medium text-warmgray-800 truncate">
-                                      {templateLabel(app.template_code, lang, app.template_name)}
+                                      {templateLabel(app.template_code, lang, app.template_name, app.template_title_en)}
                                     </p>
                                     <PatternBadge patternId={app.pattern_id} />
                                   </div>
@@ -616,7 +616,7 @@ export default function Dashboard() {
                                 className="block px-4 py-3 hover:bg-white/30 transition-colors"
                               >
                                 <p className="text-sm font-semibold text-warmgray-800 truncate">
-                                  {templateLabel(app.template_code, lang, app.template_name)}
+                                  {templateLabel(app.template_code, lang, app.template_name, app.template_title_en)}
                                 </p>
                                 <p className="text-[11px] text-warmgray-400 mt-0.5">{app.applicant_name}</p>
                               </Link>

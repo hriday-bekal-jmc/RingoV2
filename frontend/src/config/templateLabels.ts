@@ -21,6 +21,7 @@ export const TEMPLATE_LABELS: Record<string, TemplateLabel> = {
   TARDINESS:          { ja: '遅刻・早退',         en: 'Late/Early-Leave',           desc_ja: '控除対象の勤怠申請',   desc_en: 'Attendance deduction notice',        icon: '⏰', gradient: 'from-amber-400/20 to-ringo-500/10' },
   INCIDENT_REPORT:    { ja: '始末書',             en: 'Incident Report',            desc_ja: '事故・インシデント報告', desc_en: 'Accident / incident report',             icon: '⚠️', gradient: 'from-red-400/20 to-ringo-600/10' },
   EXPENSE_CLAIM:      { ja: '立替精算申請',       en: 'Expense Reimbursement',      desc_ja: '稟議→精算入力→精算承認', desc_en: 'Ringi → Expense input → Settlement',  icon: '💴', gradient: 'from-teal-400/20 to-emerald-500/10', twoStage: true },
+  TRANSPORT_EXPENSE:  { ja: '交通費精算（出張日除く）', en: 'Travel expense reimbursement (excluding business trip days)', desc_ja: '月次交通費精算（出張日除く）', desc_en: 'Monthly transportation expense (excl. business trips)', icon: '🚃', gradient: 'from-blue-400/20 to-indigo-500/10', twoStage: true },
 };
 
 /**
@@ -32,11 +33,15 @@ export function templateLabel(
   code:          string | undefined,
   lang:          Lang,
   fallbackTitle: string,
+  titleEn?:      string | null, // DB title field (English) — preferred over hardcoded map
 ): string {
+  if (lang === 'en') {
+    if (titleEn) return titleEn;
+    if (!code) return fallbackTitle;
+    return TEMPLATE_LABELS[code]?.en ?? fallbackTitle;
+  }
   if (!code) return fallbackTitle;
-  const entry = TEMPLATE_LABELS[code];
-  if (!entry) return fallbackTitle;
-  return lang === 'en' ? entry.en : entry.ja;
+  return TEMPLATE_LABELS[code]?.ja ?? fallbackTitle;
 }
 
 export function templateDesc(code: string | undefined, lang: Lang): string {

@@ -103,7 +103,7 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
     const recentRes = await query(
         `SELECT
            a.id, a.application_number, a.status, a.created_at, a.submitted_at,
-           t.title_ja AS template_name, t.code AS template_code,
+           t.title_ja AS template_name, t.title AS template_title_en, t.code AS template_code,
            t.settlement_schema IS NOT NULL AS has_settlement,
            t.pattern_id,
            -- current_step = 1-indexed rank within the current batch (excludes skipped-at-start steps)
@@ -147,7 +147,7 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
       ? await query(
             `SELECT
                s.id, s.application_id, a.application_number,
-               t.title_ja AS template_name,
+               t.title_ja AS template_name, t.title AS template_title_en,
                u.full_name AS applicant_name,
                s.created_at,
                COUNT(*) OVER() AS _total

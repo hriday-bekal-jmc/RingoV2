@@ -166,8 +166,8 @@ export default function History() {
       {(() => {
         const open  = lang === 'en' ? '"' : '「';
         const close = lang === 'en' ? '"' : '」';
-        const dName = templateLabel(confirmDelete?.template_code, lang, confirmDelete?.template_name ?? '');
-        const sName = templateLabel(confirmSubmit?.template_code, lang, confirmSubmit?.template_name ?? '');
+        const dName = templateLabel(confirmDelete?.template_code, lang, confirmDelete?.template_name ?? '', confirmDelete?.template_title_en);
+        const sName = templateLabel(confirmSubmit?.template_code, lang, confirmSubmit?.template_name ?? '', confirmSubmit?.template_title_en);
         return (
           <>
             <ConfirmDialog
@@ -321,7 +321,7 @@ export default function History() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-sm font-semibold text-warmgray-800 truncate">
-                          {templateLabel(app.template_code, lang, app.template_name)}
+                          {templateLabel(app.template_code, lang, app.template_name, app.template_title_en)}
                         </p>
                         <PatternBadge patternId={app.pattern_id} />
                         <span className={cls}>{label}</span>

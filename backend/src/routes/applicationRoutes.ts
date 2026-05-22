@@ -1156,7 +1156,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
          a.id, a.application_number, a.status, a.created_at, a.submitted_at,
          a.settlement_submitted_at,
          a.form_data, a.settlement_data, a.template_id,
-         t.title_ja AS template_name, t.code AS template_code,
+         t.title_ja AS template_name, t.title AS template_title_en, t.code AS template_code,
          t.settlement_schema IS NOT NULL AS has_settlement,
          t.pattern_id,
          COALESCE((
@@ -1255,7 +1255,7 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
               a.settlement_data, a.settlement_submitted_at,
               a.template_id, a.template_version_id,
               a.created_at, a.submitted_at, a.completed_at,
-              t.title_ja AS template_name, t.code AS template_code,
+              t.title_ja AS template_name, t.title AS template_title_en, t.code AS template_code,
               COALESCE(v.schema_definition, t.schema_definition) AS schema_definition,
               COALESCE(v.settlement_schema, t.settlement_schema) AS settlement_schema,
               v.version_number AS template_version_number,
