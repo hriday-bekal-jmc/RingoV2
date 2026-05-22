@@ -55,6 +55,9 @@ temp/
 # Google service account keys
 *-service-account.json
 gcp-key.json
+*.json
+*-credentials.json
+
 
 # AWS
 .aws/

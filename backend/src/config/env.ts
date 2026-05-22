@@ -42,13 +42,25 @@ const schema = z.object({
   GOOGLE_WORKSPACE_DOMAIN: z.string().optional(),
 
   // ── Google Drive (service account) ──
-  GDRIVE_SERVICE_ACCOUNT_KEY: z.string().optional(), // path to JSON key file
-  // Default / fallback folder — must be shared with service account email
-  GDRIVE_FOLDER_ID:           z.string().optional(),
+  // Prefer GDRIVE_SERVICE_ACCOUNT_JSON (inline JSON string) over key file path.
+  // Either one activates Drive integration.
+  GDRIVE_SERVICE_ACCOUNT_JSON: z.string().optional(), // inline JSON key (preferred)
+  GDRIVE_SERVICE_ACCOUNT_KEY:  z.string().optional(), // path to JSON key file (legacy)
+  // Domain-wide delegation — service account impersonates this Workspace user
+  // Requires DWD enabled in Google Admin Console for the service account.
+  GDRIVE_IMPERSONATE_USER:      z.string().email().optional(),
+  // Default / fallback folder — must be shared with service account email (or impersonated user)
+  GDRIVE_FOLDER_ID:             z.string().optional(),
   // Per-category folders (all optional — fall back to GDRIVE_FOLDER_ID)
-  GDRIVE_FOLDER_RECEIPTS:     z.string().optional(), // expense receipts / PDFs
-  GDRIVE_FOLDER_CONTRACTS:    z.string().optional(), // contracts / Word / Excel
-  GDRIVE_FOLDER_OTHER:        z.string().optional(), // anything else
+  GDRIVE_FOLDER_RECEIPTS:       z.string().optional(), // expense receipts / PDFs
+  GDRIVE_FOLDER_INVOICES:       z.string().optional(), // vendor invoices / bills
+  GDRIVE_FOLDER_TRANSPORTATION: z.string().optional(), // transport tickets / IC records
+  GDRIVE_FOLDER_CONTRACTS:      z.string().optional(), // contracts / Word / Excel
+  GDRIVE_FOLDER_OTHER:          z.string().optional(), // anything else
+
+  // ── Gemini AI (OCR / auto-fill) ──
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL:   z.string().default('gemini-2.0-flash'),
 
   // ── Misc ──
   SUPER_ADMIN_EMAIL: z.string().email().optional(),

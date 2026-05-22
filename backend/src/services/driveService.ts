@@ -1,18 +1,18 @@
-// Google Drive service-account uploader. Receipts/images go here so the
-// Postgres row only stores a Drive file_id + URL — the binary lives in
-// Drive, not in our backend FS.
+// Google Drive service-account uploader.
 //
-// Required env (see config/env.ts):
-//   GDRIVE_SERVICE_ACCOUNT_KEY  — path to JSON key file
-//   GDRIVE_FOLDER_ID            — default parent folder (shared with svc account)
+// Auth priority (first match wins):
+//   1. GDRIVE_SERVICE_ACCOUNT_JSON — inline JSON string (preferred, no file on disk)
+//   2. GDRIVE_SERVICE_ACCOUNT_KEY  — path to JSON key file (legacy)
+//
+// Required:
+//   GDRIVE_FOLDER_ID — default parent folder (shared with service account email)
 //
 // Optional per-category folders (all fall back to GDRIVE_FOLDER_ID):
-//   GDRIVE_FOLDER_RECEIPTS      — expense receipts / PDFs
-//   GDRIVE_FOLDER_CONTRACTS     — contracts / Word / Excel
-//   GDRIVE_FOLDER_OTHER         — anything else
-//
-// If Drive env not set, isDriveEnabled() returns false and uploadRoutes falls
-// back to local FS storage. Switching is zero-touch — populate env, redeploy.
+//   GDRIVE_FOLDER_RECEIPTS       — expense receipts / PDFs
+//   GDRIVE_FOLDER_INVOICES       — vendor invoices / bills
+//   GDRIVE_FOLDER_TRANSPORTATION — transport tickets / IC records
+//   GDRIVE_FOLDER_CONTRACTS      — contracts / Word / Excel
+//   GDRIVE_FOLDER_OTHER          — anything else
 
 import { google } from 'googleapis';
 import type { drive_v3 } from 'googleapis';
@@ -21,72 +21,92 @@ import { Readable } from 'stream';
 import { env } from '../config/env';
 
 // ── Folder category map ───────────────────────────────────────────────────────
-// Upload callers pass one of these keys. Unknown/missing key → default folder.
-export type DriveFolder = 'receipts' | 'contracts' | 'other';
+export type DriveFolder = 'receipts' | 'invoices' | 'transportation' | 'contracts' | 'other';
 
 function resolveFolderId(category?: DriveFolder): string {
   const fallback = env.GDRIVE_FOLDER_ID as string;
   if (!category) return fallback;
   const map: Record<DriveFolder, string | undefined> = {
-    receipts:  env.GDRIVE_FOLDER_RECEIPTS,
-    contracts: env.GDRIVE_FOLDER_CONTRACTS,
-    other:     env.GDRIVE_FOLDER_OTHER,
+    receipts:       env.GDRIVE_FOLDER_RECEIPTS,
+    invoices:       env.GDRIVE_FOLDER_INVOICES,
+    transportation: env.GDRIVE_FOLDER_TRANSPORTATION,
+    contracts:      env.GDRIVE_FOLDER_CONTRACTS,
+    other:          env.GDRIVE_FOLDER_OTHER,
   };
   return map[category] ?? fallback;
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+function buildAuth() {
+  const scopes = ['https://www.googleapis.com/auth/drive.file'];
+  const subject = env.GDRIVE_IMPERSONATE_USER; // undefined = no impersonation
+
+  // Prefer inline JSON (no file on disk — more secure for containers/PaaS)
+  if (env.GDRIVE_SERVICE_ACCOUNT_JSON) {
+    const credentials = JSON.parse(env.GDRIVE_SERVICE_ACCOUNT_JSON);
+    // When GDRIVE_IMPERSONATE_USER set, use JWT so we can pass subject (DWD)
+    if (subject) {
+      return new google.auth.JWT({
+        email:   credentials.client_email,
+        key:     credentials.private_key,
+        scopes,
+        subject, // impersonate this Workspace user — requires DWD in Admin Console
+      });
+    }
+    return new google.auth.GoogleAuth({ credentials, scopes });
+  }
+
+  // Fall back to key file path
+  if (env.GDRIVE_SERVICE_ACCOUNT_KEY) {
+    if (!fs.existsSync(env.GDRIVE_SERVICE_ACCOUNT_KEY)) {
+      throw new Error(`Drive service account key not found: ${env.GDRIVE_SERVICE_ACCOUNT_KEY}`);
+    }
+    if (subject) {
+      const keyJson = JSON.parse(fs.readFileSync(env.GDRIVE_SERVICE_ACCOUNT_KEY, 'utf-8'));
+      return new google.auth.JWT({
+        email:   keyJson.client_email,
+        key:     keyJson.private_key,
+        scopes,
+        subject,
+      });
+    }
+    return new google.auth.GoogleAuth({ keyFile: env.GDRIVE_SERVICE_ACCOUNT_KEY, scopes });
+  }
+
+  throw new Error('No Drive credentials configured (set GDRIVE_SERVICE_ACCOUNT_JSON or GDRIVE_SERVICE_ACCOUNT_KEY)');
 }
 
 // ── Client singleton ──────────────────────────────────────────────────────────
 let driveClient: drive_v3.Drive | null = null;
 
 export function isDriveEnabled(): boolean {
-  return !!(env.GDRIVE_SERVICE_ACCOUNT_KEY && env.GDRIVE_FOLDER_ID);
+  return !!((env.GDRIVE_SERVICE_ACCOUNT_JSON || env.GDRIVE_SERVICE_ACCOUNT_KEY) && env.GDRIVE_FOLDER_ID);
 }
 
 function getDrive(): drive_v3.Drive {
   if (driveClient) return driveClient;
-  if (!env.GDRIVE_SERVICE_ACCOUNT_KEY) throw new Error('GDRIVE_SERVICE_ACCOUNT_KEY not set');
-
-  const keyFile = env.GDRIVE_SERVICE_ACCOUNT_KEY;
-  if (!fs.existsSync(keyFile)) {
-    throw new Error(`Drive service account key not found: ${keyFile}`);
-  }
-
-  const auth = new google.auth.GoogleAuth({
-    keyFile,
-    scopes: ['https://www.googleapis.com/auth/drive.file'],
-  });
-  driveClient = google.drive({ version: 'v3', auth });
+  driveClient = google.drive({ version: 'v3', auth: buildAuth() });
   return driveClient;
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface DriveUploadResult {
   fileId:          string;
-  webViewLink:     string;        // Permalink for human viewing
-  webContentLink?: string | null; // Direct download link
+  webViewLink:     string;
+  webContentLink?: string | null;
 }
 
 // ── Upload ────────────────────────────────────────────────────────────────────
-/**
- * Upload a buffer to a Drive folder.
- *
- * @param filename  Original filename stored in Drive
- * @param mimeType  File MIME type
- * @param buffer    File bytes
- * @param category  Optional folder category. Falls back to GDRIVE_FOLDER_ID.
- *
- * The service account must have Editor access to the target folder.
- * When no category-specific folder is configured, GDRIVE_FOLDER_ID is used.
- */
 export async function uploadToDrive(
   filename: string,
   mimeType: string,
   buffer:   Buffer,
   category?: DriveFolder,
+  parentFolderId?: string, // explicit override (e.g. per-application subfolder)
 ): Promise<DriveUploadResult> {
   if (!isDriveEnabled()) throw new Error('Drive integration not configured');
 
-  const folderId = resolveFolderId(category);
+  const folderId = parentFolderId ?? resolveFolderId(category);
   const drive    = getDrive();
 
   const res = await drive.files.create({
@@ -112,6 +132,29 @@ export async function uploadToDrive(
   };
 }
 
+// ── Create subfolder ──────────────────────────────────────────────────────────
+// Creates a named subfolder inside a parent folder. Used to create per-application
+// folders (e.g. "APP-2025-001") inside the category folder.
+export async function createDriveFolder(name: string, parentFolderId?: string): Promise<string> {
+  if (!isDriveEnabled()) throw new Error('Drive integration not configured');
+
+  const parent = parentFolderId ?? (env.GDRIVE_FOLDER_ID as string);
+  const drive  = getDrive();
+
+  const res = await drive.files.create({
+    requestBody: {
+      name,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents:  [parent],
+    },
+    fields: 'id',
+    supportsAllDrives: true,
+  });
+
+  if (!res.data.id) throw new Error('Drive folder creation returned no id');
+  return res.data.id;
+}
+
 // ── Delete ────────────────────────────────────────────────────────────────────
 export async function deleteFromDrive(fileId: string): Promise<void> {
   if (!isDriveEnabled()) return;
@@ -120,13 +163,8 @@ export async function deleteFromDrive(fileId: string): Promise<void> {
 }
 
 // ── Download stream ───────────────────────────────────────────────────────────
-/**
- * Proxy-download a Drive file. Used by fileRoutes when we want to keep files
- * private (not shareable by link) and stream bytes through the backend.
- *
- * NOTE: For fully private files, remove link-sharing from the Drive folder and
- * route ALL downloads through this function + authz middleware.
- */
+// Proxy a Drive file through the backend (auth-gated). Keeps files private —
+// the Drive folder does NOT need link-sharing enabled.
 export async function getDriveDownloadStream(fileId: string): Promise<NodeJS.ReadableStream> {
   const drive = getDrive();
   const res = await drive.files.get(
@@ -134,4 +172,15 @@ export async function getDriveDownloadStream(fileId: string): Promise<NodeJS.Rea
     { responseType: 'stream' },
   );
   return res.data as unknown as NodeJS.ReadableStream;
+}
+
+// ── Get file bytes (for Gemini OCR) ──────────────────────────────────────────
+export async function getDriveFileBuffer(fileId: string): Promise<Buffer> {
+  const stream = await getDriveDownloadStream(fileId);
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+    stream.on('end', () => resolve(Buffer.concat(chunks)));
+    stream.on('error', reject);
+  });
 }

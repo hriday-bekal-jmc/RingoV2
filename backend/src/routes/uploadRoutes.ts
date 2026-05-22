@@ -8,7 +8,7 @@ import { uploadLimiter } from '../middlewares/rateLimit';
 import { isDriveEnabled, uploadToDrive, type DriveFolder } from '../services/driveService';
 
 // Valid folder categories accepted from callers
-const VALID_FOLDERS: DriveFolder[] = ['receipts', 'contracts', 'other'];
+const VALID_FOLDERS: DriveFolder[] = ['receipts', 'invoices', 'transportation', 'contracts', 'other'];
 function parseFolder(raw: unknown): DriveFolder | undefined {
   return VALID_FOLDERS.includes(raw as DriveFolder) ? (raw as DriveFolder) : undefined;
 }
@@ -104,8 +104,8 @@ router.post('/', upload.array('files', 10), async (req: Request, res: Response):
         const row = await query(
           `INSERT INTO uploaded_files
              (application_id, uploader_id, field_name, original_name,
-              stored_path, file_size, mime_type, drive_url, drive_file_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+              stored_path, file_size, mime_type, drive_url, drive_file_id, category)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
            RETURNING id`,
           [
             application_id ?? null,
@@ -117,6 +117,7 @@ router.post('/', upload.array('files', 10), async (req: Request, res: Response):
             f.mimetype,
             drive_url,
             drive_file_id,
+            folderCategory ?? null,
           ],
         );
 

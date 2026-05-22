@@ -8,7 +8,9 @@ import fs from 'fs';
 import { query } from '../config/db';
 import { isAdminUser, requireAuth } from '../middlewares/authMiddleware';
 import { assertCanReadApp } from '../middlewares/authz';
-import { isDriveEnabled, deleteFromDrive } from '../services/driveService';
+import { isDriveEnabled, deleteFromDrive, getDriveFileBuffer } from '../services/driveService';
+import { extractReceiptData } from '../services/geminiService';
+import { env } from '../config/env';
 
 const UPLOADS_DIR = path.join(__dirname, '../../uploads');
 
@@ -129,6 +131,70 @@ router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
   } catch (err) {
     console.error('[files] delete failed:', err);
     res.status(500).json({ error: 'ファイルの削除に失敗しました' });
+  }
+});
+
+// POST /api/files/:id/ocr — run Gemini OCR on a stored file, return { date, amount }
+// The file must be an image. Caller must have read access to the associated application.
+router.post('/:id/ocr', async (req: Request, res: Response): Promise<void> => {
+  if (!env.GEMINI_API_KEY) {
+    res.status(503).json({ error: 'AI OCR not configured on this server' });
+    return;
+  }
+
+  try {
+    const r = await query(
+      `SELECT id, application_id, uploader_id, original_name,
+              stored_path, mime_type, drive_file_id
+       FROM uploaded_files WHERE id = $1`,
+      [req.params.id],
+    );
+    if (r.rows.length === 0) { res.status(404).json({ error: 'File not found' }); return; }
+
+    const f = r.rows[0] as {
+      id: string; application_id: string | null; uploader_id: string;
+      original_name: string; stored_path: string; mime_type: string;
+      drive_file_id: string | null;
+    };
+
+    // Auth: same as GET
+    const actor = { id: req.user!.id, role: req.user!.role, is_admin: req.user!.is_admin };
+    if (f.application_id) {
+      await assertCanReadApp(actor, f.application_id);
+    } else if (f.uploader_id !== actor.id && !isAdminUser(req.user)) {
+      res.status(403).json({ error: 'このファイルにアクセスする権限がありません' });
+      return;
+    }
+
+    // Only images supported for OCR
+    if (!f.mime_type.startsWith('image/')) {
+      res.status(422).json({ error: 'OCRは画像ファイルのみ対応しています' });
+      return;
+    }
+
+    // Fetch bytes from Drive or local FS
+    let imageBuffer: Buffer;
+    if (f.drive_file_id && isDriveEnabled()) {
+      imageBuffer = await getDriveFileBuffer(f.drive_file_id);
+    } else if (f.stored_path && !f.stored_path.startsWith('drive:')) {
+      const abs = path.join(UPLOADS_DIR, f.stored_path);
+      if (!fs.existsSync(abs)) {
+        res.status(404).json({ error: 'ファイルが見つかりません' });
+        return;
+      }
+      imageBuffer = fs.readFileSync(abs);
+    } else {
+      res.status(422).json({ error: 'ファイルを取得できませんでした' });
+      return;
+    }
+
+    const result = await extractReceiptData(imageBuffer, f.mime_type);
+    res.json({ date: result.date, amount: result.amount });
+  } catch (err) {
+    const e = err as { status?: number; message?: string };
+    if (e.status) { res.status(e.status).json({ error: e.message }); return; }
+    console.error('[files] OCR failed:', err);
+    res.status(500).json({ error: 'OCR処理に失敗しました' });
   }
 });
 

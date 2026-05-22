@@ -97,6 +97,12 @@ interface FormField {
    * exist and differ, the row is highlighted amber.
    */
   row_compare_with?: string;
+  /** ai_file_reader: form field name to auto-fill with extracted date (YYYY-MM-DD) */
+  target_date_field?: string;
+  /** ai_file_reader: form field name to auto-fill with extracted amount (integer ¥) */
+  target_amount_field?: string;
+  /** ai_file_reader / file: Drive folder category for uploaded files */
+  file_category?: 'receipts' | 'invoices' | 'transportation' | 'other';
 }
 
 interface FormSchema {
@@ -189,8 +195,10 @@ const FIELD_TYPES = [
   { value: 'repeat_group',   label_ja: '繰り返しグループ',     label_en: 'Repeatable group' },
   { value: 'header',         label_ja: 'セクション見出し',     label_en: 'Section header' },
   // Reusable transport types — usable in any form via DynamicForm
-  { value: 'allowance_days', label_ja: '日当支給日数（0/半日/1日）', label_en: 'Allowance days (0/half/1)' },
-  { value: 'route_entry',    label_ja: '交通経路（乗車駅→降車駅・運賃）', label_en: 'Transport route (from/to/fare)' },
+  { value: 'allowance_days',  label_ja: '日当支給日数（0/半日/1日）',         label_en: 'Allowance days (0/half/1)' },
+  { value: 'route_entry',     label_ja: '交通経路（乗車駅→降車駅・運賃）',   label_en: 'Transport route (from/to/fare)' },
+  // AI-assisted file upload — uploads receipt/bill image, runs Gemini OCR, auto-fills target fields
+  { value: 'ai_file_reader',  label_ja: 'AI領収書読み取り',                  label_en: 'AI receipt reader' },
 ];
 
 const REPEAT_CHILD_FIELD_TYPES = FIELD_TYPES.filter((ft) => !['repeat_group', 'header'].includes(ft.value));
@@ -1279,6 +1287,87 @@ function FieldEditor({
                     ? 'Value must be numeric (e.g. 0, 0.5, 1, 1.5, 2). Label = button text.'
                     : '値は数値（例: 0, 0.5, 1, 1.5, 2）。ラベルはボタンに表示されるテキスト。'}
                 />
+              </div>
+            </div>
+          )}
+
+          {/* ai_file_reader settings: target fields + Drive category */}
+          {field.type === 'ai_file_reader' && (
+            <div className="bg-violet-50/60 border border-violet-200/60 rounded-xl p-3 space-y-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-violet-700">
+                {lang === 'en' ? 'AI reader settings' : 'AI読み取り設定'}
+              </p>
+              <p className="text-[10px] text-violet-600">
+                {lang === 'en'
+                  ? 'After upload, clicking "Auto-fill" runs Gemini OCR on the image and fills the target fields. Leave blank to skip that field.'
+                  : 'アップロード後に「自動入力」を押すとGemini OCRが実行され、対象フィールドに値が自動入力されます。空欄にすると対象フィールドをスキップします。'}
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="label text-violet-700">
+                    {lang === 'en' ? 'Fill date into field name' : '日付を入力するフィールド名'}
+                  </label>
+                  <input
+                    type="text"
+                    className="input text-xs"
+                    placeholder="date"
+                    value={field.target_date_field ?? ''}
+                    onChange={(e) => onUpdate({ target_date_field: e.target.value || undefined })}
+                  />
+                </div>
+                <div>
+                  <label className="label text-violet-700">
+                    {lang === 'en' ? 'Fill amount into field name' : '金額を入力するフィールド名'}
+                  </label>
+                  <input
+                    type="text"
+                    className="input text-xs"
+                    placeholder="total"
+                    value={field.target_amount_field ?? ''}
+                    onChange={(e) => onUpdate({ target_amount_field: e.target.value || undefined })}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="label text-violet-700">
+                  {lang === 'en' ? 'Drive folder category' : 'Driveフォルダカテゴリ'}
+                </label>
+                <select
+                  className="input text-xs"
+                  value={field.file_category ?? ''}
+                  onChange={(e) => onUpdate({ file_category: (e.target.value || undefined) as typeof field.file_category })}
+                >
+                  <option value="">{lang === 'en' ? 'Default (root)' : 'デフォルト（ルート）'}</option>
+                  <option value="receipts">{lang === 'en' ? 'Receipts' : '領収書'}</option>
+                  <option value="invoices">{lang === 'en' ? 'Invoices / Bills' : '請求書・明細'}</option>
+                  <option value="transportation">{lang === 'en' ? 'Transportation' : '交通費'}</option>
+                  <option value="other">{lang === 'en' ? 'Other' : 'その他'}</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* file type: Drive category selector */}
+          {field.type === 'file' && (
+            <div className="bg-slate-50/60 border border-slate-200/60 rounded-xl p-3 space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600">
+                {lang === 'en' ? 'Storage settings' : 'ストレージ設定'}
+              </p>
+              <div>
+                <label className="label text-slate-600">
+                  {lang === 'en' ? 'Drive folder category' : 'Driveフォルダカテゴリ'}
+                </label>
+                <select
+                  className="input text-xs"
+                  value={field.file_category ?? ''}
+                  onChange={(e) => onUpdate({ file_category: (e.target.value || undefined) as typeof field.file_category })}
+                >
+                  <option value="">{lang === 'en' ? 'Default (root)' : 'デフォルト（ルート）'}</option>
+                  <option value="receipts">{lang === 'en' ? 'Receipts' : '領収書'}</option>
+                  <option value="invoices">{lang === 'en' ? 'Invoices / Bills' : '請求書・明細'}</option>
+                  <option value="transportation">{lang === 'en' ? 'Transportation' : '交通費'}</option>
+                  <option value="other">{lang === 'en' ? 'Other' : 'その他'}</option>
+                </select>
               </div>
             </div>
           )}

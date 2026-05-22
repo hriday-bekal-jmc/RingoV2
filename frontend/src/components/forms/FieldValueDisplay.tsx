@@ -31,6 +31,8 @@ export function isLongField(field: DisplayField, value: unknown): boolean {
     field.type === 'repeat_group' ||
     field.type === 'route_entry' ||
     field.type === 'textarea' ||
+    field.type === 'file' ||
+    field.type === 'ai_file_reader' ||
     (typeof value === 'string' && !isFileValue(value) && value.length > 60)
   );
 }
@@ -124,7 +126,7 @@ export function FieldValueContent({
     return <span>{formatAllowanceDays(value, lang)}</span>;
   }
 
-  const isFile = field.type === 'file' || isFileValue(value);
+  const isFile = field.type === 'file' || field.type === 'ai_file_reader' || isFileValue(value);
   if (isFile && value) return <FileLinks val={value} />;
 
   if (value == null || value === '') return <span className="text-warmgray-300 text-xs">—</span>;

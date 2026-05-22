@@ -11,6 +11,7 @@ import apiClient from '../../services/apiClient';
 import CalendarPicker from './CalendarPicker';
 import TimePicker from './TimePicker';
 import CustomSelect from './CustomSelect';
+import AiFileReaderInput from './AiFileReaderInput';
 import { useLang } from '../../context/LanguageContext';
 
 // File URLs are same-origin (vite proxy /api in dev, reverse proxy in prod)
@@ -33,6 +34,9 @@ interface FormField {
   computed?: boolean;
   sum_target?: string;
   col_span?: 'half' | 'full';
+  target_date_field?:   string;
+  target_amount_field?: string;
+  file_category?:       string;
   options?: string[] | { value: string; label?: string; label_ja?: string; label_en?: string }[];
   validation?: {
     regex?: string;
@@ -514,6 +518,19 @@ export default function StandardInput({
 
       {field.type === 'route_entry' && (
         <RouteEntryInput field={field} setValue={setValue} watch={watch} isDraft={isDraft} />
+      )}
+
+      {field.type === 'ai_file_reader' && setValue && (
+        <>
+          <input type="hidden" {...register(field.name, { required: requiredRule })} />
+          <AiFileReaderInput
+            field={field}
+            setValue={setValue}
+            currentValue={watch ? String(watch(field.name) ?? '') : ''}
+            error={typeof error?.message === 'string' ? error.message : undefined}
+            disabled={false}
+          />
+        </>
       )}
 
       {error && !isDraft && (
