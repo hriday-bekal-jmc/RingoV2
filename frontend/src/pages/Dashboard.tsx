@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import { createPortal } from 'react-dom';
 import Layout from '../components/common/Layout';
+import PatternBadge from '../components/common/PatternBadge';
 import { useAuth } from '../context/AuthContext';
 import { useLang } from '../context/LanguageContext';
 import { usePermissions } from '../hooks/usePermissions';
@@ -516,7 +517,9 @@ export default function Dashboard() {
                       const desc = lang === 'en'
                         ? (tmpl.description_en ?? legacy?.desc_en ?? '')
                         : (tmpl.description_ja ?? legacy?.desc_ja ?? '');
-                      const isTwoStage = tmpl.pattern_id === 3 || legacy?.twoStage;
+                      // Pattern badge shown via shared PatternBadge component below.
+                      // Legacy `twoStage` flag falls back to pattern_id=3.
+                      const effectivePattern = tmpl.pattern_id ?? (legacy?.twoStage ? 3 : 1);
                       return (
                         <Link
                           key={tmpl.code}
@@ -531,11 +534,8 @@ export default function Dashboard() {
                               <p className="text-sm font-semibold text-warmgray-800 leading-tight group-hover:text-ringo-600 transition-colors">
                                 {title}
                               </p>
-                              {isTwoStage && (
-                                <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700 border border-teal-200/60 leading-none">
-                                  {t('two_stage_badge')}
-                                </span>
-                              )}
+                              <PatternBadge patternId={effectivePattern} />
+
                             </div>
                             <p className="text-[11px] text-warmgray-400 mt-0.5 leading-tight">{desc}</p>
                           </div>
@@ -573,9 +573,12 @@ export default function Dashboard() {
                                 className="flex items-center gap-3 px-4 py-3 hover:bg-white/30 transition-colors"
                               >
                                 <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium text-warmgray-800 truncate">
-                                    {templateLabel(app.template_code, lang, app.template_name)}
-                                  </p>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <p className="text-sm font-medium text-warmgray-800 truncate">
+                                      {templateLabel(app.template_code, lang, app.template_name)}
+                                    </p>
+                                    <PatternBadge patternId={app.pattern_id} />
+                                  </div>
                                   <p className="text-[11px] text-warmgray-400 mt-0.5">
                                     {new Date(app.created_at).toLocaleDateString(dateLocale)}
                                   </p>

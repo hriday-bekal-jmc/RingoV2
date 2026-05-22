@@ -11,6 +11,8 @@ import type { TransportFormData } from '../components/forms/TransportationForm';
 import Toast, { useToast } from '../components/common/Toast';
 import { useLang } from '../context/LanguageContext';
 import { fieldLabel, optionLabel } from '../i18n';
+import { FieldValueContent, isLongField } from '../components/forms/FieldValueDisplay';
+import PatternBadge from '../components/common/PatternBadge';
 import CustomSelect from '../components/forms/CustomSelect';
 import RouteTimeline from '../components/common/RouteTimeline';
 import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
@@ -38,6 +40,7 @@ interface ApplicationDetail {
   applicant_avatar?: string | null;
   status: string;
   has_settlement: boolean;
+  pattern_id?: number;
   form_data: Record<string, any>;
   settlement_data: Record<string, any> | null;
   schema_definition: { fields: any[] };
@@ -73,22 +76,6 @@ function isFileValue(v: unknown): boolean {
   if (typeof v !== 'string' || !v) return false;
   return v.split(',').some((s) => s.trim().startsWith('/api/files/') || s.trim().startsWith('/uploads/'));
 }
-function FileLinks({ val }: { val: unknown }) {
-  const { lang } = useLang();
-  return (
-    <div className="flex flex-wrap gap-1.5 mt-0.5">
-      {String(val).split(',').filter(Boolean).map((url, i) => (
-        <a key={i} href={url.trim()} target="_blank" rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 text-xs text-ringo-600 hover:text-ringo-700 bg-ringo-50/60 border border-ringo-200/60 px-2.5 py-1 rounded-lg font-medium transition-colors">
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-          </svg>
-          {lang === 'en' ? 'File' : 'ファイル'} {i + 1}
-        </a>
-      ))}
-    </div>
-  );
-}
 
 // ── View Mode: 申請データを綺麗に表示するコンポーネント ──
 function FormDataViewer({ app }: { app: ApplicationDetail }) {
@@ -98,22 +85,16 @@ function FormDataViewer({ app }: { app: ApplicationDetail }) {
     <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
       {fields.map((f) => {
         const val = app.form_data[f.name];
-        const isFile = f.type === 'file' || isFileValue(val);
-        const isLong = f.type === 'repeat_group' || f.type === 'textarea' || (typeof val === 'string' && !isFile && val.length > 40);
-        const displayVal = optionLabel(f, val, lang);
+        const isLong = isLongField(f, val);
         return (
           <div key={f.name} className={isLong ? 'col-span-full' : ''}>
             <dt className="text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{fieldLabel(f, lang)}</dt>
             <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3.5 py-2.5 rounded-xl break-words min-h-[42px]">
-              {f.type === 'repeat_group' ? (
-                <RepeatGroupDisplay field={f} value={val} />
-              ) : isFile && val ? (
-                <FileLinks val={val} />
-              ) : val != null && val !== '' ? (
-                displayVal
-              ) : (
-                <span className="text-warmgray-300">—</span>
-              )}
+              <FieldValueContent
+                field={f}
+                value={val}
+                renderRepeat={(field, value) => <RepeatGroupDisplay field={field} value={value} />}
+              />
             </dd>
           </div>
         );
@@ -370,18 +351,23 @@ function SettlementReturnEditor({ app, onSuccess }: { app: ApplicationDetail; on
     }
   };
 
-  const isTransport = app.component_type === 'transportation';
+  const isTransport       = app.component_type === 'transportation';
+  // pattern_id=2 (direct settlement, transport OR admin-built) stores data in form_data,
+  // not settlement_data. Editor must default to form_data so user can edit what they sent.
+  const isDirectSettlement = app.pattern_id === 2;
 
   const template = {
     id: app.template_id,
     title_ja: app.template_name,
+    // For direct-settlement, settlement schema = the form schema (same fields user filled)
     schema_definition: app.schema_definition,
-    settlement_schema: app.settlement_schema ?? { fields: [] },
+    settlement_schema: isDirectSettlement
+      ? app.schema_definition
+      : (app.settlement_schema ?? { fields: [] }),
     component_type: app.component_type,
   };
 
-  // For transportation (pattern_id=2), data lives in form_data, not settlement_data
-  const settlementDefaults = isTransport
+  const settlementDefaults = isDirectSettlement
     ? (app.form_data as unknown as Partial<TransportFormData>)
     : (app.settlement_data ?? {});
 
@@ -438,9 +424,13 @@ function DraftEditor({
   const { toast, show, dismiss } = useToast();
   const { t } = useLang();
 
+  // pattern_id=2 (direct settlement) needs SETTLEMENT routes, not RINGI.
+  // Same logic as NewApplication.tsx so draft/returned editors mirror new-form UX.
+  const draftRouteStage = app.pattern_id === 2 ? 'SETTLEMENT' : 'RINGI';
   const { data: routePreview, isLoading: routeLoading } = useQuery({
-    queryKey: ['route-preview', app.template_id],
-    queryFn: async () => (await apiClient.get(`/applications/route-preview?template_id=${app.template_id}`)).data,
+    queryKey: ['route-preview', app.template_id, draftRouteStage],
+    queryFn: async () =>
+      (await apiClient.get(`/applications/route-preview?template_id=${app.template_id}&stage=${draftRouteStage}`)).data,
   });
 
   useEffect(() => {
@@ -792,11 +782,7 @@ export default function ApplicationDetail() {
                   <span className={STATUS_BADGE[app.status] ?? 'badge-draft'}>
                     {STATUS_LABEL[app.status] ?? app.status}
                   </span>
-                  {app.has_settlement && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700 border border-teal-200/60">
-                      {t('two_stage_badge')}
-                    </span>
-                  )}
+                  <PatternBadge patternId={app.pattern_id} size="sm" />
                 </div>
                 <h2 className="text-2xl font-bold text-warmgray-800 mt-3">{app.template_name}</h2>
                 <div className="flex items-center gap-3 mt-2 text-xs font-medium text-warmgray-500">

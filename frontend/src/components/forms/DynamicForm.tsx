@@ -219,7 +219,7 @@ export default function DynamicForm({
       <div className="border-b border-white/30 pb-5">
         <h2 className="text-xl font-bold text-warmgray-800">{template.title_ja}</h2>
         <p className="text-xs text-warmgray-400 mt-1 uppercase tracking-wide font-medium">
-          {isSettlementPhase ? 'Settlement Phase' : 'Ringi Phase'}
+          {isSettlementPhase ? '精算フェーズ / Settlement' : '稟議フェーズ / Ringi'}
         </p>
       </div>
 

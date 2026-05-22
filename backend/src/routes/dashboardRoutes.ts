@@ -48,6 +48,7 @@ interface DashboardSummary {
     template_name:       string;
     template_code:       string;
     has_settlement:      boolean;
+    pattern_id:          number;
     current_step:        number | null;
     total_steps:         number;
   }>;
@@ -104,6 +105,7 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
            a.id, a.application_number, a.status, a.created_at, a.submitted_at,
            t.title_ja AS template_name, t.code AS template_code,
            t.settlement_schema IS NOT NULL AS has_settlement,
+           t.pattern_id,
            -- current_step = 1-indexed rank within the current batch (excludes skipped-at-start steps)
            COALESCE((
              SELECT COUNT(*)::int FROM approval_steps
@@ -186,6 +188,7 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
         template_name:      r.template_name,
         template_code:      r.template_code,
         has_settlement:     r.has_settlement,
+        pattern_id:         Number(r.pattern_id),
         current_step:       r.current_step !== null ? Number(r.current_step) : null,
         total_steps:        Number(r.total_steps),
       })),

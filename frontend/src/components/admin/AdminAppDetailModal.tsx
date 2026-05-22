@@ -16,8 +16,10 @@ import { useQuery } from '@tanstack/react-query';
 import apiClient from '../../services/apiClient';
 import { templateLabel } from '../../config/templateLabels';
 import { useLang } from '../../context/LanguageContext';
-import { optionLabel } from '../../i18n';
 import RepeatGroupDisplay from '../forms/RepeatGroupDisplay';
+import TransportationDetail from '../forms/TransportationDetail';
+import { FieldValueContent, isLongField } from '../forms/FieldValueDisplay';
+import PatternBadge from '../common/PatternBadge';
 import CollapsibleComment from '../common/CollapsibleComment';
 import { Sk } from '../common/Skeleton';
 
@@ -36,6 +38,8 @@ interface ApplicationDetail {
   schema_definition: { fields: FormField[] } | null;
   settlement_schema: { fields: FormField[] } | null;
   has_settlement: boolean;
+  pattern_id?: number | null;
+  component_type?: string | null;
   route_id: string | null;
   applicant_id: string;
   applicant_name: string | null;
@@ -257,14 +261,29 @@ export default function AdminAppDetailModal({ appId, onClose }: Props) {
           {data && (
             <div className="p-4 md:p-5 space-y-5">
               <MetaCard d={data} lang={lang} dateLocale={dateLocale} />
-              <FormDataCard
-                title={lang === 'en' ? 'RINGI Form Data' : '稟議フォーム'}
-                accent="ringo"
-                data={data.application.form_data}
-                schema={data.application.schema_definition}
-                files={data.files}
-                lang={lang}
-              />
+              {data.application.component_type === 'transportation' ? (
+                <div className={`card space-y-3 border border-ringo-200/40`}>
+                  <div className="flex items-center gap-2 pb-2 border-b border-white/30">
+                    <span className="w-1 h-4 rounded-full bg-ringo-500" />
+                    <p className="text-sm font-bold text-warmgray-800">
+                      {lang === 'en' ? 'Transportation Form' : '交通費フォーム'}
+                    </p>
+                  </div>
+                  <TransportationDetail
+                    formData={data.application.form_data}
+                    schema={data.application.schema_definition ?? undefined}
+                  />
+                </div>
+              ) : (
+                <FormDataCard
+                  title={lang === 'en' ? 'RINGI Form Data' : '稟議フォーム'}
+                  accent="ringo"
+                  data={data.application.form_data}
+                  schema={data.application.schema_definition}
+                  files={data.files}
+                  lang={lang}
+                />
+              )}
               {data.application.settlement_data && (
                 <FormDataCard
                   title={lang === 'en' ? 'Settlement Form Data' : '精算フォーム'}
@@ -302,11 +321,7 @@ function MetaCard({ d, lang, dateLocale }: { d: AdminAppDetailResponse; lang: 'j
             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold ${STATUS_BADGE[a.status] ?? 'bg-surface-100 text-warmgray-500'}`}>
               {a.status}
             </span>
-            {a.has_settlement && (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-100 text-teal-700 border border-teal-200/60">
-                {lang === 'en' ? 'Two-stage' : '二段階'}
-              </span>
-            )}
+            <PatternBadge patternId={a.pattern_id ?? undefined} size="sm" />
             <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-surface-100 text-warmgray-500 border border-surface-200">
               v{a.version}
             </span>
@@ -426,21 +441,9 @@ function FormDataCard({ title, accent, data, schema, files, lang }: {
       <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-3">
         {entries.map((f) => {
           const isFile = f.type === 'file';
-          const isRepeat = f.type === 'repeat_group';
-          const isLong = isRepeat || (!isFile && typeof f.value === 'string' && (f.type === 'textarea' || f.value.length > 50));
+          const isLong = isLongField(f, f.value);
 
-          if (isRepeat) {
-            return (
-              <div key={f.name} className="md:col-span-2">
-                <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{f.label}</dt>
-                <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3 py-2 rounded-xl break-words min-h-[36px]">
-                  <RepeatGroupDisplay field={f} value={f.value} compact />
-                </dd>
-              </div>
-            );
-          }
-
-          // File-type rendering: tiles instead of raw URL string.
+          // File fields get rich tile rendering with metadata from uploaded_files
           if (isFile) {
             const parsed = parseFileValue(f.value, files);
             return (
@@ -452,13 +455,8 @@ function FormDataCard({ title, accent, data, schema, files, lang }: {
                   ) : (
                     <div className="flex flex-wrap gap-2">
                       {parsed.map(({ url, file }, i) => (
-                        <a
-                          key={url}
-                          href={url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2 bg-white/70 hover:bg-white border border-white/80 hover:border-ringo-200 rounded-xl px-3 py-2 transition-colors group max-w-full"
-                        >
+                        <a key={url} href={url} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 bg-white/70 hover:bg-white border border-white/80 hover:border-ringo-200 rounded-xl px-3 py-2 transition-colors group max-w-full">
                           <span className="text-base shrink-0">📎</span>
                           <div className="min-w-0 text-left">
                             <p className="text-xs font-semibold text-warmgray-800 group-hover:text-ringo-600 truncate">
@@ -483,9 +481,11 @@ function FormDataCard({ title, accent, data, schema, files, lang }: {
             <div key={f.name} className={isLong ? 'md:col-span-2' : ''}>
               <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{f.label}</dt>
               <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3 py-2 rounded-xl break-words min-h-[36px]">
-                {f.value != null && f.value !== ''
-                  ? <span className={isLong ? 'whitespace-pre-wrap' : ''}>{optionLabel(f as any, f.value, lang) || String(f.value)}</span>
-                  : <span className="text-warmgray-300 text-xs">—</span>}
+                <FieldValueContent
+                  field={f as any}
+                  value={f.value}
+                  renderRepeat={(field, value) => <RepeatGroupDisplay field={field} value={value} compact />}
+                />
               </dd>
             </div>
           );

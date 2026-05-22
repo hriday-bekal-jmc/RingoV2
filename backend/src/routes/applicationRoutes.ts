@@ -19,6 +19,37 @@ router.use(mutationLimiter);
 
 type ApprovalStage = 'RINGI' | 'SETTLEMENT';
 
+// Resolve the headline amount for a settlement-only (pattern_id=2) application.
+// Used to populate settlements.expected_amount so accounting page sees the total.
+//
+// Detection order (first hit wins):
+//   1. Explicit `grand_total` (transportation form convention)
+//   2. Any schema field with `computed: true` (sum_target receiver)
+//   3. Any schema field with `sum_target` defined (rolled-up source totals)
+//   4. First number-type field in schema
+// Returns 0 when nothing matches (rare — admin-built form w/o numbers).
+interface AmountField { name: string; type: string; computed?: boolean; sum_target?: string }
+function detectSettlementAmount(
+  schema:   { fields?: AmountField[] } | null | undefined,
+  formData: Record<string, unknown>,
+): number {
+  const num = (v: unknown): number => {
+    const n = typeof v === 'number' ? v : parseFloat(String(v ?? 0));
+    return isFinite(n) ? n : 0;
+  };
+  if (formData.grand_total != null) return num(formData.grand_total);
+  const fields = schema?.fields ?? [];
+  const computed = fields.find((f) => f.computed && f.type === 'number');
+  if (computed) return num(formData[computed.name]);
+  const firstWithSumTarget = fields.find((f) => !!f.sum_target);
+  if (firstWithSumTarget && firstWithSumTarget.sum_target) {
+    return num(formData[firstWithSumTarget.sum_target]);
+  }
+  const firstNumber = fields.find((f) => f.type === 'number');
+  if (firstNumber) return num(formData[firstNumber.name]);
+  return 0;
+}
+
 async function nextApplicationNumber(client: pg.PoolClient, appId: string): Promise<string> {
   const year = new Date().getFullYear();
   // Look up template's prefix and digit padding
@@ -431,55 +462,87 @@ router.post('/:id/submit', async (req: Request, res: Response): Promise<void> =>
 
   try {
     const result = await withTransaction(async (client: pg.PoolClient) => {
-      // Load and lock the draft
+      // Load and lock the draft (join template to know pattern_id + component_type)
       const draftRes = await client.query(
-        `SELECT id, status, template_id FROM applications
-         WHERE id = $1 AND applicant_id = $2 AND status = 'DRAFT' FOR UPDATE`,
+        `SELECT a.id, a.status, a.template_id, t.pattern_id, t.component_type
+         FROM applications a JOIN form_templates t ON t.id = a.template_id
+         WHERE a.id = $1 AND a.applicant_id = $2 AND a.status = 'DRAFT' FOR UPDATE`,
         [req.params.id, applicant_id],
       );
       if (draftRes.rows.length === 0) {
         throw Object.assign(new Error('下書きが見つかりません'), { status: 404 });
       }
-      const { template_id } = draftRes.rows[0] as { template_id: string; id: string; status: string };
+      const draftRow = draftRes.rows[0] as {
+        template_id: string; pattern_id: number; component_type: string | null;
+      };
+      const template_id        = draftRow.template_id;
+      const isDirectSettlement = draftRow.pattern_id === 2;
+      const routeStage: ApprovalStage = isDirectSettlement ? 'SETTLEMENT' : 'RINGI';
 
-      // Resolve route
+      // Resolve route — pattern_id picks SETTLEMENT vs RINGI bucket
       let route_id: string = chosen_route_id || '';
       if (!route_id) {
         const routeRes = await client.query(
           `SELECT id FROM approval_routes
-           WHERE template_id = $1 AND department_id = $2 AND stage = 'RINGI' AND is_active = TRUE AND is_default = TRUE
+           WHERE template_id = $1 AND department_id = $2 AND stage = $3 AND is_active = TRUE AND is_default = TRUE
            LIMIT 1`,
-          [template_id, department_id],
+          [template_id, department_id, routeStage],
         );
-        if (routeRes.rows.length === 0) throw Object.assign(new Error('承認ルートが設定されていません'), { status: 422 });
+        if (routeRes.rows.length === 0) {
+          throw Object.assign(
+            new Error(isDirectSettlement ? '精算承認ルートが設定されていません' : '承認ルートが設定されていません'),
+            { status: 422 },
+          );
+        }
         route_id = routeRes.rows[0].id as string;
       } else {
-        // Client-supplied route — must match template+dept+stage+active
-        await assertValidRouteForTemplate(client, route_id, template_id, department_id, 'RINGI');
+        await assertValidRouteForTemplate(client, route_id, template_id, department_id, routeStage);
       }
 
-      // Resolve route → concrete steps (single batched role lookup)
       const submitRoutePolicy = skipStepsThroughApplicant(
         await resolveApprovalSteps(client, route_id),
         applicant_id,
       );
       const resolvedSubmitSteps = submitRoutePolicy.steps;
 
-      // Update application to PENDING_APPROVAL
+      // Update application: pattern_id=2 → PENDING_SETTLEMENT + settlement_submitted_at, else PENDING_APPROVAL
+      const initialStatus = isDirectSettlement ? 'PENDING_SETTLEMENT' : 'PENDING_APPROVAL';
       await client.query(
-        `UPDATE applications SET status = 'PENDING_APPROVAL', route_id = $2, submitted_at = CURRENT_TIMESTAMP
+        `UPDATE applications
+         SET status = $3, route_id = $2,
+             submitted_at = CURRENT_TIMESTAMP,
+             settlement_submitted_at = CASE WHEN $4 THEN CURRENT_TIMESTAMP ELSE settlement_submitted_at END
          WHERE id = $1`,
-        [req.params.id, route_id],
+        [req.params.id, route_id, initialStatus, isDirectSettlement],
       );
 
-      // Assign application_number at submit time — row already locked above
       const assignedNumber = await ensureApplicationNumber(client, String(req.params.id));
 
       let finalApp: { id: string; status: string; application_number: string | null } | null = null;
       if (resolvedSubmitSteps.length > 0) {
-        await insertApprovalSteps(client, String(req.params.id), 'RINGI', resolvedSubmitSteps);
+        await insertApprovalSteps(client, String(req.params.id), routeStage, resolvedSubmitSteps);
       } else {
-        finalApp = await finalizeStageWithoutApprovalSteps(client, String(req.params.id), 'RINGI');
+        finalApp = await finalizeStageWithoutApprovalSteps(client, String(req.params.id), routeStage);
+      }
+
+      // Auto-create settlements row for pattern_id=2 (matches POST / behaviour)
+      if (isDirectSettlement) {
+        const fdRes = await client.query(
+          `SELECT a.form_data, COALESCE(v.schema_definition, t.schema_definition) AS schema_def
+           FROM applications a
+           JOIN form_templates t ON t.id = a.template_id
+           LEFT JOIN form_template_versions v ON v.id = a.template_version_id
+           WHERE a.id = $1`,
+          [req.params.id],
+        );
+        const fdRow = fdRes.rows[0] as { form_data: Record<string, unknown>; schema_def: any };
+        const amount = detectSettlementAmount(fdRow.schema_def, fdRow.form_data ?? {});
+        await client.query(
+          `INSERT INTO settlements (application_id, expected_amount, actual_amount, settlement_data, status)
+           VALUES ($1, $2, $2, '{}'::jsonb, 'PENDING_VERIFICATION')
+           ON CONFLICT (application_id) DO NOTHING`,
+          [req.params.id, amount],
+        );
       }
 
       await client.query(
@@ -731,30 +794,45 @@ router.post('/:id/resubmit-settlement', async (req: Request, res: Response): Pro
         route_id: string | null;
       };
 
-      // Fetch pattern_id — determines where submitted data lives (form_data vs settlement_data)
+      // Fetch pattern_id + component_type — determines data layout + validation behaviour
       const tmplPatternRes = await client.query(
-        `SELECT pattern_id FROM form_templates WHERE id = $1`,
+        `SELECT pattern_id, component_type FROM form_templates WHERE id = $1`,
         [template_id],
       );
       const isDirectSettlement = (tmplPatternRes.rows[0]?.pattern_id ?? 1) === 2;
+      const skipValidation     = !!tmplPatternRes.rows[0]?.component_type;
 
+      // For pattern_id=2 (direct settlement), schema lives in schema_definition (data is in
+      // form_data). For pattern_id=3, settlement-specific fields are in settlement_schema.
       const schemaRes = await client.query(
-        `SELECT COALESCE(v.settlement_schema, active_v.settlement_schema) AS settlement_schema
-         FROM form_templates t
-         LEFT JOIN form_template_versions v ON v.id = $2
-         LEFT JOIN LATERAL (
-           SELECT settlement_schema
-           FROM form_template_versions
-           WHERE template_id = t.id AND is_active = TRUE
-           LIMIT 1
-         ) active_v ON TRUE
-         WHERE t.id = $1`,
+        isDirectSettlement
+          ? `SELECT COALESCE(v.schema_definition, active_v.schema_definition) AS settlement_schema
+             FROM form_templates t
+             LEFT JOIN form_template_versions v ON v.id = $2
+             LEFT JOIN LATERAL (
+               SELECT schema_definition
+               FROM form_template_versions
+               WHERE template_id = t.id AND is_active = TRUE
+               LIMIT 1
+             ) active_v ON TRUE
+             WHERE t.id = $1`
+          : `SELECT COALESCE(v.settlement_schema, active_v.settlement_schema) AS settlement_schema
+             FROM form_templates t
+             LEFT JOIN form_template_versions v ON v.id = $2
+             LEFT JOIN LATERAL (
+               SELECT settlement_schema
+               FROM form_template_versions
+               WHERE template_id = t.id AND is_active = TRUE
+               LIMIT 1
+             ) active_v ON TRUE
+             WHERE t.id = $1`,
         [template_id, template_version_id],
       );
       const settlementSchema = schemaRes.rows[0]?.settlement_schema;
       const normalizedSettlementData = applyComputedFormData(settlementSchema, settlement_data);
-      // Skip schema validation for direct-settlement (pattern_id=2) — custom form, no settlement_schema
-      if (settlementSchema && !isDirectSettlement) {
+      // Skip schema validation only for custom-renderer forms (transportation etc.).
+      // Admin-built pattern_id=2 forms ARE validated against schema.
+      if (settlementSchema && !skipValidation) {
         const errors = validateFormData(settlementSchema, normalizedSettlementData);
         if (errors.length > 0) {
           throw Object.assign(new Error(errors.map(e => e.message).join(' / ')), { status: 400 });
@@ -808,7 +886,9 @@ router.post('/:id/resubmit-settlement', async (req: Request, res: Response): Pro
       // pattern_id=2 (direct settlement): data lives in form_data, not settlement_data.
       // pattern_id=1/3: data goes into settlement_data as usual.
       if (isDirectSettlement) {
-        const grandTotal = Number((normalizedSettlementData as Record<string, unknown>).grand_total) || 0;
+        // Re-detect amount from updated form_data (schema may differ from original snapshot,
+        // but settlementSchema fallback covers it). Generic for transport + admin-built forms.
+        const amount = detectSettlementAmount(settlementSchema ?? null, normalizedSettlementData);
         await client.query(
           `UPDATE applications
            SET status = 'PENDING_SETTLEMENT', form_data = $2::jsonb,
@@ -816,12 +896,11 @@ router.post('/:id/resubmit-settlement', async (req: Request, res: Response): Pro
            WHERE id = $1`,
           [req.params.id, JSON.stringify(normalizedSettlementData)],
         );
-        // Sync settlements expected_amount with updated grand_total
         await client.query(
           `UPDATE settlements
            SET expected_amount = $2, actual_amount = $2, updated_at = CURRENT_TIMESTAMP
            WHERE application_id = $1`,
-          [req.params.id, grandTotal],
+          [req.params.id, amount],
         );
       } else {
         await client.query(
@@ -915,11 +994,15 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       //   pattern_id = 2  → SETTLEMENT only (e.g. transportation) → PENDING_SETTLEMENT + SETTLEMENT steps
       //   pattern_id = 3  → RINGI + SETTLEMENT → same as 1 (settlement added later via start-settlement)
       const tmplRes = await client.query(
-        `SELECT pattern_id FROM form_templates WHERE id = $1`,
+        `SELECT pattern_id, component_type FROM form_templates WHERE id = $1`,
         [template_id],
       );
-      const pattern_id = (tmplRes.rows[0]?.pattern_id ?? 1) as number;
+      const pattern_id     = (tmplRes.rows[0]?.pattern_id ?? 1) as number;
+      const component_type = (tmplRes.rows[0]?.component_type ?? null) as string | null;
       const isDirectSettlement = pattern_id === 2;
+      // Skip validation only for custom-renderer forms (transportation, etc.) —
+      // their data shape (entries[] etc.) doesn't fit the standard field schema.
+      const skipValidation = !!component_type;
       const routeStage  = isDirectSettlement ? 'SETTLEMENT' : 'RINGI';
       const missingRouteErr = isDirectSettlement
         ? '精算承認ルートが設定されていません。管理者にお問い合わせください。'
@@ -971,8 +1054,9 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       const normalizedFormData = applyComputedFormData(versionSchema, form_data);
 
       // Server-side schema validation — honours conditional_on (hidden fields exempt)
-      // Skip for transportation (custom form; schema validation doesn't cover entries array)
-      if (versionSchema && !isDirectSettlement) {
+      // Skip for custom-renderer forms (transportation etc.) whose data shape doesn't
+      // match a standard field schema. Admin-built pattern_id=2 forms ARE validated.
+      if (versionSchema && !skipValidation) {
         const errors = validateFormData(versionSchema, normalizedFormData);
         if (errors.length > 0) {
           throw Object.assign(new Error(errors.map(e => e.message).join(' / ')), { status: 400 });
@@ -1008,14 +1092,16 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
 
       // Auto-create settlements record for pattern_id=2 so the accounting page can
       // list the app, set transfer_date, upload proof, and close it — same as pattern 3.
+      // Amount detection works for both transportation (grand_total) and admin-built
+      // settlement forms (uses computed/sum_target/first number field).
       if (isDirectSettlement) {
-        const grandTotal = Number((normalizedFormData as Record<string, unknown>).grand_total) || 0;
+        const amount = detectSettlementAmount(versionSchema, normalizedFormData);
         await client.query(
           `INSERT INTO settlements
              (application_id, expected_amount, actual_amount, settlement_data, status)
            VALUES ($1, $2, $2, '{}'::jsonb, 'PENDING_VERIFICATION')
            ON CONFLICT (application_id) DO NOTHING`,
-          [app.id, grandTotal],
+          [app.id, amount],
         );
       }
 
@@ -1072,6 +1158,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
          a.form_data, a.settlement_data, a.template_id,
          t.title_ja AS template_name, t.code AS template_code,
          t.settlement_schema IS NOT NULL AS has_settlement,
+         t.pattern_id,
          COALESCE((
            SELECT COUNT(*)::int FROM approval_steps
            WHERE application_id = a.id
@@ -1173,6 +1260,7 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
               COALESCE(v.settlement_schema, t.settlement_schema) AS settlement_schema,
               v.version_number AS template_version_number,
               t.settlement_schema IS NOT NULL AS has_settlement,
+         t.pattern_id,
               t.component_type,
               u.full_name AS applicant_name,
               u.avatar_url AS applicant_avatar,

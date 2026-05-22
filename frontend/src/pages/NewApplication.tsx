@@ -80,8 +80,8 @@ export default function NewApplication() {
     try {
       await apiClient.post('/applications', {
         ...payload,
-        // pattern_id=2: backend auto-selects default SETTLEMENT route — don't pass route_id
-        route_id: template?.pattern_id === 2 ? undefined : (selectedRouteId || undefined),
+        // route_id passed for all patterns — backend validates against pattern's expected stage
+        route_id: selectedRouteId || undefined,
       });
       queryClient.invalidateQueries({ queryKey: ['myApplications'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard', 'summary'] });
@@ -133,9 +133,10 @@ export default function NewApplication() {
           </div>
         )}
 
-        {/* Route preview panel — hidden for pattern_id=2 (direct settlement, backend auto-selects route)
-            unless no settlement route exists (show error) */}
-        {template && (template.pattern_id !== 2 || routePreview?.department_has_route === false) && (
+        {/* Route preview panel — shown for every pattern. Stage = SETTLEMENT when
+            pattern_id=2 (direct settlement), RINGI otherwise. Selector + timeline
+            identical to other application flows. */}
+        {template && (
           <div className="card space-y-4">
             <div className="flex items-center justify-between">
               <div>
@@ -170,7 +171,7 @@ export default function NewApplication() {
               </div>
             )}
 
-            {routePreview && routePreview.routes.length > 1 && template.pattern_id !== 2 && (
+            {routePreview && routePreview.routes.length > 1 && (
               <div className="space-y-1.5">
                 <label className="label">{t('route_select')}</label>
                 <CustomSelect
@@ -184,22 +185,23 @@ export default function NewApplication() {
               </div>
             )}
 
-            {selectedRoute && template.pattern_id !== 2 && (
+            {selectedRoute && (
               <div className="bg-white/40 backdrop-blur-sm rounded-xl border border-white/60 p-4">
                 <RouteTimeline
                   steps={selectedRoute.steps}
                   originLabel={t('route_applicant_node')}
                   doneLabel={t('route_done_node')}
                   emptyMessage={t('route_no_steps')}
-                  accent="ringo"
+                  accent={template.pattern_id === 2 ? 'teal' : 'ringo'}
                 />
               </div>
             )}
           </div>
         )}
 
-        {/* Two-stage flow banner for 立替精算申請 — hidden for transportation (pattern_id=2 direct settlement) */}
-        {template?.settlement_schema && template?.component_type !== 'transportation' && (
+        {/* Two-stage flow banner — ONLY for pattern_id=3 (ringi → settle).
+            Hidden for pattern_id=2 (direct settlement, single phase) and transportation. */}
+        {template?.pattern_id === 3 && template?.component_type !== 'transportation' && (
           <div className="card !py-3 !px-4 border border-teal-200/60 bg-teal-50/40 space-y-2">
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold uppercase tracking-widest text-teal-600">{t('two_stage_flow_label')}</span>
@@ -253,8 +255,9 @@ export default function NewApplication() {
             template={template}
             onSubmit={handleFormSubmit}
             onDraft={handleDraft}
-            isSettlementPhase={false}
-            disabled={template.pattern_id !== 2 && routePreview?.department_has_route === false}
+            // pattern_id=2 → settlement-only form. Renders schema fields w/ "Settlement" header label.
+            isSettlementPhase={template.pattern_id === 2}
+            disabled={routePreview?.department_has_route === false}
           />
         )}
       </div>

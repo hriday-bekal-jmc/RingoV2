@@ -870,11 +870,10 @@ function RepeatCell({
       )}
 
       {field.type === 'date' && (
-        <input
-          type="date"
-          value={String(value ?? '')}
-          onChange={(e) => onChange(e.target.value)}
-          className="input"
+        <CalendarPicker
+          value={String(value ?? '') || undefined}
+          onChange={(val) => onChange(val)}
+          required={field.required}
         />
       )}
 
@@ -889,12 +888,11 @@ function RepeatCell({
       )}
 
       {field.type === 'select' && (
-        <select value={String(value ?? '')} onChange={(e) => onChange(e.target.value)} className="input">
-          <option value="">-</option>
-          {normalizeOptions(field.options, lang).map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
+        <CustomSelect
+          value={String(value ?? '')}
+          onChange={(val) => onChange(val)}
+          options={normalizeOptions(field.options, lang)}
+        />
       )}
 
       {field.type === 'checkbox' && (() => {

@@ -60,6 +60,7 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
          a.id, a.application_number, a.status, a.created_at,
          a.form_data, a.settlement_data, a.template_id,
          t.title_ja AS template_name,
+         t.pattern_id,
          u.full_name AS applicant_name,
          u.avatar_url AS applicant_avatar,
          COALESCE(d.name, '—') AS department_name,

@@ -493,6 +493,7 @@ router.get('/applications/:id', async (req: Request, res: Response): Promise<voi
            COALESCE(v.settlement_schema, t.settlement_schema) AS settlement_schema,
            v.version_number AS template_version_number,
            t.settlement_schema IS NOT NULL AS has_settlement,
+           t.pattern_id, t.component_type,
            u.full_name AS applicant_name, u.email AS applicant_email, u.avatar_url AS applicant_avatar,
            d.name AS department_name, d.id AS department_id
          FROM applications a

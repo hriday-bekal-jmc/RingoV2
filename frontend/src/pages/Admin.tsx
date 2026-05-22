@@ -1865,7 +1865,7 @@ export default function Admin() {
           </div>
         </div>
 
-        <div key={tab} className="animate-fade-up">
+        <div key={tab} className="animate-fade-up min-h-[60vh]">
           {tab === 'routes'       && <RoutesTab showToast={showToast} />}
           {tab === 'users'        && <UsersTab showToast={showToast} />}
           {tab === 'applications' && <ApplicationsTab showToast={showToast} />}

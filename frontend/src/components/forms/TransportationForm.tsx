@@ -1,6 +1,8 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useLang } from '../../context/LanguageContext';
 import { useAuth } from '../../context/AuthContext';
+import CalendarPicker from './CalendarPicker';
+import CustomSelect from './CustomSelect';
 
 // ── Exported types ─────────────────────────────────────────────────────────────
 
@@ -440,19 +442,14 @@ export default function TransportationForm({
                 <div key={route.id} className="flex flex-col gap-1.5">
                   {/* Mode selector row (only when show_mode: true and options provided) */}
                   {f.show_mode && f.options && f.options.length > 0 && (
-                    <select
+                    <CustomSelect
                       value={route.mode ?? ''}
-                      onChange={(e) => updateRoute(ri, { ...route, mode: e.target.value })}
+                      onChange={(val) => updateRoute(ri, { ...route, mode: val })}
                       disabled={busy}
-                      className="input text-xs w-full sm:w-auto sm:max-w-[180px]"
-                    >
-                      <option value="">— {lang === 'en' ? 'Mode' : '交通手段'} —</option>
-                      {f.options.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {lang === 'en' ? o.label_en : o.label_ja}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder={lang === 'en' ? 'Mode' : '交通手段'}
+                      options={f.options.map((o) => ({ value: o.value, label: (lang === 'en' ? o.label_en : o.label_ja) ?? o.value }))}
+                      className="text-xs w-full sm:w-auto sm:max-w-[180px]"
+                    />
                   )}
                   {/* From / swap / to / fare / delete */}
                   <div className="flex items-center gap-1.5 md:gap-2">
@@ -529,7 +526,7 @@ export default function TransportationForm({
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                   </svg>
-                  {lang === 'ja' ? '+ 経路追加' : '+ Add route'}
+                  {lang === 'ja' ? '経路追加' : 'Add route'}
                 </button>
                 {f.show_copy_return !== false && (
                   <button
@@ -541,7 +538,7 @@ export default function TransportationForm({
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                     </svg>
-                    {lang === 'ja' ? '⇄ 復路コピー' : '⇄ Copy return'}
+                    {lang === 'ja' ? '復路コピー' : 'Copy return'}
                   </button>
                 )}
               </div>
@@ -625,12 +622,11 @@ export default function TransportationForm({
               {fieldLabel}
               {f.required && <span className="text-red-500 ml-0.5">*</span>}
             </label>
-            <input
-              type="date"
-              value={dateVal}
-              onChange={(e) => setEntryField(f.name, e.target.value)}
+            <CalendarPicker
+              value={dateVal || undefined}
+              onChange={(val) => setEntryField(f.name, val)}
               disabled={busy}
-              className={`input${hasError ? ' border-red-400' : ''}`}
+              required={f.required}
             />
             {hasError && <p className="text-xs text-red-500">⚠ {errors[f.name]}</p>}
             {hasDuplicateDate && !hasError && (
@@ -651,19 +647,14 @@ export default function TransportationForm({
               {fieldLabel}
               {f.required && <span className="text-red-500 ml-0.5">*</span>}
             </label>
-            <select
+            <CustomSelect
               value={currentVal}
-              onChange={(e) => setEntryField(f.name, e.target.value)}
+              onChange={(val) => setEntryField(f.name, val)}
               disabled={busy}
-              className={`input${hasError ? ' border-red-400' : ''}`}
-            >
-              <option value="">— {lang === 'en' ? 'Select' : '選択'} —</option>
-              {opts.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {lang === 'en' ? o.label_en : o.label_ja}
-                </option>
-              ))}
-            </select>
+              placeholder={lang === 'en' ? 'Select' : '選択'}
+              options={opts.map((o) => ({ value: o.value, label: (lang === 'en' ? o.label_en : o.label_ja) ?? o.value }))}
+              className={hasError ? 'border-red-400' : ''}
+            />
             {hasError && <p className="text-xs text-red-500">⚠ {errors[f.name]}</p>}
           </div>
         );
@@ -724,14 +715,23 @@ export default function TransportationForm({
               {lang === 'en' && f.label_en ? f.label_en : f.label}
               {f.required && <span className="text-red-500 ml-0.5">*</span>}
             </label>
-            <input
-              type={f.type === 'date' ? 'date' : 'text'}
-              value={headerData[f.name] ?? ''}
-              onChange={(e) => setHeaderData((p) => ({ ...p, [f.name]: e.target.value }))}
-              placeholder={f.placeholder ?? ''}
-              disabled={busy}
-              className="input"
-            />
+            {f.type === 'date' ? (
+              <CalendarPicker
+                value={(headerData[f.name] as string | undefined) || undefined}
+                onChange={(val) => setHeaderData((p) => ({ ...p, [f.name]: val }))}
+                disabled={busy}
+                required={f.required}
+              />
+            ) : (
+              <input
+                type="text"
+                value={headerData[f.name] ?? ''}
+                onChange={(e) => setHeaderData((p) => ({ ...p, [f.name]: e.target.value }))}
+                placeholder={f.placeholder ?? ''}
+                disabled={busy}
+                className="input"
+              />
+            )}
           </div>
         ))}
       </div>

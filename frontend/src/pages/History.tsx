@@ -8,6 +8,7 @@ import ConfirmDialog from '../components/common/ConfirmDialog';
 import { useLang } from '../context/LanguageContext';
 import { templateLabel } from '../config/templateLabels';
 import RingoLoader from '../components/common/RingoLoader';
+import PatternBadge from '../components/common/PatternBadge';
 import { Sk } from '../components/common/Skeleton';
 
 interface RowTextPreview { label: string; label_en: string; value: string }
@@ -25,6 +26,7 @@ interface Application {
   template_name: string;
   template_code?: string;
   has_settlement?: boolean;
+  pattern_id?: number;
   created_at: string;
   row_preview?: RowPreview | null;
 }
@@ -321,6 +323,7 @@ export default function History() {
                         <p className="text-sm font-semibold text-warmgray-800 truncate">
                           {templateLabel(app.template_code, lang, app.template_name)}
                         </p>
+                        <PatternBadge patternId={app.pattern_id} />
                         <span className={cls}>{label}</span>
                         {phaseBadge && (
                           <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${phaseBadge.cls}`}>

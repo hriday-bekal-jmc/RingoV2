@@ -58,7 +58,8 @@ router.get('/:code', async (req: Request, res: Response): Promise<void> => {
   try {
     const code = req.params['code'] as string;
     const result = await query(
-      `SELECT id, code, title, title_ja, schema_definition, settlement_schema, component_type
+      `SELECT id, code, title, title_ja, pattern_id, schema_definition, settlement_schema,
+              component_type, icon, gradient, description_ja, description_en
        FROM form_templates WHERE code = $1 AND is_active = TRUE`,
       [code.toUpperCase()],
     );

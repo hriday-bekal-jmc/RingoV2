@@ -7,12 +7,13 @@ import Layout from '../components/common/Layout';
 import Toast, { useToast } from '../components/common/Toast';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import { useLang } from '../context/LanguageContext';
-import { optionLabel, type Lang } from '../i18n';
+import PatternBadge from '../components/common/PatternBadge';
 import { useAuth } from '../context/AuthContext';
 import RingoLoader from '../components/common/RingoLoader';
 import { Sk } from '../components/common/Skeleton';
 import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
 import TransportationDetail from '../components/forms/TransportationDetail';
+import { FieldValueContent, isLongField } from '../components/forms/FieldValueDisplay';
 import CollapsibleComment from '../components/common/CollapsibleComment';
 import UserAvatar from '../components/common/UserAvatar';
 
@@ -43,6 +44,7 @@ interface Application {
   row_preview?: RowPreview | null;
   created_at: string;
   template_name: string;
+  pattern_id?: number;
   applicant_name?: string;
   applicant_avatar?: string | null;
   department_name?: string;
@@ -118,11 +120,9 @@ function FormDataViewer({ formData, schema, tFn }: {
   schema: { fields: FormField[] } | null;
   tFn: (k: any) => string;
 }) {
-  const { lang } = useLang();
   const fields = schema?.fields ?? [];
 
   if (fields.length === 0) {
-    // Schema unavailable — render raw key/value but still detect file URLs
     return (
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
         {Object.entries(formData).map(([k, v]) => {
@@ -145,24 +145,16 @@ function FormDataViewer({ formData, schema, tFn }: {
     <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
       {fields.map((f) => {
         const val = formData[f.name];
-        // Treat as file if schema says 'file' OR value looks like a file URL
-        const isFile = f.type === 'file' || isFileValue(val);
-        const isRepeat = f.type === 'repeat_group';
-        const isLong = isRepeat || f.type === 'textarea' || (typeof val === 'string' && !isFile && val.length > 60);
-
+        const isLong = isLongField(f, val);
         return (
           <div key={f.name} className={isLong ? 'col-span-full' : ''}>
             <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-0.5">{f.label}</dt>
             <dd className="text-sm text-warmgray-800 break-words">
-              {isRepeat ? (
-                <RepeatGroupDisplay field={f} value={val} compact />
-              ) : isFile && val ? (
-                renderFileLinks(val, tFn('attach_label'))
-              ) : val != null && val !== '' ? (
-                <span className={isLong ? 'block whitespace-pre-wrap leading-relaxed' : ''}>{optionLabel(f, val, lang) || String(val)}</span>
-              ) : (
-                <span className="text-warmgray-300 text-xs">{tFn('not_entered')}</span>
-              )}
+              <FieldValueContent
+                field={f}
+                value={val}
+                renderRepeat={(field, value) => <RepeatGroupDisplay field={field} value={value} compact />}
+              />
             </dd>
           </div>
         );
@@ -185,6 +177,7 @@ interface AppDetailData {
   applicant_name: string;
   applicant_avatar?: string | null;
   created_at: string;
+  pattern_id?: number | null;
   component_type?: string | null;
   applicant_daily_rate?: number | null;
   transfer_date?: string | null;
@@ -285,22 +278,16 @@ function AppDetailPanel({ appId, onClose, tFn, lang }: {
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
         {fields.map((f) => {
           const val = formData[f.name];
-          const isRepeat = f.type === 'repeat_group';
-          const isFile = f.type === 'file' || isFileValue(val);
-          const isLong = isRepeat || f.type === 'textarea' || (typeof val === 'string' && !isFile && val.length > 50);
+          const isLong = isLongField(f, val);
           return (
             <div key={f.name} className={isLong ? 'col-span-full' : ''}>
               <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{f.label}</dt>
               <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3 py-2.5 rounded-xl break-words min-h-[38px]">
-                {isRepeat ? (
-                  <RepeatGroupDisplay field={f} value={val} compact />
-                ) : isFile && val ? (
-                  renderFileLinks(val, tFn('attach_label'))
-                ) : val != null && val !== '' ? (
-                  <span className={isLong ? 'block whitespace-pre-wrap leading-relaxed' : ''}>{optionLabel(f, val, lang as Lang) || String(val)}</span>
-                ) : (
-                  <span className="text-warmgray-300 text-xs">—</span>
-                )}
+                <FieldValueContent
+                  field={f}
+                  value={val}
+                  renderRepeat={(field, value) => <RepeatGroupDisplay field={field} value={value} compact />}
+                />
               </dd>
             </div>
           );
@@ -366,11 +353,7 @@ function AppDetailPanel({ appId, onClose, tFn, lang }: {
                           <span className={STATUS_BADGE_PANEL[data.status] ?? 'badge-draft'}>
                             {statusLabel[data.status] ?? data.status}
                           </span>
-                          {hasSettlement && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700 border border-teal-200/60">
-                              {tFn('two_stage_badge')}
-                            </span>
-                          )}
+                          <PatternBadge patternId={data.pattern_id ?? undefined} size="sm" />
                         </div>
                         <h3 className="text-xl font-bold text-warmgray-800 mt-2 leading-tight">{data.template_name}</h3>
                         <div className="flex items-center gap-2 mt-1.5 text-xs text-warmgray-400 flex-wrap">
@@ -391,7 +374,13 @@ function AppDetailPanel({ appId, onClose, tFn, lang }: {
                     {/* RINGI form data */}
                     <div>
                       <p className="section-title mb-3">{tFn('detail_content')}</p>
-                      {renderFields(data.form_data, data.schema_definition)}
+                      {data.component_type === 'transportation' ? (
+                        <TransportationDetail
+                          formData={data.form_data}
+                          dailyAllowanceRate={data.applicant_daily_rate}
+                          schema={data.schema_definition ?? undefined}
+                        />
+                      ) : renderFields(data.form_data, data.schema_definition)}
                     </div>
                   </div>
 
@@ -533,7 +522,10 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
             <div className="flex items-center gap-3 min-w-0">
               <UserAvatar name={app.applicant_name ?? '?'} avatarUrl={app.applicant_avatar} size={10} />
               <div className="min-w-0">
-                <h3 className="text-lg font-bold text-warmgray-800 leading-tight">{app.template_name}</h3>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-lg font-bold text-warmgray-800 leading-tight">{app.template_name}</h3>
+                  <PatternBadge patternId={app.pattern_id} size="sm" />
+                </div>
                 {app.applicant_name && (
                   <p className="text-xs text-warmgray-500 mt-0.5">
                     {t('approvals_applicant_lbl')}: {app.applicant_name}

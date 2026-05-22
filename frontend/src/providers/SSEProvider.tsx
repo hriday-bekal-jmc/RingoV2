@@ -47,7 +47,8 @@ function keysForApprovalAction(d: ApprovalPayload): KeyList {
     ['dashboard', 'admin-overview'],
     ['pendingApprovals'],
     ['approvalHistory'],
-    ['admin', 'applications'],   // admin list view
+    ['admin', 'applications'],          // admin list view
+    ['accountingSettlements'],          // accounting inbox flips when SETTLEMENT step closes / final approval
   ];
   if (d.applicationId) {
     keys.push(['application', d.applicationId]);
@@ -73,10 +74,9 @@ function keysForApplicationSubmitted(d: SubmitPayload): KeyList {
     keys.push(['application', d.applicationId]);
     keys.push(['admin', 'application', d.applicationId]);
   }
-  // Settlement-stage submits also affect accounting list
-  if (d.type === 'settlement_start' || d.type === 'settlement_resubmit') {
-    keys.push(['accountingSettlements']);
-  }
+  // Settlement-stage submits affect accounting list. Includes pattern_id=2
+  // direct-settlement submits (type='submit') which now create a settlements row.
+  keys.push(['accountingSettlements']);
   return keys;
 }
 
