@@ -86,6 +86,7 @@ interface PendingItem {
   application_id:     string;
   application_number: string | null;
   template_name:      string;
+  template_title_en?: string | null;
   template_code:      string;
   applicant_name:     string;
   created_at:         string;

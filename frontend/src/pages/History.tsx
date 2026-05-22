@@ -24,6 +24,7 @@ interface Application {
   application_number: string | null;
   status: string;
   template_name: string;
+  template_title_en?: string | null;
   template_code?: string;
   has_settlement?: boolean;
   pattern_id?: number;

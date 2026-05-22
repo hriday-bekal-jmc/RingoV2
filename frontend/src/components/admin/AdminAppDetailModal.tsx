@@ -35,6 +35,7 @@ interface ApplicationDetail {
   template_version_number: number | null;
   template_code: string;
   template_name: string;
+  template_title_en?: string | null;
   schema_definition: { fields: FormField[] } | null;
   settlement_schema: { fields: FormField[] } | null;
   has_settlement: boolean;
