@@ -20,6 +20,7 @@ const schema = z.object({
   PGDATABASE: z.string().min(1),
   PG_POOL_MIN: z.coerce.number().int().nonnegative().default(2),
   PG_POOL_MAX: z.coerce.number().int().positive().default(20),
+  PGSSLMODE: z.enum(['disable', 'verify-full']).default('verify-full'),
   // Path to CA bundle (e.g. RDS combined CA). Required in production.
   PGSSLROOTCERT: z.string().optional(),
 
@@ -96,7 +97,14 @@ export const SUPER_ADMIN_EMAILS = new Set(superAdminEmails);
 
 // Production hardening assertions
 if (env.NODE_ENV === 'production') {
-  if (!env.PGSSLROOTCERT) {
+  if (env.PGSSLMODE === 'disable') {
+    const localHosts = new Set(['127.0.0.1', 'localhost', '::1']);
+    if (!localHosts.has(env.PGHOST)) {
+      console.error('[env] PGSSLMODE=disable is only allowed for localhost PostgreSQL in production');
+      process.exit(1);
+    }
+    console.warn('[env] WARNING: PostgreSQL TLS disabled for local loopback connection');
+  } else if (!env.PGSSLROOTCERT) {
     console.warn('[env] WARNING: PGSSLROOTCERT not set — Postgres TLS will use system CAs only');
   } else if (!fs.existsSync(env.PGSSLROOTCERT)) {
     console.error(`[env] PGSSLROOTCERT path does not exist: ${env.PGSSLROOTCERT}`);

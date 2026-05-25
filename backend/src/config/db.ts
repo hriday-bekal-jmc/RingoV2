@@ -8,6 +8,7 @@ const { Pool } = pg;
 // combined CA) when PGSSLROOTCERT is set. rejectUnauthorized=true means
 // MITM-resistant — never silently downgrade.
 function buildSslConfig(): { rejectUnauthorized: boolean; ca?: string } | false {
+  if (env.PGSSLMODE === 'disable') return false;
   if (env.NODE_ENV !== 'production') return false;
   const cfg: { rejectUnauthorized: boolean; ca?: string } = { rejectUnauthorized: true };
   if (env.PGSSLROOTCERT) cfg.ca = fs.readFileSync(env.PGSSLROOTCERT, 'utf8');
