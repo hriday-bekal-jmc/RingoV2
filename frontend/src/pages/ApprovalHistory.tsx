@@ -107,7 +107,7 @@ function DetailPanel({ applicationId, onClose, lang }: { applicationId: string; 
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-warmgray-900/60 backdrop-blur-sm" onClick={onClose} />
 
-      <div className="relative glass rounded-3xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col animate-scale-in overflow-hidden">
+      <div className="relative glass rounded-none md:rounded-3xl shadow-2xl w-full max-w-3xl max-h-[100dvh] md:max-h-[92vh] flex flex-col animate-scale-in overflow-hidden">
 
         {/* Header */}
         <div className="px-4 md:px-7 pt-5 md:pt-6 pb-4 md:pb-5 border-b border-white/30 shrink-0 flex items-center justify-between gap-3">

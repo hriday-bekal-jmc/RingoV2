@@ -133,6 +133,8 @@
            transition-all duration-150
            focus:outline-none focus:ring-2 focus:ring-ringo-400/40 focus:border-ringo-300 focus:bg-white/95 focus:shadow-[0_0_0_3px_rgba(154,46,34,0.12)]
            disabled:bg-white/30 disabled:text-warmgray-400 disabled:cursor-not-allowed;
+    /* iOS Safari zooms into inputs with font-size < 16px — prevent by overriding on touch devices */
+    font-size: max(14px, 1rem);
   }
   /* Custom-styled native select — hides browser chrome, adds brand chevron */
   .select {

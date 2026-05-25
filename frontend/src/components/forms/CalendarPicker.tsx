@@ -149,7 +149,7 @@ export default function CalendarPicker({
 
       {/* Dropdown calendar */}
       {open && (
-        <div className="absolute z-50 mt-1.5 left-0 w-[280px]
+        <div className="absolute z-50 mt-1.5 left-0 w-[min(280px,calc(100vw-32px))]
           bg-white/85 backdrop-blur-2xl border border-warmgray-200/60
           rounded-2xl shadow-[0_8px_28px_rgba(60,40,20,0.16),0_2px_8px_rgba(60,40,20,0.08)]
           p-3 animate-scale-in origin-top-left">

@@ -179,7 +179,7 @@ export default function AdminAppDetailModal({ appId, onClose }: Props) {
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-2 md:p-4">
       <div className="absolute inset-0 bg-warmgray-900/60 backdrop-blur-sm" onClick={onClose} />
 
-      <div className="relative glass rounded-3xl shadow-2xl w-full max-w-5xl max-h-[95vh] md:max-h-[92vh] flex flex-col animate-scale-in overflow-hidden">
+      <div className="relative glass rounded-none md:rounded-3xl shadow-2xl w-full max-w-5xl max-h-[100dvh] md:max-h-[92vh] flex flex-col animate-scale-in overflow-hidden">
 
         {/* Header */}
         <div className="px-5 md:px-7 pt-5 pb-4 border-b border-white/30 shrink-0 flex items-center justify-between gap-4">

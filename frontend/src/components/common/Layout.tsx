@@ -17,8 +17,8 @@ export default function Layout({ title, children }: LayoutProps) {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Header title={title} />
         {/* Tighter padding on mobile, generous on desktop */}
-        {/* pb-24 on mobile adds clearance below bottom tab bar (54px bar + safe-area ~34px) */}
-        <main className="flex-1 p-4 pb-24 md:p-6 md:pb-6 lg:p-8 lg:pb-8 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">{children}</main>
+        {/* pb-[72px] on mobile clears the fixed 52px tab bar + env(safe-area-inset-bottom) */}
+        <main className="flex-1 p-4 pb-[72px] md:p-6 md:pb-6 lg:p-8 lg:pb-8 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">{children}</main>
       </div>
     </div>
   );

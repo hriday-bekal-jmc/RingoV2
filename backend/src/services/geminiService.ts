@@ -13,9 +13,15 @@ import { GoogleGenerativeAI, Part } from '@google/generative-ai';
 import { env } from '../config/env';
 
 export interface OcrResult {
-  date:   string | null;  // ISO 8601 "YYYY-MM-DD" or null if not found
-  amount: number | null;  // integer yen amount, or null if not found
-  raw:    string;         // raw Gemini response for debugging
+  date:    string | null;  // ISO 8601 "YYYY-MM-DD" or null if not found
+  amount:  number | null;  // integer yen amount, or null if not found
+  raw:     string;         // raw Gemini response for debugging
+  custom?: Record<string, string | null>; // semantic custom field extraction results
+}
+
+export interface CustomFieldSpec {
+  name: string;  // target form field name
+  hint: string;  // plain-language description for AI (e.g. "store or vendor name")
 }
 
 let _client: GoogleGenerativeAI | null = null;
@@ -45,6 +51,55 @@ Rules:
 - If the receipt shows amounts in other currencies, convert to the displayed number as-is (do not convert currencies).
 - Do not include any explanation, markdown, or extra text — only the JSON object.
 `.trim();
+
+// Semantic extraction for custom (non-date, non-amount) fields.
+// Uses Gemini vision to find text matching each field's hint description.
+export async function extractCustomFields(
+  imageBuffer: Buffer,
+  mimeType: string,
+  fields: CustomFieldSpec[],
+): Promise<Record<string, string | null>> {
+  if (fields.length === 0) return {};
+  if (!env.GEMINI_API_KEY) return Object.fromEntries(fields.map((f) => [f.name, null]));
+
+  const supportedImageTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+  const effectiveMime = supportedImageTypes.includes(mimeType) ? mimeType : 'image/jpeg';
+
+  const fieldList = fields.map((f) => `- "${f.name}": ${f.hint}`).join('\n');
+  const returnShape = `{\n${fields.map((f) => `  "${f.name}": "extracted text or null"`).join(',\n')}\n}`;
+
+  const prompt = `You are reading a document image (receipt, invoice, or business document).
+Extract the following pieces of information. For each field, find text in the document that best matches the description.
+
+Fields to extract:
+${fieldList}
+
+Return ONLY a JSON object in this exact format:
+${returnShape}
+
+Rules:
+- Return null (not a string "null") for any field you cannot confidently find.
+- Extract text exactly as it appears in the document.
+- Do not add explanation, markdown fences, or any text outside the JSON.`.trim();
+
+  const client = getClient();
+  const model   = client.getGenerativeModel({ model: env.GEMINI_MODEL });
+  const imagePart: Part = {
+    inlineData: { data: imageBuffer.toString('base64'), mimeType: effectiveMime },
+  };
+
+  try {
+    const result  = await model.generateContent([prompt, imagePart]);
+    const raw     = result.response.text().trim();
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    const parsed  = JSON.parse(cleaned) as Record<string, unknown>;
+    return Object.fromEntries(
+      fields.map((f) => [f.name, typeof parsed[f.name] === 'string' ? (parsed[f.name] as string) : null]),
+    );
+  } catch {
+    return Object.fromEntries(fields.map((f) => [f.name, null]));
+  }
+}
 
 export async function extractReceiptData(
   imageBuffer: Buffer,

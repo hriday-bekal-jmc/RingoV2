@@ -101,8 +101,18 @@ interface FormField {
   target_date_field?: string;
   /** ai_file_reader: form field name to auto-fill with extracted amount (integer ¥) */
   target_amount_field?: string;
+  /** ai_file_reader: custom semantic fields — [{target: fieldName, hint: "plain language description"}] */
+  extract_fields?: Array<{ target: string; hint: string }>;
   /** ai_file_reader / file: Drive folder category for uploaded files */
   file_category?: 'receipts' | 'invoices' | 'transportation' | 'other';
+  /** user_picker: sibling field name to auto-set with selected user count */
+  count_field?: string;
+  /** number: safe math formula using sibling field names; implies computed=true */
+  formula?: string;
+  /** repeat_group sum target: child field name whose values are summed */
+  sum_field?: string;
+  /** number: display unit appended after value (e.g. '人', 'km') */
+  unit?: string;
 }
 
 interface FormSchema {
@@ -199,9 +209,11 @@ const FIELD_TYPES = [
   { value: 'route_entry',     label_ja: '交通経路（乗車駅→降車駅・運賃）',   label_en: 'Transport route (from/to/fare)' },
   // AI-assisted file upload — uploads receipt/bill image, runs Gemini OCR, auto-fills target fields
   { value: 'ai_file_reader',  label_ja: 'AI領収書読み取り',                  label_en: 'AI receipt reader' },
+  // Multi-select employees + free-add external names; auto-sets a count sibling field
+  { value: 'user_picker',     label_ja: '参加者選択',                        label_en: 'User picker' },
 ];
 
-const REPEAT_CHILD_FIELD_TYPES = FIELD_TYPES.filter((ft) => !['repeat_group', 'header'].includes(ft.value));
+const REPEAT_CHILD_FIELD_TYPES = FIELD_TYPES.filter((ft) => ft.value !== 'header');
 const DEFAULT_REPEAT_MAX_ROWS = 50;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1162,12 +1174,59 @@ function FieldEditor({
                 <input
                   type="checkbox"
                   checked={field.computed ?? false}
-                  onChange={(e) => onUpdate({ computed: e.target.checked, sum_target: undefined })}
+                  onChange={(e) => onUpdate({ computed: e.target.checked, sum_target: undefined, formula: undefined })}
                 />
                 {lang === 'en' ? 'Auto-sum total (read-only)' : '自動合計（読取専用）'}
               </label>
             )}
           </div>
+
+          {/* Formula — number fields only */}
+          {field.type === 'number' && (
+            <div className="bg-teal-50/60 border border-teal-200/60 rounded-xl p-3 space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-teal-700">
+                {lang === 'en' ? 'Formula (auto-calc)' : '計算式（自動計算）'}
+              </p>
+              <input
+                type="text"
+                value={field.formula ?? ''}
+                onChange={(e) => onUpdate({ formula: e.target.value || undefined, computed: e.target.value ? true : field.computed })}
+                placeholder={lang === 'en' ? 'e.g. participant_count * 2000' : '例）participant_count * 2000'}
+                className="w-full rounded-lg border border-teal-200 bg-white/80 px-3 py-1.5 text-xs font-mono outline-none focus:border-teal-400"
+              />
+              <p className="text-[10px] text-teal-600">
+                {lang === 'en'
+                  ? 'Use field names as variables. Supports +−×÷, Math.min(), Math.max().'
+                  : 'フィールド名を変数として使用。+−×÷、Math.min()、Math.max() 対応。'}
+              </p>
+            </div>
+          )}
+
+          {/* User picker settings */}
+          {field.type === 'user_picker' && (
+            <div className="bg-violet-50/60 border border-violet-200/60 rounded-xl p-3 space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-violet-700">
+                {lang === 'en' ? 'User picker options' : '参加者選択オプション'}
+              </p>
+              <div className="space-y-1">
+                <label className="text-[10px] font-semibold text-warmgray-500 uppercase tracking-wide">
+                  {lang === 'en' ? 'Auto-set count field' : '人数自動入力先フィールド名'}
+                </label>
+                <input
+                  type="text"
+                  value={field.count_field ?? ''}
+                  onChange={(e) => onUpdate({ count_field: e.target.value || undefined })}
+                  placeholder={lang === 'en' ? 'e.g. participant_count' : '例）participant_count'}
+                  className="w-full rounded-lg border border-violet-200 bg-white/80 px-3 py-1.5 text-xs font-mono outline-none focus:border-violet-400"
+                />
+                <p className="text-[10px] text-violet-500">
+                  {lang === 'en'
+                    ? 'When set, this number field is automatically updated with the selected user count.'
+                    : '設定すると、選択人数がこのフィールドに自動入力されます。'}
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Show in row */}
           <div className="flex items-center gap-4 flex-wrap">
@@ -1328,6 +1387,66 @@ function FieldEditor({
                   />
                 </div>
               </div>
+              {/* Custom semantic extraction fields */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-violet-700">
+                    {lang === 'en' ? 'Custom AI fields (semantic)' : 'カスタムAI抽出フィールド（意味検索）'}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => onUpdate({ extract_fields: [...(field.extract_fields ?? []), { target: '', hint: '' }] })}
+                    className="text-[11px] font-semibold text-violet-700 hover:text-violet-900"
+                  >
+                    + {lang === 'en' ? 'Add field' : 'フィールド追加'}
+                  </button>
+                </div>
+                <p className="text-[10px] text-violet-500">
+                  {lang === 'en'
+                    ? 'AI uses the hint to semantically find matching text in the document. Date and amount are always extracted by regex above.'
+                    : 'AIはヒントをもとに文書内の一致テキストを意味的に検索します。日付・金額は上記のregex抽出が優先されます。'}
+                </p>
+                {(field.extract_fields ?? []).length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="grid grid-cols-2 gap-1 text-[10px] font-semibold text-violet-600 uppercase tracking-wide px-1">
+                      <span>{lang === 'en' ? 'Field name (target)' : 'フィールド名（入力先）'}</span>
+                      <span>{lang === 'en' ? 'AI hint (what to look for)' : 'AIヒント（何を探すか）'}</span>
+                    </div>
+                    {(field.extract_fields ?? []).map((ef, i) => (
+                      <div key={i} className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={ef.target}
+                          onChange={(e) => {
+                            const next = [...(field.extract_fields ?? [])];
+                            next[i] = { ...ef, target: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') };
+                            onUpdate({ extract_fields: next });
+                          }}
+                          placeholder="vendor_name"
+                          className="input text-xs font-mono flex-1 min-w-0"
+                        />
+                        <input
+                          type="text"
+                          value={ef.hint}
+                          onChange={(e) => {
+                            const next = [...(field.extract_fields ?? [])];
+                            next[i] = { ...ef, hint: e.target.value };
+                            onUpdate({ extract_fields: next });
+                          }}
+                          placeholder={lang === 'en' ? 'store or vendor name' : '店名または業者名'}
+                          className="input text-xs flex-1 min-w-0"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => onUpdate({ extract_fields: (field.extract_fields ?? []).filter((_, j) => j !== i) })}
+                          className="text-red-400 hover:text-red-600 text-sm shrink-0"
+                        >×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="label text-violet-700">
                   {lang === 'en' ? 'Drive folder category' : 'Driveフォルダカテゴリ'}
@@ -1641,6 +1760,9 @@ function RepeatGroupFieldsEditor({
 }) {
   const { lang } = useLang();
   const childFields = field.fields ?? [];
+  const [expandedChildren, setExpandedChildren] = useState<Set<number>>(new Set());
+  const toggleChildExpand = (idx: number) =>
+    setExpandedChildren((prev) => { const next = new Set(prev); next.has(idx) ? next.delete(idx) : next.add(idx); return next; });
 
   const updateChild = (idx: number, patch: Partial<FormField>) => {
     onUpdate({ fields: childFields.map((f, i) => i === idx ? { ...f, ...patch } : f) });
@@ -1657,6 +1779,19 @@ function RepeatGroupFieldsEditor({
 
   const setChildType = (idx: number, type: string) => {
     const child = childFields[idx];
+    if (type === 'repeat_group') {
+      updateChild(idx, {
+        type,
+        fields: child.fields ?? [],
+        min_rows: child.min_rows ?? 0,
+        max_rows: child.max_rows ?? DEFAULT_REPEAT_MAX_ROWS,
+        options: undefined,
+        multiple: undefined,
+        computed: undefined,
+        sum_target: undefined,
+      });
+      return;
+    }
     updateChild(idx, {
       type,
       options: ['select', 'checkbox'].includes(type) ? (child.options ?? []) : undefined,
@@ -1664,6 +1799,8 @@ function RepeatGroupFieldsEditor({
       computed: undefined,
       sum_target: type === 'number' ? child.sum_target : undefined,
       fields: undefined,
+      min_rows: undefined,
+      max_rows: undefined,
     });
   };
 
@@ -1746,6 +1883,7 @@ function RepeatGroupFieldsEditor({
                   </select>
                   <button type="button" onClick={() => moveChild(idx, -1)} disabled={idx === 0} className="btn-ghost text-xs px-2 disabled:opacity-30">▲</button>
                   <button type="button" onClick={() => moveChild(idx, 1)} disabled={idx === childFields.length - 1} className="btn-ghost text-xs px-2 disabled:opacity-30">▼</button>
+                  <button type="button" onClick={() => toggleChildExpand(idx)} className="btn-ghost text-xs px-2">{expandedChildren.has(idx) ? '−' : '⚙'}</button>
                   <button type="button" onClick={() => removeChild(idx)} className="text-red-400 hover:text-red-600 text-sm">×</button>
                 </div>
                 {duplicate && (
@@ -1777,7 +1915,98 @@ function RepeatGroupFieldsEditor({
                       {lang === 'en' ? 'Multiple files' : '複数ファイル'}
                     </label>
                   )}
+                  {child.type === 'number' && (
+                    <label className="flex items-center gap-1.5 text-xs font-semibold text-warmgray-600">
+                      <input
+                        type="checkbox"
+                        checked={child.computed ?? false}
+                        onChange={(e) => updateChild(idx, { computed: e.target.checked, sum_target: undefined, formula: undefined })}
+                      />
+                      {lang === 'en' ? 'Auto-sum total' : '自動合計'}
+                    </label>
+                  )}
                 </div>
+
+                {/* Expanded settings panel */}
+                {expandedChildren.has(idx) && (
+                  <div className="pt-2 border-t border-warmgray-100 space-y-2">
+                    <input
+                      type="text"
+                      value={child.label_en ?? ''}
+                      onChange={(e) => updateChild(idx, { label_en: e.target.value || undefined })}
+                      className="input text-xs w-full"
+                      placeholder="English label"
+                    />
+                    {['text', 'textarea', 'number', 'date'].includes(child.type) && (
+                      <input
+                        type="text"
+                        value={child.placeholder ?? ''}
+                        onChange={(e) => updateChild(idx, { placeholder: e.target.value || undefined })}
+                        className="input text-xs w-full"
+                        placeholder={lang === 'en' ? 'Placeholder text' : 'プレースホルダー'}
+                      />
+                    )}
+                    {child.type === 'number' && (
+                      <input
+                        type="text"
+                        value={child.unit ?? ''}
+                        onChange={(e) => updateChild(idx, { unit: e.target.value || undefined })}
+                        className="input text-xs w-full"
+                        placeholder={lang === 'en' ? 'Unit (e.g. 人, km)' : '単位（例：人、km）'}
+                      />
+                    )}
+                    {child.type === 'number' && (
+                      <input
+                        type="text"
+                        value={child.formula ?? ''}
+                        onChange={(e) => updateChild(idx, { formula: e.target.value || undefined, computed: e.target.value ? true : child.computed })}
+                        className="input text-xs w-full font-mono"
+                        placeholder={lang === 'en' ? 'Formula (e.g. price * qty)' : '計算式（例：price * qty）'}
+                      />
+                    )}
+                    {child.type === 'ai_file_reader' && (
+                      <>
+                        <input
+                          type="text"
+                          value={child.target_date_field ?? ''}
+                          onChange={(e) => updateChild(idx, { target_date_field: e.target.value || undefined })}
+                          className="input text-xs w-full font-mono"
+                          placeholder={lang === 'en' ? 'Date field to fill (e.g. receipt_date)' : '日付フィールド名（例：receipt_date）'}
+                        />
+                        <input
+                          type="text"
+                          value={child.target_amount_field ?? ''}
+                          onChange={(e) => updateChild(idx, { target_amount_field: e.target.value || undefined })}
+                          className="input text-xs w-full font-mono"
+                          placeholder={lang === 'en' ? 'Amount field to fill (e.g. receipt_amount)' : '金額フィールド名（例：receipt_amount）'}
+                        />
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-semibold text-violet-600">{lang === 'en' ? 'Custom AI fields' : 'カスタムAI抽出'}</span>
+                            <button type="button" onClick={() => updateChild(idx, { extract_fields: [...(child.extract_fields ?? []), { target: '', hint: '' }] })} className="text-[10px] text-violet-600 hover:text-violet-800">+ add</button>
+                          </div>
+                          {(child.extract_fields ?? []).map((ef, ei) => (
+                            <div key={ei} className="flex items-center gap-1">
+                              <input type="text" value={ef.target} onChange={(e) => { const next = [...(child.extract_fields ?? [])]; next[ei] = { ...ef, target: e.target.value }; updateChild(idx, { extract_fields: next }); }} placeholder="field_name" className="input text-xs font-mono flex-1 min-w-0" />
+                              <input type="text" value={ef.hint} onChange={(e) => { const next = [...(child.extract_fields ?? [])]; next[ei] = { ...ef, hint: e.target.value }; updateChild(idx, { extract_fields: next }); }} placeholder="hint" className="input text-xs flex-1 min-w-0" />
+                              <button type="button" onClick={() => updateChild(idx, { extract_fields: (child.extract_fields ?? []).filter((_, j) => j !== ei) })} className="text-red-400 text-sm shrink-0">×</button>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    {child.type === 'user_picker' && (
+                      <input
+                        type="text"
+                        value={child.count_field ?? ''}
+                        onChange={(e) => updateChild(idx, { count_field: e.target.value || undefined })}
+                        className="input text-xs w-full font-mono"
+                        placeholder={lang === 'en' ? 'Count field (e.g. participant_count)' : '人数フィールド名（例：participant_count）'}
+                      />
+                    )}
+                  </div>
+                )}
+
                 {child.type === 'number' && (
                   <div className="bg-teal-50/40 border border-teal-200/40 rounded-xl p-3 space-y-1.5">
                     <div className="flex items-center justify-between gap-2">
@@ -1822,6 +2051,14 @@ function RepeatGroupFieldsEditor({
                     hint={child.type === 'checkbox'
                       ? (lang === 'en' ? 'Empty = single boolean checkbox. Add options for multi-select.' : '空の場合は単一チェック、選択肢ありの場合は複数選択です。')
                       : undefined}
+                  />
+                )}
+                {child.type === 'repeat_group' && (
+                  <RepeatGroupFieldsEditor
+                    field={child}
+                    computedFieldNames={computedFieldNames}
+                    onCreateTotal={() => {/* nested totals not supported at this level */}}
+                    onUpdate={(patch) => updateChild(idx, patch)}
                   />
                 )}
               </div>
@@ -1878,7 +2115,6 @@ function OptionsEditor({
               value={o.label_ja}
               onChange={(e) => update(i, {
                 label_ja: e.target.value,
-                // Backfill missing value (legacy options created before auto-gen)
                 ...(o.value ? {} : { value: genValue() }),
               })}
               className="input text-xs flex-1"

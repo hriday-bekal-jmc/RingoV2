@@ -42,6 +42,7 @@ interface FieldDef {
   row_compare_with?: string;
   computed?:         boolean;
   sum_target?:       string;
+  count_field?:      string;
   options?:          { value: string; label_ja?: string; label_en?: string }[];
   fields?:           FieldDef[]; // repeat_group children (skip for row preview)
 }
@@ -82,6 +83,23 @@ function processField(
         label_en: f.label_en ?? f.label,
         value:    display,
       };
+    }
+    return;
+  }
+
+  if (f.type === 'user_picker' && out.numbers.length < 2) {
+    let arr: unknown[] = [];
+    try {
+      const raw = data[f.name];
+      arr = Array.isArray(raw) ? raw : (typeof raw === 'string' ? JSON.parse(raw) : []);
+    } catch { /* empty */ }
+    if (arr.length > 0) {
+      out.numbers.push({
+        label:        f.label,
+        label_en:     f.label_en ?? f.label,
+        value:        arr.length,
+        is_different: false,
+      });
     }
     return;
   }

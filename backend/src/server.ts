@@ -31,11 +31,33 @@ import accountingRoutes from './routes/accountingRoutes';
 import dashboardRoutes from './routes/dashboardRoutes';
 import avatarRoutes from './routes/avatarRoutes';
 import allowanceRoutes from './routes/allowanceRoutes';
+import userSearchRoutes from './routes/userSearchRoutes';
 // DEV-ONLY: i18n overrides editor (gated by email). Remove on prod cleanup.
 import devRoutes from './routes/devRoutes';
 
 const app: Application = express();
 const PORT = env.PORT;
+
+function sanitizeLogUrl(originalUrl: string): string {
+  try {
+    const parsed = new URL(originalUrl, 'http://local');
+    for (const key of ['code', 'state', 'id_token', 'access_token', 'refresh_token']) {
+      if (parsed.searchParams.has(key)) parsed.searchParams.set(key, '[redacted]');
+    }
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return originalUrl;
+  }
+}
+
+morgan.token('safe-url', (req) => {
+  const expressReq = req as express.Request;
+  return sanitizeLogUrl(expressReq.originalUrl ?? req.url ?? '');
+});
+
+const accessLogFormat = env.NODE_ENV === 'production'
+  ? ':remote-addr - :remote-user [:date[clf]] ":method :safe-url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"'
+  : ':method :safe-url :status :response-time ms - :res[content-length]';
 
 // Authenticated JSON APIs are kept fresh by React Query + SSE, not by browser
 // conditional caching. Disabling Express ETags prevents misleading 304s where
@@ -67,8 +89,8 @@ app.use(cors({
 app.use(express.json({ limit: '2mb' }));
 app.use(cookieParser());
 
-// Structured logging: 'combined' in prod (Apache format), 'dev' locally
-app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+// Access logging with OAuth secrets redacted from query strings.
+app.use(morgan(accessLogFormat));
 
 app.use('/api', (_req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -106,6 +128,7 @@ app.use('/api/accounting',   accountingRoutes);
 app.use('/api/dashboard',    dashboardRoutes);
 app.use('/api/avatars',          avatarRoutes);
 app.use('/api/allowance-rates',  allowanceRoutes);
+app.use('/api/users',            userSearchRoutes);
 // DEV-ONLY: remove on prod cleanup.
 app.use('/api/dev',              devRoutes);
 

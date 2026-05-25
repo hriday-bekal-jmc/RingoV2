@@ -12,6 +12,9 @@ import CalendarPicker from './CalendarPicker';
 import TimePicker from './TimePicker';
 import CustomSelect from './CustomSelect';
 import AiFileReaderInput from './AiFileReaderInput';
+import UserPickerInput from './UserPickerInput';
+import { TRANSPORT_MODE_OPTIONS } from './TransportationForm';
+import { evalFormula, formulaDeps } from '../../utils/formulaEval';
 import { useLang } from '../../context/LanguageContext';
 
 // File URLs are same-origin (vite proxy /api in dev, reverse proxy in prod)
@@ -33,9 +36,16 @@ interface FormField {
   add_label_en?: string;
   computed?: boolean;
   sum_target?: string;
+  sum_field?:  string;   // child field name to aggregate inside repeat_group
+  formula?:    string;   // safe math expression; implies computed
+  count_field?: string;  // user_picker: auto-set sibling field with array length
+  unit?:       string;   // display unit suffix instead of ¥ prefix (e.g. "人" for counts)
   col_span?: 'half' | 'full';
+  show_mode?:         boolean;  // route_entry: show mode selector per row
+  show_copy_return?:  boolean;  // route_entry: show copy-return button (default true)
   target_date_field?:   string;
   target_amount_field?: string;
+  extract_fields?:      Array<{ target: string; hint: string }>;
   file_category?:       string;
   options?: string[] | { value: string; label?: string; label_ja?: string; label_en?: string }[];
   validation?: {
@@ -414,18 +424,9 @@ export default function StandardInput({
         );
       })()}
 
-      {/* Computed total — read-only, driven by DynamicForm auto-sum */}
-      {field.type === 'number' && field.computed && (
-        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-teal-50/60 border border-teal-200/60">
-          <input
-            type="hidden"
-            {...register(field.name, { required: requiredRule, valueAsNumber: true })}
-          />
-          <span className="text-xl font-bold text-teal-700">
-            ¥{((watch ? Number(watch(field.name)) : 0) || 0).toLocaleString('ja-JP')}
-          </span>
-          <span className="text-xs text-teal-500 font-medium">（自動計算）</span>
-        </div>
+      {/* Computed / formula / sum_target — read-only auto-calculated */}
+      {field.type === 'number' && (field.computed || field.formula) && (
+        <ComputedNumberDisplay field={field} watch={watch} setValue={setValue} register={register} />
       )}
 
       {/* File upload — immediate upload, URL stored in hidden field */}
@@ -533,11 +534,91 @@ export default function StandardInput({
         </>
       )}
 
+      {field.type === 'user_picker' && setValue && (
+        <>
+          <input type="hidden" {...register(field.name, { required: requiredRule })} />
+          <UserPickerInput
+            field={field}
+            setValue={setValue}
+            currentValue={watch ? String(watch(field.name) ?? '') : ''}
+            error={typeof error?.message === 'string' ? error.message : undefined}
+          />
+        </>
+      )}
+
       {error && !isDraft && (
         <p className="text-xs text-ringo-500 flex items-center gap-1">
           <span>⚠</span> {typeof error.message === 'string' && error.message ? error.message : 'この項目は必須です'}
         </p>
       )}
+    </div>
+  );
+}
+
+// ── ComputedNumberDisplay ─────────────────────────────────────────────────────
+// Handles three computed number variants:
+//   1. formula  — reactive expression evaluated from sibling field values
+//   2. sum_target + sum_field — sums a child field across a repeat_group array
+//   3. plain computed — set externally (e.g. by user_picker count_field)
+function ComputedNumberDisplay({
+  field, watch, setValue, register,
+}: {
+  field: FormField;
+  watch?: UseFormWatch<Record<string, unknown>>;
+  setValue?: UseFormSetValue<Record<string, unknown>>;
+  register: UseFormRegister<Record<string, unknown>>;
+}) {
+  // Collect formula deps so useEffect only re-runs when they change
+  const deps = useMemo(() => formulaDeps(field.formula ?? ''), [field.formula]);
+
+  // Watch all values for formula evaluation
+  const allValues = watch ? watch() as Record<string, unknown> : {};
+
+  useEffect(() => {
+    if (!setValue) return;
+
+    // Formula takes priority
+    if (field.formula && deps.length > 0) {
+      const numValues: Record<string, number> = {};
+      for (const dep of deps) {
+        const v = allValues[dep];
+        numValues[dep] = typeof v === 'number' ? v : parseFloat(String(v ?? '0')) || 0;
+      }
+      const result = evalFormula(field.formula, numValues);
+      setValue(field.name as never, result as never, { shouldDirty: false });
+      return;
+    }
+
+    // sum_target: sum repeat_group rows by sum_field
+    if (field.sum_target && field.sum_field) {
+      const rows = allValues[field.sum_target];
+      if (Array.isArray(rows)) {
+        const total = rows.reduce((acc: number, row: unknown) => {
+          const r = row as Record<string, unknown>;
+          const v = parseFloat(String(r[field.sum_field!] ?? '0'));
+          return acc + (isFinite(v) ? v : 0);
+        }, 0);
+        setValue(field.name as never, total as never, { shouldDirty: false });
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(deps.map((d) => allValues[d])), allValues[field.sum_target ?? '']]);
+
+  const current = watch ? Number(watch(field.name)) || 0 : 0;
+  const { lang } = useLang();
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-teal-50/60 border border-teal-200/60">
+      {/* Computed fields are auto-set by formula/user_picker — their driver inputs
+          handle required validation. Registering without required avoids spurious
+          "0 is falsy" errors when count/amount is legitimately zero mid-lifecycle. */}
+      <input type="hidden" {...register(field.name, { valueAsNumber: true })} />
+      <span className="text-xl font-bold text-teal-700">
+        {field.unit
+          ? `${current.toLocaleString('ja-JP')} ${field.unit}`
+          : `¥${current.toLocaleString('ja-JP')}`}
+      </span>
+      <span className="text-xs text-teal-500 font-medium">{lang === 'en' ? '(auto)' : '（自動計算）'}</span>
     </div>
   );
 }
@@ -590,10 +671,14 @@ function AllowanceDaysInput({
 }
 
 // ── RouteEntryInput ────────────────────────────────────────────────────────────
-// Reusable transport route picker. Stores array of {id,from_station,to_station,fare}
-// in form field value. Add to any schema with type: 'route_entry'.
-// Total displayed as yen × 2 (round-trip assumption).
-interface RouteRow { id: string; from_station: string; to_station: string; fare: number }
+interface RouteRow {
+  id: string;
+  mode?: string;
+  mode_custom?: string;
+  from_station: string;
+  to_station: string;
+  fare: number;
+}
 
 function RouteEntryInput({
   field,
@@ -611,7 +696,9 @@ function RouteEntryInput({
   const [routes, setRoutes] = useState<RouteRow[]>(() => {
     if (Array.isArray(rawVal)) {
       return (rawVal as RouteRow[]).map((r) => ({
-        id: r.id ?? crypto.randomUUID(),
+        id:           r.id ?? crypto.randomUUID(),
+        mode:         r.mode,
+        mode_custom:  r.mode_custom,
         from_station: r.from_station ?? '',
         to_station:   r.to_station ?? '',
         fare:         Number(r.fare) || 0,
@@ -624,78 +711,129 @@ function RouteEntryInput({
     setValue?.(field.name, routes, { shouldDirty: true, shouldTouch: false, shouldValidate: false });
   }, [routes, field.name, setValue]);
 
-  const update = (i: number, patch: Partial<RouteRow>) =>
+  const update  = (i: number, patch: Partial<RouteRow>) =>
     setRoutes((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-  const add    = () => setRoutes((prev) => [...prev, { id: crypto.randomUUID(), from_station: '', to_station: '', fare: 0 }]);
-  const remove = (i: number) => setRoutes((prev) => prev.filter((_, j) => j !== i));
-  const swap   = (i: number) =>
+  const add     = () => setRoutes((prev) => [...prev, { id: crypto.randomUUID(), from_station: '', to_station: '', fare: 0 }]);
+  const remove  = (i: number) => setRoutes((prev) => prev.filter((_, j) => j !== i));
+  const swap    = (i: number) =>
     setRoutes((prev) => prev.map((r, j) => j === i ? { ...r, from_station: r.to_station, to_station: r.from_station } : r));
+  const copyReturn = () => {
+    const last = routes[routes.length - 1];
+    if (!last) return;
+    setRoutes((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), mode: last.mode, mode_custom: last.mode_custom, from_station: last.to_station, to_station: last.from_station, fare: last.fare },
+    ]);
+  };
 
-  const total = routes.reduce((s, r) => s + (Number(r.fare) || 0), 0) * 2;
+  const total = routes.reduce((s, r) => s + (Number(r.fare) || 0), 0);
+
+  const normalizedOptions = useMemo(() => {
+    const opts = field.options && Array.isArray(field.options) && field.options.length > 0
+      ? field.options as Array<{ value: string; label_ja?: string; label_en?: string; label?: string }>
+      : TRANSPORT_MODE_OPTIONS;
+    return opts.map((o) => ({
+      value: o.value,
+      // Use || so empty string falls through to the other language label or value
+      label: (lang === 'en'
+        ? (o.label_en || o.label_ja)
+        : (o.label_ja || o.label_en)
+      ) || (o as { label?: string }).label || o.value,
+    }));
+  }, [field.options, lang]);
 
   return (
     <div className="space-y-2 rounded-xl border border-ringo-100 bg-ringo-50/40 p-3">
       {routes.map((r, i) => (
-        <div key={r.id} className="flex items-center gap-1.5">
-          <input
-            type="text"
-            value={r.from_station}
-            onChange={(e) => update(i, { from_station: e.target.value })}
-            placeholder={lang === 'ja' ? '乗車駅' : 'From station'}
-            className="input flex-1 min-w-0 text-sm"
-          />
-          <button
-            type="button"
-            onClick={() => swap(i)}
-            title={lang === 'ja' ? '乗降駅を入替' : 'Swap stations'}
-            className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg border border-warmgray-200 bg-white text-warmgray-400 hover:text-ringo-600 hover:border-ringo-300 transition-colors"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-            </svg>
-          </button>
-          <input
-            type="text"
-            value={r.to_station}
-            onChange={(e) => update(i, { to_station: e.target.value })}
-            placeholder={lang === 'ja' ? '降車駅' : 'To station'}
-            className="input flex-1 min-w-0 text-sm"
-          />
-          <div className="relative shrink-0 w-20">
-            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-warmgray-400 pointer-events-none">¥</span>
+        <div key={r.id} className="flex flex-col gap-1.5">
+          {/* Mode row */}
+          {field.show_mode && (
+            <div className="flex items-center gap-2">
+              <CustomSelect
+                value={r.mode ?? ''}
+                onChange={(val) => update(i, { mode: val, mode_custom: val !== 'other' ? undefined : r.mode_custom })}
+                placeholder={lang === 'en' ? 'Mode' : '交通手段'}
+                options={normalizedOptions}
+                className="text-xs w-full sm:w-auto sm:max-w-[180px]"
+              />
+              {r.mode === 'other' && (
+                <input
+                  type="text"
+                  value={r.mode_custom ?? ''}
+                  onChange={(e) => update(i, { mode_custom: e.target.value })}
+                  placeholder={lang === 'en' ? 'Specify transport' : '交通手段を入力'}
+                  className="input flex-1 text-xs"
+                />
+              )}
+            </div>
+          )}
+          {/* From / swap / to / fare / delete */}
+          <div className="flex items-center gap-1.5">
             <input
-              type="number"
-              min={0}
-              step={1}
-              value={r.fare || ''}
-              onChange={(e) => update(i, { fare: Number(e.target.value) || 0 })}
-              className="input pl-5 text-sm"
+              type="text"
+              value={r.from_station}
+              onChange={(e) => update(i, { from_station: e.target.value })}
+              placeholder={lang === 'ja' ? '乗車駅' : 'From station'}
+              className="input flex-1 min-w-0 text-sm"
             />
-          </div>
-          {routes.length > 1 && (
             <button
               type="button"
-              onClick={() => remove(i)}
-              className="shrink-0 text-warmgray-300 hover:text-red-400 transition-colors"
+              onClick={() => swap(i)}
+              title={lang === 'ja' ? '乗降駅を入替' : 'Swap stations'}
+              className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg border border-warmgray-200 bg-white text-warmgray-400 hover:text-ringo-600 hover:border-ringo-300 transition-colors"
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
               </svg>
             </button>
-          )}
+            <input
+              type="text"
+              value={r.to_station}
+              onChange={(e) => update(i, { to_station: e.target.value })}
+              placeholder={lang === 'ja' ? '降車駅' : 'To station'}
+              className="input flex-1 min-w-0 text-sm"
+            />
+            <div className="relative shrink-0 w-20">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-warmgray-400 pointer-events-none">¥</span>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={r.fare || ''}
+                onChange={(e) => update(i, { fare: Number(e.target.value) || 0 })}
+                className="input pl-5 text-sm"
+              />
+            </div>
+            {routes.length > 1 && (
+              <button type="button" onClick={() => remove(i)} className="shrink-0 text-warmgray-300 hover:text-red-400 transition-colors">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
       ))}
 
-      <div className="flex items-center justify-between pt-1">
-        <button
-          type="button"
-          onClick={add}
-          className="text-xs text-ringo-600 hover:text-ringo-700 font-medium"
-        >
+      <div className="flex items-center gap-2 pt-1 flex-wrap">
+        <button type="button" onClick={add} className="text-xs text-ringo-600 hover:text-ringo-700 font-medium">
           + {lang === 'ja' ? '経路追加' : 'Add route'}
         </button>
-        <span className="text-xs font-semibold text-warmgray-600 tabular-nums">
-          {lang === 'ja' ? '合計（往復）' : 'Total (round-trip)'}: ¥{total.toLocaleString('ja-JP')}
+        {field.show_copy_return !== false && (
+          <button
+            type="button"
+            onClick={copyReturn}
+            disabled={routes.length === 0}
+            className="inline-flex items-center gap-1 rounded-lg border border-dashed border-amber-400/70 bg-amber-50/60 px-2.5 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-40 transition-colors"
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+            </svg>
+            {lang === 'ja' ? '復路コピー' : 'Copy return'}
+          </button>
+        )}
+        <span className="ml-auto text-xs font-semibold text-warmgray-600 tabular-nums">
+          {lang === 'ja' ? '合計' : 'Total'}: ¥{total.toLocaleString('ja-JP')}
         </span>
       </div>
     </div>
@@ -717,7 +855,7 @@ function RepeatGroupInput({
 }) {
   const { lang } = useLang();
   const childFields = useMemo(
-    () => (field.fields ?? []).filter((f) => f.type !== 'repeat_group' && f.type !== 'header'),
+    () => (field.fields ?? []).filter((f) => f.type !== 'header'),
     [field.fields],
   );
   const minRows = Math.max(0, Number(field.min_rows ?? ((field.required && !isDraft) ? 1 : 0)) || 0);
@@ -803,7 +941,7 @@ function RepeatGroupInput({
               {childFields.map((child) => (
                 <div
                   key={child.name}
-                  className={`min-w-0 ${child.type === 'textarea' || child.type === 'file' ? 'md:col-span-2' : ''}`}
+                  className={`min-w-0 ${child.type === 'textarea' || child.type === 'file' || child.type === 'ai_file_reader' ? 'md:col-span-2' : ''}`}
                 >
                   <RepeatCell
                     groupName={field.name}
@@ -811,6 +949,7 @@ function RepeatGroupInput({
                     field={child}
                     value={row[child.name]}
                     onChange={(value) => updateCell(rowIndex, child.name, value)}
+                    onFillSibling={(name, value) => updateCell(rowIndex, name, value)}
                   />
                 </div>
               ))}
@@ -833,18 +972,96 @@ function RepeatGroupInput({
   );
 }
 
+// Inline 1-level nested repeat group — no react-hook-form registration, just value/onChange
+function NestedRepeatGroupInput({
+  parentGroupName,
+  parentRowIndex,
+  field,
+  value,
+  onChange,
+}: {
+  parentGroupName: string;
+  parentRowIndex: number;
+  field: FormField;
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const { lang } = useLang();
+  const childFields = field.fields ?? [];
+  const rows: Record<string, unknown>[] = Array.isArray(value) ? (value as Record<string, unknown>[]) : [];
+  const addLabel = (lang === 'en' ? (field.add_label_en ?? 'Add row') : (field.add_label ?? '行を追加'));
+  const maxRows = field.max_rows ?? 50;
+
+  const addRow = () => {
+    const blank: Record<string, unknown> = { id: crypto.randomUUID() };
+    childFields.forEach((cf) => { blank[cf.name] = cf.type === 'number' ? 0 : ''; });
+    onChange([...rows, blank]);
+  };
+
+  const removeRow = (ri: number) => onChange(rows.filter((_, i) => i !== ri));
+
+  const updateCell = (ri: number, name: string, val: unknown) => {
+    onChange(rows.map((r, i) => i === ri ? { ...r, [name]: val } : r));
+  };
+
+  return (
+    <div className="rounded-xl border border-warmgray-200 bg-warmgray-50/50 p-2 space-y-2">
+      {rows.length === 0 ? (
+        <p className="text-xs text-warmgray-400 text-center py-2">
+          {lang === 'en' ? 'No rows yet' : '行がありません'}
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {rows.map((row, ri) => (
+            <div key={ri} className="rounded-lg border border-white/80 bg-white/70 p-2 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-warmgray-400">#{ri + 1}</span>
+                <button type="button" onClick={() => removeRow(ri)} className="text-red-400 hover:text-red-600 text-xs">×</button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                {childFields.map((cf) => (
+                  <RepeatCell
+                    key={cf.name}
+                    groupName={`${parentGroupName}_${parentRowIndex}_${field.name}`}
+                    rowIndex={ri}
+                    field={cf}
+                    value={row[cf.name]}
+                    onChange={(val) => updateCell(ri, cf.name, val)}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {rows.length < maxRows && (
+        <button
+          type="button"
+          onClick={addRow}
+          className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-warmgray-300 bg-white/60 py-1.5 text-xs font-semibold text-warmgray-500 hover:border-ringo-300 hover:text-ringo-600 transition-colors"
+        >
+          <span className="text-base leading-none">+</span>
+          {addLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function RepeatCell({
   groupName,
   rowIndex,
   field,
   value,
   onChange,
+  onFillSibling,
 }: {
   groupName: string;
   rowIndex: number;
   field: FormField;
   value: unknown;
   onChange: (value: unknown) => void;
+  onFillSibling?: (name: string, value: unknown) => void;
 }) {
   const { lang } = useLang();
   const label = localizedLabel(field, lang);
@@ -963,6 +1180,27 @@ function RepeatCell({
           onChange={onChange}
         />
       )}
+
+      {field.type === 'ai_file_reader' && (
+        <RepeatAiFileInput
+          groupName={groupName}
+          rowIndex={rowIndex}
+          field={field}
+          value={String(value ?? '')}
+          onChange={(v) => onChange(v)}
+          onFillSibling={onFillSibling}
+        />
+      )}
+
+      {field.type === 'repeat_group' && (
+        <NestedRepeatGroupInput
+          parentGroupName={groupName}
+          parentRowIndex={rowIndex}
+          field={field}
+          value={value}
+          onChange={onChange}
+        />
+      )}
     </div>
   );
 }
@@ -1066,6 +1304,222 @@ function RepeatFileInput({
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+// ── RepeatAiFileInput ─────────────────────────────────────────────────────────
+// AI file reader variant for inside repeat_group rows. Unlike top-level
+// AiFileReaderInput (which uses UseFormSetValue), this works with value/onChange
+// callback pattern. OCR fills sibling row fields via onFillSibling.
+function RepeatAiFileInput({
+  groupName,
+  rowIndex,
+  field,
+  value,
+  onChange,
+  onFillSibling,
+}: {
+  groupName: string;
+  rowIndex: number;
+  field: FormField;
+  value: string;
+  onChange: (value: string) => void;
+  onFillSibling?: (name: string, value: unknown) => void;
+}) {
+  const { lang } = useLang();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadErr, setUploadErr] = useState<string | null>(null);
+  const [ocrFileId, setOcrFileId] = useState<string | null>(null);
+  const [ocring, setOcring] = useState(false);
+  const [ocrErr, setOcrErr] = useState<string | null>(null);
+  const [ocrPreview, setOcrPreview] = useState<Array<{key:string;label:string;value:string;type:'date'|'amount'|'custom';enabled:boolean}> | null>(null);
+  const newUploadIds = useRef<Set<string>>(new Set());
+
+  const [files, setFiles] = useState<UploadedFile[]>(() =>
+    value.split(',').filter(Boolean).map((url, i) => parseFileUrl(url.trim(), i)),
+  );
+
+  const syncFiles = (next: UploadedFile[]) => {
+    setFiles(next);
+    onChange(next.map((f) => f.url).join(','));
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files;
+    if (!selected || selected.length === 0) return;
+    setUploading(true);
+    setUploadErr(null);
+    setOcrPreview(null);
+    setOcrErr(null);
+
+    const fd = new FormData();
+    Array.from(selected).forEach((f) => fd.append('files', f));
+    fd.append('field_name', `${groupName}.${rowIndex}.${field.name}`);
+    if (field.file_category) fd.append('folder', field.file_category);
+
+    try {
+      const res = await apiClient.post('/uploads', fd);
+      const uploaded = (res.data.files as UploadedFile[]);
+      uploaded.forEach((f) => newUploadIds.current.add(f.id));
+      const next = field.multiple ? [...files, ...uploaded] : uploaded.slice(-1);
+      syncFiles(next);
+      if (uploaded.length > 0) { setOcrFileId(uploaded[0].id); setOcrPreview(null); }
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setUploadErr(msg ?? (lang === 'en' ? 'Upload failed' : 'アップロードに失敗しました'));
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const removeFile = (id: string) => {
+    if (newUploadIds.current.has(id)) {
+      newUploadIds.current.delete(id);
+      apiClient.delete(`/files/${id}`).catch(() => {});
+    }
+    const next = files.filter((f) => f.id !== id);
+    syncFiles(next);
+    if (ocrFileId === id) { setOcrFileId(null); setOcrPreview(null); }
+  };
+
+  const runOcr = async () => {
+    if (!ocrFileId) return;
+    setOcring(true);
+    setOcrErr(null);
+    setOcrPreview(null);
+    try {
+      const res = await apiClient.post(`/files/${ocrFileId}/ocr`, {
+        extract_fields: (field.extract_fields ?? []).map((ef) => ({ name: ef.target, hint: ef.hint })),
+      });
+      const { date, amount, custom } = res.data as { date: string | null; amount: number | null; custom: Record<string, string | null> };
+      const items: typeof ocrPreview = [];
+      if (field.target_date_field) items.push({ key: field.target_date_field, label: lang === 'en' ? 'Date' : '日付', value: date ?? '', type: 'date', enabled: !!date });
+      if (field.target_amount_field) items.push({ key: field.target_amount_field, label: lang === 'en' ? 'Amount' : '金額', value: amount !== null ? String(amount) : '', type: 'amount', enabled: amount !== null });
+      for (const ef of (field.extract_fields ?? [])) {
+        const found = custom?.[ef.target] ?? null;
+        items.push({ key: ef.target, label: ef.hint, value: found ?? '', type: 'custom', enabled: !!found });
+      }
+      setOcrPreview(items);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setOcrErr(msg ?? (lang === 'en' ? 'OCR failed' : 'OCR処理に失敗しました'));
+    } finally {
+      setOcring(false);
+    }
+  };
+
+  const applyOcrPreview = () => {
+    if (!ocrPreview) return;
+    for (const item of ocrPreview) {
+      if (!item.enabled || !item.value) continue;
+      if (item.type === 'amount') {
+        const n = parseInt(item.value.replace(/[^0-9]/g, ''), 10);
+        if (!isNaN(n)) onFillSibling?.(item.key, n);
+      } else {
+        onFillSibling?.(item.key, item.value);
+      }
+    }
+    setOcrPreview(null);
+  };
+
+  const canOcr = !!ocrFileId && !!(field.target_date_field || field.target_amount_field || (field.extract_fields?.length ?? 0) > 0);
+
+  return (
+    <div className="space-y-2">
+      <div
+        onClick={() => fileInputRef.current?.click()}
+        className={`flex items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-4 cursor-pointer transition-colors
+          ${uploadErr ? 'border-red-300 bg-red-50/40' : 'border-violet-300/70 bg-violet-50/40 hover:bg-violet-50/80'}`}
+      >
+        <svg className="w-5 h-5 text-violet-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+        </svg>
+        <span className="text-xs font-semibold text-violet-700">
+          {uploading
+            ? (lang === 'en' ? 'Uploading…' : 'アップロード中…')
+            : (lang === 'en' ? 'Upload receipt' : '領収書をアップロード')}
+        </span>
+      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple={field.multiple}
+        accept="image/jpeg,image/png,image/webp,image/gif"
+        className="sr-only"
+        onChange={handleFileChange}
+        disabled={uploading}
+      />
+      {uploadErr && <p className="text-xs text-red-500">⚠ {uploadErr}</p>}
+
+      {files.length > 0 && (
+        <ul className="space-y-1.5">
+          {files.map((f) => (
+            <li key={f.id} className="flex items-center gap-2 bg-white/70 border border-white/80 rounded-lg px-3 py-2">
+              <svg className="w-4 h-4 text-violet-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909" />
+              </svg>
+              <a href={f.url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 truncate text-xs font-semibold text-violet-700 hover:text-violet-900">
+                {f.original_name}
+              </a>
+              <button type="button" onClick={() => removeFile(f.id)} className="text-warmgray-400 hover:text-red-500 text-sm leading-none">×</button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {canOcr && !ocrPreview && (
+        <button
+          type="button"
+          onClick={runOcr}
+          disabled={ocring}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-violet-700 disabled:opacity-50 transition-colors"
+        >
+          {ocring ? (
+            <>
+              <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+              </svg>
+              {lang === 'en' ? 'Reading…' : '読み取り中…'}
+            </>
+          ) : (
+            <>{lang === 'en' ? 'AI Auto-fill' : 'AI自動入力'}</>
+          )}
+        </button>
+      )}
+
+      {ocrPreview && (
+        <div className="rounded-xl border border-violet-200/70 bg-violet-50/60 p-2.5 space-y-1.5">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-violet-700">
+            {lang === 'en' ? 'AI found' : 'AI読み取り結果'}
+          </p>
+          {ocrPreview.map((item) => (
+            <div key={item.key} className={`flex items-center gap-1.5 rounded-lg px-2 py-1 ${item.enabled ? 'bg-white/80 border border-violet-100' : 'opacity-40'}`}>
+              <input type="checkbox" checked={item.enabled} onChange={(e) => setOcrPreview((p) => p?.map((x) => x.key === item.key ? { ...x, enabled: e.target.checked } : x) ?? null)} className="w-3 h-3 accent-violet-500 shrink-0" />
+              <span className="text-[10px] text-warmgray-500 shrink-0 w-16 truncate">{item.label}</span>
+              <input
+                type={item.type === 'date' ? 'date' : 'text'}
+                value={item.value}
+                onChange={(e) => setOcrPreview((p) => p?.map((x) => x.key === item.key ? { ...x, value: e.target.value, enabled: true } : x) ?? null)}
+                className="input text-xs flex-1 min-w-0 py-0.5"
+              />
+            </div>
+          ))}
+          <div className="flex gap-1.5 pt-0.5">
+            <button type="button" onClick={applyOcrPreview} className="flex-1 rounded-lg bg-violet-600 py-1 text-xs font-bold text-white hover:bg-violet-700">
+              {lang === 'en' ? 'Fill' : '入力'}
+            </button>
+            <button type="button" onClick={() => setOcrPreview(null)} className="rounded-lg border border-warmgray-200 px-2 py-1 text-xs text-warmgray-500 hover:bg-warmgray-50">
+              {lang === 'en' ? '×' : '×'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {ocrErr && <p className="text-xs text-red-500">⚠ {ocrErr}</p>}
     </div>
   );
 }

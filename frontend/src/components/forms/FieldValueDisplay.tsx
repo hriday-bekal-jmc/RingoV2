@@ -9,6 +9,7 @@
  */
 import { useLang } from '../../context/LanguageContext';
 import { optionLabel } from '../../i18n';
+import { TRANSPORT_MODE_OPTIONS } from './TransportationForm';
 
 export interface DisplayField {
   name: string;
@@ -33,6 +34,7 @@ export function isLongField(field: DisplayField, value: unknown): boolean {
     field.type === 'textarea' ||
     field.type === 'file' ||
     field.type === 'ai_file_reader' ||
+    field.type === 'user_picker' ||
     (typeof value === 'string' && !isFileValue(value) && value.length > 60)
   );
 }
@@ -63,32 +65,79 @@ function FileLinks({ val }: { val: unknown }) {
   );
 }
 
-interface RouteRow { id?: string; from_station?: string; to_station?: string; fare?: number }
+interface RouteRow { id?: string; mode?: string; mode_custom?: string; from_station?: string; to_station?: string; fare?: number }
+
+function ModeLabel({ mode, mode_custom, lang }: { mode?: string; mode_custom?: string; lang: 'ja' | 'en' }) {
+  if (!mode) return null;
+  const opt = TRANSPORT_MODE_OPTIONS.find((o) => o.value === mode);
+  const label = mode === 'other'
+    ? (mode_custom || (lang === 'ja' ? 'その他' : 'Other'))
+    : ((lang === 'en' ? opt?.label_en : opt?.label_ja) ?? mode);
+  return (
+    <span className="inline-flex items-center text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200/60 rounded-full px-2 py-0.5 shrink-0">
+      {label}
+    </span>
+  );
+}
 
 function RouteEntryDisplay({ value, lang }: { value: unknown; lang: 'ja' | 'en' }) {
   const routes = Array.isArray(value)
     ? (value as RouteRow[]).filter((r) => r.from_station || r.to_station)
     : [];
   if (routes.length === 0) return <span className="text-warmgray-300 text-xs">—</span>;
-  const total = routes.reduce((s, r) => s + (Number(r.fare) || 0), 0) * 2;
+  const total = routes.reduce((s, r) => s + (Number(r.fare) || 0), 0);
   return (
     <div className="space-y-1.5">
       {routes.map((r, i) => (
-        <div key={i} className="flex items-center gap-2 text-sm flex-wrap">
-          <span className="font-medium text-warmgray-700 min-w-0 truncate">{r.from_station || '—'}</span>
-          <svg className="w-3.5 h-3.5 text-warmgray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-          </svg>
-          <span className="font-medium text-warmgray-700 min-w-0 truncate">{r.to_station || '—'}</span>
-          <span className="ml-auto text-ringo-600 font-bold tabular-nums shrink-0">
-            ¥{(Number(r.fare) || 0).toLocaleString('ja-JP')}
-          </span>
+        <div key={i} className="flex flex-col gap-0.5">
+          {r.mode && (
+            <div>
+              <ModeLabel mode={r.mode} mode_custom={r.mode_custom} lang={lang} />
+            </div>
+          )}
+          <div className="flex items-center gap-2 text-sm flex-wrap">
+            <span className="font-medium text-warmgray-700 min-w-0 truncate">{r.from_station || '—'}</span>
+            <svg className="w-3.5 h-3.5 text-warmgray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+            </svg>
+            <span className="font-medium text-warmgray-700 min-w-0 truncate">{r.to_station || '—'}</span>
+            <span className="ml-auto text-ringo-600 font-bold tabular-nums shrink-0">
+              ¥{(Number(r.fare) || 0).toLocaleString('ja-JP')}
+            </span>
+          </div>
         </div>
       ))}
       <div className="pt-1.5 border-t border-warmgray-100 flex justify-between text-xs font-semibold text-warmgray-600">
-        <span>{lang === 'ja' ? '合計（往復）' : 'Total (round-trip)'}</span>
+        <span>{lang === 'ja' ? '合計' : 'Total'}</span>
         <span className="text-ringo-700 tabular-nums">¥{total.toLocaleString('ja-JP')}</span>
       </div>
+    </div>
+  );
+}
+
+function UserPickerDisplay({ val, lang }: { val: unknown; lang: 'ja' | 'en' }) {
+  let users: { id?: string; name: string; email?: string; avatar_url?: string }[] = [];
+  try {
+    const parsed = typeof val === 'string' ? JSON.parse(val) : val;
+    if (Array.isArray(parsed)) users = parsed as typeof users;
+  } catch { /* empty */ }
+
+  if (users.length === 0) return <span className="text-warmgray-300 text-xs">—</span>;
+
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-0.5">
+      {users.map((u, i) => (
+        <span key={i} className="inline-flex items-center gap-1.5 bg-violet-50 border border-violet-200/60 rounded-full px-2.5 py-0.5 text-xs font-medium text-violet-800">
+          {u.avatar_url
+            ? <img src={u.avatar_url} alt={u.name} className="w-4 h-4 rounded-full object-cover" />
+            : <span className="w-4 h-4 rounded-full bg-violet-200 text-violet-700 font-bold text-[9px] flex items-center justify-center">{u.name.slice(0,2).toUpperCase()}</span>
+          }
+          {u.name}
+        </span>
+      ))}
+      <span className="text-[10px] text-warmgray-400 self-center">
+        {lang === 'en' ? `${users.length} person(s)` : `${users.length}名`}
+      </span>
     </div>
   );
 }
@@ -124,6 +173,10 @@ export function FieldValueContent({
 
   if (field.type === 'allowance_days') {
     return <span>{formatAllowanceDays(value, lang)}</span>;
+  }
+
+  if (field.type === 'user_picker') {
+    return <UserPickerDisplay val={value} lang={lang} />;
   }
 
   const isFile = field.type === 'file' || field.type === 'ai_file_reader' || isFileValue(value);

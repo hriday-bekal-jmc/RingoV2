@@ -8,11 +8,21 @@ import CustomSelect from './CustomSelect';
 
 export interface TransportRoute {
   id: string;
-  mode?: string;       // transport mode value (e.g. 'train', 'taxi') — optional
+  mode?: string;        // transport mode value (e.g. 'train', 'taxi') — optional
+  mode_custom?: string; // free-text label when mode === 'other'
   from_station: string;
   to_station: string;
   fare: number;
 }
+
+export const TRANSPORT_MODE_OPTIONS = [
+  { value: 'train',    label_ja: '電車・地下鉄', label_en: 'Train / Subway' },
+  { value: 'bus',      label_ja: 'バス',          label_en: 'Bus' },
+  { value: 'taxi',     label_ja: 'タクシー',      label_en: 'Taxi' },
+  { value: 'car',      label_ja: '自家用車',      label_en: 'Private Car' },
+  { value: 'airplane', label_ja: '飛行機',        label_en: 'Airplane' },
+  { value: 'other',    label_ja: 'その他',        label_en: 'Other' },
+];
 
 /**
  * A single daily expense entry.
@@ -79,15 +89,6 @@ interface TransportationFormProps {
 }
 
 // ── Fallback entry fields (used when migration 036 hasn't run yet) ─────────────
-
-const TRANSPORT_MODE_OPTIONS = [
-  { value: 'train',    label_ja: '電車・地下鉄', label_en: 'Train / Subway' },
-  { value: 'bus',      label_ja: 'バス',          label_en: 'Bus' },
-  { value: 'taxi',     label_ja: 'タクシー',      label_en: 'Taxi' },
-  { value: 'car',      label_ja: '自家用車',      label_en: 'Private Car' },
-  { value: 'airplane', label_ja: '飛行機',        label_en: 'Airplane' },
-  { value: 'other',    label_ja: 'その他',        label_en: 'Other' },
-];
 
 const FALLBACK_ALLOWANCE_OPTIONS = [
   { value: '0',   label_ja: '0',   label_en: '0' },
@@ -407,7 +408,7 @@ export default function TransportationForm({
         ...p,
         [name]: [
           ...routes,
-          { id: crypto.randomUUID(), from_station: last.to_station, to_station: last.from_station, fare: last.fare },
+          { id: crypto.randomUUID(), mode: last.mode, mode_custom: last.mode_custom, from_station: last.to_station, to_station: last.from_station, fare: last.fare },
         ],
       };
     });
@@ -440,16 +441,29 @@ export default function TransportationForm({
             <div className="space-y-2.5 rounded-xl border border-ringo-100 bg-ringo-50/40 p-3">
               {currentRoutes.map((route, ri) => (
                 <div key={route.id} className="flex flex-col gap-1.5">
-                  {/* Mode selector row (only when show_mode: true and options provided) */}
-                  {f.show_mode && f.options && f.options.length > 0 && (
-                    <CustomSelect
-                      value={route.mode ?? ''}
-                      onChange={(val) => updateRoute(ri, { ...route, mode: val })}
-                      disabled={busy}
-                      placeholder={lang === 'en' ? 'Mode' : '交通手段'}
-                      options={f.options.map((o) => ({ value: o.value, label: (lang === 'en' ? o.label_en : o.label_ja) ?? o.value }))}
-                      className="text-xs w-full sm:w-auto sm:max-w-[180px]"
-                    />
+                  {/* Mode selector row (only when show_mode: true; falls back to TRANSPORT_MODE_OPTIONS) */}
+                  {f.show_mode && (
+                    <div className="flex items-center gap-2">
+                      <CustomSelect
+                        value={route.mode ?? ''}
+                        onChange={(val) => updateRoute(ri, { ...route, mode: val, mode_custom: val !== 'other' ? undefined : route.mode_custom })}
+                        disabled={busy}
+                        placeholder={lang === 'en' ? 'Mode' : '交通手段'}
+                        options={(f.options && f.options.length > 0 ? f.options : TRANSPORT_MODE_OPTIONS)
+                          .map((o) => ({ value: o.value, label: (lang === 'en' ? o.label_en : o.label_ja) ?? o.value }))}
+                        className="text-xs w-full sm:w-auto sm:max-w-[180px]"
+                      />
+                      {route.mode === 'other' && (
+                        <input
+                          type="text"
+                          value={route.mode_custom ?? ''}
+                          onChange={(e) => updateRoute(ri, { ...route, mode_custom: e.target.value })}
+                          placeholder={lang === 'en' ? 'Specify transport' : '交通手段を入力'}
+                          disabled={busy}
+                          className="input flex-1 text-xs"
+                        />
+                      )}
+                    </div>
                   )}
                   {/* From / swap / to / fare / delete */}
                   <div className="flex items-center gap-1.5 md:gap-2">

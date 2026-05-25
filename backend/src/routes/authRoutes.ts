@@ -235,6 +235,12 @@ router.get('/google/callback', authLimiter, async (req: Request, res: Response):
   const cookieState = req.cookies?.oauth_state as string | undefined;
   res.clearCookie('oauth_state');
   if (!cookieState || !state || cookieState !== state) {
+    console.warn('[auth] rejected OAuth callback: state mismatch', {
+      ip: req.ip,
+      hasCookieState: Boolean(cookieState),
+      hasQueryState: Boolean(state),
+      userAgent: req.get('user-agent') ?? 'unknown',
+    });
     res.redirect(`${FRONTEND}/login?error=oauth_state_mismatch`);
     return;
   }

@@ -9,7 +9,7 @@ import { query } from '../config/db';
 import { isAdminUser, requireAuth } from '../middlewares/authMiddleware';
 import { assertCanReadApp } from '../middlewares/authz';
 import { isDriveEnabled, deleteFromDrive, getDriveFileBuffer } from '../services/driveService';
-import { extractReceiptData } from '../services/geminiService';
+import { extractReceiptData, extractCustomFields, CustomFieldSpec } from '../services/geminiService';
 import { env } from '../config/env';
 
 const UPLOADS_DIR = path.join(__dirname, '../../uploads');
@@ -188,8 +188,21 @@ router.post('/:id/ocr', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const result = await extractReceiptData(imageBuffer, f.mime_type);
-    res.json({ date: result.date, amount: result.amount });
+    // Parse custom fields from body (optional)
+    const rawCustom = req.body?.extract_fields;
+    const customFields: CustomFieldSpec[] = Array.isArray(rawCustom)
+      ? rawCustom.filter((x): x is CustomFieldSpec =>
+          x && typeof x === 'object' && typeof x.name === 'string' && typeof x.hint === 'string',
+        )
+      : [];
+
+    // Run date+amount (regex-validated) and custom semantic extraction in parallel
+    const [result, custom] = await Promise.all([
+      extractReceiptData(imageBuffer, f.mime_type),
+      customFields.length > 0 ? extractCustomFields(imageBuffer, f.mime_type, customFields) : Promise.resolve({}),
+    ]);
+
+    res.json({ date: result.date, amount: result.amount, custom });
   } catch (err) {
     const e = err as { status?: number; message?: string };
     if (e.status) { res.status(e.status).json({ error: e.message }); return; }

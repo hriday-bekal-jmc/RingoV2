@@ -70,10 +70,6 @@ const NAV_SHORT: Record<string, { ja: string; en: string }> = {
   '/admin':            { ja: '管理',     en: 'Admin'   },
 };
 
-// px width per tab cell inside the pill (fixed so sliding pill math is exact)
-const ITEM_W = 58;
-// px — the p-1.5 inset (6px) on each side of the pill container
-const PILL_INSET = 6;
 
 export default function Sidebar() {
   const { user } = useAuth();
@@ -234,47 +230,21 @@ export default function Sidebar() {
       </aside>
 
       {/* ══════════════════════════════════════════════════════════════════════
-          MOBILE floating pill tab bar (<md)
-          Apple-style: centered, floating, frosted glass, sliding indicator
+          MOBILE bottom tab bar (<md)
+          Apple iOS-style: full-width, warm frosted glass, color active state
           ══════════════════════════════════════════════════════════════════════ */}
-      <div
-        className="md:hidden fixed z-50 left-1/2 -translate-x-1/2"
-        style={{ bottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
+      <nav
+        className="md:hidden fixed z-50 bottom-0 left-0 right-0 select-none"
+        style={{
+          background: 'rgba(251, 248, 244, 0.92)',
+          backdropFilter: 'blur(28px) saturate(1.8)',
+          WebkitBackdropFilter: 'blur(28px) saturate(1.8)',
+          borderTop: '1px solid rgba(154, 46, 34, 0.10)',
+          boxShadow: '0 -1px 0 rgba(0,0,0,0.06), 0 -6px 24px rgba(60,30,20,0.07)',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        }}
       >
-        {/* Outer pill container */}
-        <div
-          className="relative flex items-center"
-          style={{
-            background: 'rgba(30, 24, 22, 0.82)',
-            backdropFilter: 'blur(24px) saturate(1.8)',
-            WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
-            borderRadius: '9999px',
-            border: '1px solid rgba(255,255,255,0.10)',
-            boxShadow: '0 8px 40px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.08)',
-            padding: `${PILL_INSET}px`,
-          }}
-        >
-          {/* ── Sliding active indicator pill ── */}
-          {activeIndex >= 0 && (
-            <div
-              aria-hidden
-              style={{
-                position:   'absolute',
-                top:        `${PILL_INSET}px`,
-                bottom:     `${PILL_INSET}px`,
-                width:      `${ITEM_W}px`,
-                left:       `${activeIndex * ITEM_W + PILL_INSET}px`,
-                borderRadius: '9999px',
-                background: 'var(--ringo-gradient)',
-                boxShadow:  '0 2px 12px rgba(154,46,34,0.55)',
-                transition: 'left 380ms cubic-bezier(0.34, 1.45, 0.64, 1)',
-                pointerEvents: 'none',
-                zIndex: 0,
-              }}
-            />
-          )}
-
-          {/* ── Tab items ── */}
+        <div className="flex items-stretch justify-around">
           {perms.navItems.map((item, idx) => {
             const short = NAV_SHORT[item.to];
             const label = short
@@ -287,41 +257,41 @@ export default function Sidebar() {
                 key={item.to}
                 to={item.to}
                 end={item.to === '/dashboard'}
-                style={{ width: `${ITEM_W}px`, position: 'relative', zIndex: 1 }}
-                className="flex flex-col items-center justify-center gap-[3px] py-2 select-none
-                           transition-opacity duration-150 active:opacity-60"
+                className="flex flex-col items-center justify-center gap-[3px] flex-1 min-w-0
+                           py-2.5 transition-opacity duration-150 active:opacity-50"
+                style={{ minHeight: '52px' }}
               >
                 {/* Icon with badge */}
                 <span className="relative flex items-center justify-center">
                   <span
                     className="transition-all duration-200"
                     style={{
-                      color: isActive ? '#fff' : 'rgba(255,255,255,0.42)',
-                      transform: isActive ? 'scale(1.1)' : 'scale(1)',
+                      color: isActive ? 'var(--ringo-600)' : 'rgba(120,110,104,0.65)',
+                      transform: isActive ? 'scale(1.08)' : 'scale(1)',
                     }}
                   >
-                    {ICONS[item.to] ?? (
-                      <span className="w-[18px] h-[18px] text-xs flex items-center justify-center">
-                        {item.icon}
-                      </span>
-                    )}
+                    {/* Render icon at 22px for better mobile legibility */}
+                    {ICONS[item.to]
+                      ? <span className="[&>svg]:w-[22px] [&>svg]:h-[22px]">{ICONS[item.to]}</span>
+                      : <span className="w-[22px] h-[22px] text-sm flex items-center justify-center">{item.icon}</span>
+                    }
                   </span>
+
                   {/* Approval badge */}
                   {item.to === '/approvals' && pendingCount > 0 && (
                     <span
                       className="absolute flex items-center justify-center leading-none font-bold"
                       style={{
-                        top: '-6px',
-                        right: '-8px',
-                        minWidth: '16px',
-                        height: '16px',
-                        padding: '0 3px',
+                        top: '-5px',
+                        right: '-9px',
+                        minWidth: '17px',
+                        height: '17px',
+                        padding: '0 4px',
                         borderRadius: '9999px',
-                        background: isActive ? 'rgba(255,255,255,0.92)' : 'var(--ringo-500)',
-                        color: isActive ? 'var(--ringo-500)' : '#fff',
+                        background: isActive ? 'var(--ringo-500)' : 'var(--ringo-500)',
+                        color: '#fff',
                         fontSize: '9px',
-                        boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
-                        transition: 'background 200ms, color 200ms',
+                        boxShadow: '0 1px 4px rgba(0,0,0,0.18)',
                       }}
                     >
                       {pendingCount > 99 ? '99+' : pendingCount}
@@ -331,10 +301,11 @@ export default function Sidebar() {
 
                 {/* Label */}
                 <span
-                  className="font-semibold leading-none tracking-tight transition-all duration-200"
+                  className="leading-none tracking-tight transition-all duration-200 font-medium"
                   style={{
-                    fontSize: '9px',
-                    color: isActive ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.38)',
+                    fontSize: '10px',
+                    color: isActive ? 'var(--ringo-600)' : 'rgba(120,110,104,0.55)',
+                    fontWeight: isActive ? 600 : 500,
                   }}
                 >
                   {label}
@@ -343,7 +314,7 @@ export default function Sidebar() {
             );
           })}
         </div>
-      </div>
+      </nav>
     </>
   );
 }

@@ -301,7 +301,7 @@ function AppDetailPanel({ appId, onClose, tFn, lang }: {
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-2 md:p-4">
       <div className="absolute inset-0 bg-warmgray-900/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative glass rounded-3xl shadow-2xl w-full max-w-4xl max-h-[95vh] md:max-h-[90vh] flex flex-col animate-scale-in overflow-hidden">
+      <div className="relative glass rounded-none md:rounded-3xl shadow-2xl w-full max-w-4xl max-h-[100dvh] md:max-h-[90vh] flex flex-col animate-scale-in overflow-hidden">
 
         {/* Header */}
         <div className="px-6 pt-5 pb-4 border-b border-white/30 shrink-0 flex items-center justify-between gap-4">
@@ -514,7 +514,7 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
       <div className="absolute inset-0 bg-warmgray-900/60 backdrop-blur-sm" onClick={onClose} />
 
       {/* Panel */}
-      <div className="relative glass rounded-3xl shadow-2xl w-full max-w-3xl max-h-[95vh] md:max-h-[90vh] flex flex-col animate-scale-in overflow-hidden">
+      <div className="relative glass rounded-none md:rounded-3xl shadow-2xl w-full max-w-3xl max-h-[100dvh] md:max-h-[90vh] flex flex-col animate-scale-in overflow-hidden">
 
         {/* Header */}
         <div className="px-7 pt-7 pb-5 border-b border-white/30 shrink-0">
@@ -1127,7 +1127,7 @@ export default function Approvals() {
 
       {/* Bulk-select floating action bar — portal so it overlays everything */}
       {selectionMode && createPortal(
-        <div className="fixed bottom-0 left-0 right-0 z-40 p-3 sm:p-4 pointer-events-none">
+        <div className="fixed bottom-0 left-0 right-0 z-[60] p-3 sm:p-4 pointer-events-none" style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px) + 52px)' }}>
           <div className="max-w-2xl mx-auto pointer-events-auto">
             <div className="glass rounded-2xl shadow-2xl border border-white/40 overflow-hidden animate-scale-in">
               {/* Top: count + select-all + close */}

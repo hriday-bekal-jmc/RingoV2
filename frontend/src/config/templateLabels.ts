@@ -22,6 +22,7 @@ export const TEMPLATE_LABELS: Record<string, TemplateLabel> = {
   INCIDENT_REPORT:    { ja: '始末書',             en: 'Incident Report',            desc_ja: '事故・インシデント報告', desc_en: 'Accident / incident report',             icon: '⚠️', gradient: 'from-red-400/20 to-ringo-600/10' },
   EXPENSE_CLAIM:      { ja: '立替精算申請',       en: 'Expense Reimbursement',      desc_ja: '稟議→精算入力→精算承認', desc_en: 'Ringi → Expense input → Settlement',  icon: '💴', gradient: 'from-teal-400/20 to-emerald-500/10', twoStage: true },
   TRANSPORT_EXPENSE:  { ja: '交通費精算（出張日除く）', en: 'Travel expense reimbursement (excluding business trip days)', desc_ja: '月次交通費精算（出張日除く）', desc_en: 'Monthly transportation expense (excl. business trips)', icon: '🚃', gradient: 'from-blue-400/20 to-indigo-500/10', twoStage: true },
+  RECREATION:         { ja: 'レクリエーション費',      en: 'Recreation Expense',                                      desc_ja: 'レクリエーション費補助申請',   desc_en: 'Recreation expense subsidy application',           icon: '🎉', gradient: 'from-pink-400/20 to-rose-500/10',   twoStage: true },
 };
 
 /**
