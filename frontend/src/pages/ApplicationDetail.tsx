@@ -347,7 +347,7 @@ function SettlementReturnEditor({ app, onSuccess }: { app: ApplicationDetail; on
       queryClient.invalidateQueries({ queryKey: ['myApplications'] });
       onSuccess();
     } catch (err: any) {
-      show(err?.response?.data?.error ?? err?.message ?? t('error_load'), 'error');
+      show(err?.data?.error ?? err?.message ?? t('error_load'), 'error');
     }
   };
 
@@ -470,7 +470,7 @@ function DraftEditor({
       invalidate();
       onSuccess();
     } catch (err: any) {
-      const msg = err?.response?.data?.error ?? err?.message ?? t('error_load');
+      const msg = err?.data?.error ?? err?.message ?? t('error_load');
       show(msg, 'error');
     }
   };

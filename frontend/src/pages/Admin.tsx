@@ -116,7 +116,7 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
   // otherwise make `fixed inset-0` resolve against the nearest glass parent
   // instead of the viewport — causing offset placement + no proper scroll).
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-warmgray-900/50 backdrop-blur-sm px-3 md:px-4 overflow-y-auto py-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-warmgray-900/50 backdrop-blur-sm px-3 md:px-4 overflow-y-auto [scrollbar-gutter:stable] py-6">
       <div className="glass rounded-3xl w-full max-w-lg p-5 md:p-8 space-y-5 shadow-2xl animate-scale-in my-auto">
         <div className="flex items-center gap-3">
           {!isNew && <UserAvatar name={form.full_name || '?'} avatarUrl={user?.avatar_url} size={10} />}
@@ -209,7 +209,10 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
 
 // ─── Users Tab ────────────────────────────────────────────────────────────────
 
-function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error' | 'info') => void }) {
+function UsersTab({ showToast, onGoToRoutes }: {
+  showToast: (m: string, t?: 'success' | 'error' | 'info') => void;
+  onGoToRoutes: () => void;
+}) {
   const queryClient = useQueryClient();
   const { t } = useLang();
   const [editUser, setEditUser] = useState<User | null | 'new'>(null);
@@ -219,6 +222,7 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
   const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('all');
   // Inline confirm — only one row can be in confirm state at a time
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [routeConflict, setRouteConflict] = useState<{ userId: string; routes: { id: string; name: string }[] } | null>(null);
 
   // Admin reference data — changes rarely (few times/month). Cache aggressively.
   const { data: users = [], isLoading } = useQuery<User[]>({
@@ -259,12 +263,21 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
   const deleteUser = useMutation({
     mutationFn: async ({ id, hard }: { id: string; hard: boolean }) =>
       (await apiClient.delete(`/admin/users/${id}${hard ? '?hard=true' : ''}`)).data,
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
       setConfirmingId(null);
+      if (variables.hard) setRouteConflict(null);
       showToast(data.message);
     },
-    onError: (err: any) => showToast(`削除失敗: ${err.message}`, 'error'),
+    onError: (err: any, variables) => {
+      const body = err?.data;
+      if (variables.hard && body?.error === 'route_assignments' && Array.isArray(body.routes)) {
+        setRouteConflict({ userId: variables.id, routes: body.routes });
+        setConfirmingId(null);
+      } else {
+        showToast(`削除失敗: ${err.message}`, 'error');
+      }
+    },
   });
 
   const filtered = users.filter((u) => {
@@ -348,6 +361,35 @@ function UsersTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error
           </button>
         </div>
       </div>
+
+      {routeConflict && (
+        <div className="rounded-2xl border border-amber-300/70 bg-amber-50/80 px-4 py-3.5 flex items-start gap-3 animate-fade-up">
+          <span className="text-xl shrink-0">⚠️</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-800">アーカイブ前に承認ルートから外してください</p>
+            <p className="text-xs text-amber-700 mt-0.5">このユーザーは以下のルートに承認者として設定されています：</p>
+            <ul className="mt-1.5 space-y-0.5">
+              {routeConflict.routes.map((r) => (
+                <li key={r.id} className="text-xs font-medium text-amber-900">• {r.name}</li>
+              ))}
+            </ul>
+            <div className="flex items-center gap-3 mt-3">
+              <button
+                onClick={() => { setRouteConflict(null); onGoToRoutes(); }}
+                className="text-xs font-semibold text-ringo-600 hover:text-ringo-800 underline underline-offset-2 transition-colors"
+              >
+                ルート設定を開く →
+              </button>
+              <button
+                onClick={() => setRouteConflict(null)}
+                className="text-xs text-warmgray-400 hover:text-warmgray-600 transition-colors"
+              >
+                閉じる
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isLoading ? (
         <RingoLoader.Block label="読み込み中..." />
@@ -1443,7 +1485,7 @@ function PermissionsTab({ showToast }: { showToast: (msg: string, type?: 'succes
       </div>
 
       {/* Permissions table — desktop */}
-      <div className="card !p-0 overflow-x-auto hidden md:block">
+      <div className="card !p-0 overflow-x-auto [scrollbar-gutter:stable] hidden md:block">
         <table className="table-base w-full text-sm">
           <thead>
             <tr>
@@ -1701,7 +1743,7 @@ function AllowanceTab({ showToast }: { showToast: (msg: string, type?: 'success'
       setEditingRole(null);
     },
     onError: (err: any) => {
-      showToast(err?.response?.data?.error ?? (lang === 'ja' ? '更新に失敗しました' : 'Update failed'), 'error');
+      showToast(err?.data?.error ?? err?.message ?? (lang === 'ja' ? '更新に失敗しました' : 'Update failed'), 'error');
     },
   });
 
@@ -1867,7 +1909,7 @@ export default function Admin() {
 
         <div key={tab} className="animate-fade-up min-h-[60vh]">
           {tab === 'routes'       && <RoutesTab showToast={showToast} />}
-          {tab === 'users'        && <UsersTab showToast={showToast} />}
+          {tab === 'users'        && <UsersTab showToast={showToast} onGoToRoutes={() => setTab('routes')} />}
           {tab === 'applications' && <ApplicationsTab showToast={showToast} />}
           {tab === 'forms'        && <FormsTab showToast={showToast} />}
           {tab === 'permissions'  && <PermissionsTab showToast={showToast} />}

@@ -39,7 +39,10 @@ async function fetchClient(endpoint: string, options: RequestOptions = {}) {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || `HTTP Error: ${response.status}`);
+      const err = new Error(errorData.error || `HTTP Error: ${response.status}`) as any;
+      err.status = response.status;
+      err.data = errorData;
+      throw err;
     }
 
     // Axiosの { data: ... } というレスポンス形式を再現して後方互換性を保つ

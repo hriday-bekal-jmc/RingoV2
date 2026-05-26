@@ -51,6 +51,7 @@ router.get('/users', async (_req: Request, res: Response): Promise<void> => {
              d.name AS department_name
       FROM users u
       LEFT JOIN departments d ON u.department_id = d.id
+      WHERE u.deleted_at IS NULL
       ORDER BY u.created_at DESC
     `, [[...SUPER_ADMIN_EMAILS]]);
     res.json(result.rows);
@@ -224,7 +225,29 @@ router.delete('/users/:id', async (req: Request, res: Response): Promise<void> =
     // ────────────────────────────────────────────────
 
     if (req.query.hard === 'true') {
-      await query(`DELETE FROM users WHERE id = $1`, [req.params.id]);
+      // Check if user is a named approver on any active route steps
+      const routeCheck = await query(
+        `SELECT ars.id AS step_id, ar.name AS route_name, ar.id AS route_id
+         FROM approval_route_steps ars
+         JOIN approval_routes ar ON ar.id = ars.route_id
+         WHERE ars.approver_id = $1`,
+        [req.params.id],
+      );
+      if (routeCheck.rows.length > 0) {
+        res.status(409).json({
+          error: 'route_assignments',
+          routes: routeCheck.rows.map((r: { route_id: string; route_name: string }) => ({
+            id: r.route_id,
+            name: r.route_name,
+          })),
+        });
+        return;
+      }
+      // Archive: keep all data intact, mark deleted so user vanishes from panel and can't log in
+      await query(
+        `UPDATE users SET deleted_at = NOW(), is_active = FALSE, token_version = token_version + 1 WHERE id = $1`,
+        [req.params.id],
+      );
     } else {
       await query(
         `UPDATE users SET is_active = FALSE, token_version = token_version + 1 WHERE id = $1`,
