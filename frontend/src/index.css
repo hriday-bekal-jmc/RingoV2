@@ -26,6 +26,7 @@
 @layer base {
   html, body, #root {
     height: 100%;
+    overflow: hidden; /* prevent browser-level scrollbar competing with main element scrollbar */
   }
   body {
     @apply text-warmgray-800 antialiased;
