@@ -451,7 +451,7 @@ export default function TransportationForm({
                         placeholder={lang === 'en' ? 'Mode' : '交通手段'}
                         options={(f.options && f.options.length > 0 ? f.options : TRANSPORT_MODE_OPTIONS)
                           .map((o) => ({ value: o.value, label: (lang === 'en' ? o.label_en : o.label_ja) ?? o.value }))}
-                        className="text-xs w-full sm:w-auto sm:max-w-[180px]"
+                        className="text-xs w-full sm:w-auto"
                       />
                       {route.mode === 'other' && (
                         <input

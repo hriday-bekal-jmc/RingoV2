@@ -1094,11 +1094,11 @@ function FieldEditor({
         </div>
       </div>
       {/* Row 2: type select + action buttons */}
-      <div className="flex items-center gap-2 pl-8">
+      <div className="flex items-center gap-2">
         <select
           value={field.type}
           onChange={(e) => updateType(e.target.value)}
-          className="input text-xs flex-1 min-w-0"
+          className="select text-xs flex-1 min-w-0"
         >
           {FIELD_TYPES.map(ft => (
             <option key={ft.value} value={ft.value}>
@@ -1107,10 +1107,10 @@ function FieldEditor({
           ))}
         </select>
         <div className="flex items-center gap-1 shrink-0">
-          <button onClick={() => onMove(-1)} disabled={index === 0} className="btn-ghost text-xs px-2 disabled:opacity-30">▲</button>
-          <button onClick={() => onMove(1)}  disabled={index === total - 1} className="btn-ghost text-xs px-2 disabled:opacity-30">▼</button>
-          <button onClick={() => setExpanded(s => !s)} className="btn-ghost text-xs px-2">{expanded ? '−' : '⚙'}</button>
-          <button onClick={onRemove} className="text-red-400 hover:text-red-600 text-sm px-1">✕</button>
+          <button onClick={() => onMove(-1)} disabled={index === 0} className="btn-ghost px-2.5 py-2 text-xs disabled:opacity-30" title="Move up">▲</button>
+          <button onClick={() => onMove(1)}  disabled={index === total - 1} className="btn-ghost px-2.5 py-2 text-xs disabled:opacity-30" title="Move down">▼</button>
+          <button onClick={() => setExpanded(s => !s)} className="btn-ghost px-2.5 py-2 text-xs" title="Settings">{expanded ? '−' : '⚙'}</button>
+          <button onClick={onRemove} className="text-red-400 hover:text-red-600 px-2.5 py-2 text-sm rounded-lg hover:bg-red-50 transition-colors" title="Remove">✕</button>
         </div>
       </div>
 
@@ -1865,26 +1865,33 @@ function RepeatGroupFieldsEditor({
             const duplicate = childFields.some((f, i) => i !== idx && f.name === child.name);
             return (
               <div key={idx} className="rounded-xl border border-white/80 bg-white/70 p-3 space-y-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold text-warmgray-400 w-6">{idx + 1}</span>
-                  <input
-                    type="text"
-                    value={child.name}
-                    onChange={(e) => updateChild(idx, { name: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') })}
-                    className={`input text-xs font-mono flex-1 ${duplicate ? 'border-red-400 ring-1 ring-red-300' : ''}`}
-                    placeholder="field_name"
-                  />
-                  <select value={child.type} onChange={(e) => setChildType(idx, e.target.value)} className="input text-xs w-36">
-                    {REPEAT_CHILD_FIELD_TYPES.map((ft) => (
-                      <option key={ft.value} value={ft.value}>
-                        {lang === 'en' ? ft.label_en : ft.label_ja}
-                      </option>
-                    ))}
-                  </select>
-                  <button type="button" onClick={() => moveChild(idx, -1)} disabled={idx === 0} className="btn-ghost text-xs px-2 disabled:opacity-30">▲</button>
-                  <button type="button" onClick={() => moveChild(idx, 1)} disabled={idx === childFields.length - 1} className="btn-ghost text-xs px-2 disabled:opacity-30">▼</button>
-                  <button type="button" onClick={() => toggleChildExpand(idx)} className="btn-ghost text-xs px-2">{expandedChildren.has(idx) ? '−' : '⚙'}</button>
-                  <button type="button" onClick={() => removeChild(idx)} className="text-red-400 hover:text-red-600 text-sm">×</button>
+                {/* Child row header: name + type on one line, actions on second line on mobile */}
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-warmgray-400 w-6 shrink-0">{idx + 1}</span>
+                    <input
+                      type="text"
+                      value={child.name}
+                      onChange={(e) => updateChild(idx, { name: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') })}
+                      className={`input text-xs font-mono flex-1 min-w-0 ${duplicate ? 'border-red-400 ring-1 ring-red-300' : ''}`}
+                      placeholder="field_name"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 pl-8">
+                    <select value={child.type} onChange={(e) => setChildType(idx, e.target.value)} className="select text-xs flex-1 min-w-0">
+                      {REPEAT_CHILD_FIELD_TYPES.map((ft) => (
+                        <option key={ft.value} value={ft.value}>
+                          {lang === 'en' ? ft.label_en : ft.label_ja}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <button type="button" onClick={() => moveChild(idx, -1)} disabled={idx === 0} className="btn-ghost text-xs px-2.5 py-2 disabled:opacity-30">▲</button>
+                      <button type="button" onClick={() => moveChild(idx, 1)} disabled={idx === childFields.length - 1} className="btn-ghost text-xs px-2.5 py-2 disabled:opacity-30">▼</button>
+                      <button type="button" onClick={() => toggleChildExpand(idx)} className="btn-ghost text-xs px-2.5 py-2">{expandedChildren.has(idx) ? '−' : '⚙'}</button>
+                      <button type="button" onClick={() => removeChild(idx)} className="text-red-400 hover:text-red-600 px-2.5 py-2 text-sm rounded-lg hover:bg-red-50 transition-colors">×</button>
+                    </div>
+                  </div>
                 </div>
                 {duplicate && (
                   <p className="text-[10px] text-red-500 pl-8">{lang === 'en' ? 'Duplicate row field name' : '行項目名が重複しています'}</p>

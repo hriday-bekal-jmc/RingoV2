@@ -72,9 +72,9 @@ export default function CustomSelect({
         </svg>
       </button>
 
-      {/* Dropdown */}
+      {/* Dropdown — min-w-full so it's at least as wide as trigger, w-max so it grows to fit content */}
       {open && (
-        <div className="absolute z-50 mt-1.5 left-0 right-0
+        <div className="absolute z-50 mt-1.5 left-0 min-w-full w-max max-w-[min(320px,calc(100vw-24px))]
           bg-white/85 backdrop-blur-2xl border border-warmgray-200/60
           rounded-xl shadow-[0_8px_28px_rgba(60,40,20,0.16),0_2px_8px_rgba(60,40,20,0.08)]
           py-1 animate-scale-in origin-top overflow-hidden">
@@ -108,7 +108,7 @@ export default function CustomSelect({
                     </svg>
                   </span>
 
-                  <span className="flex-1 truncate">{opt.label}</span>
+                  <span className="flex-1 whitespace-nowrap">{opt.label}</span>
                 </button>
               );
             })}

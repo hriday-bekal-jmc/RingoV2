@@ -9,6 +9,7 @@ import { query } from '../config/db';
 import { isAdminUser, requireAuth } from '../middlewares/authMiddleware';
 import { assertCanReadApp } from '../middlewares/authz';
 import { isDriveEnabled, deleteFromDrive, getDriveFileBuffer } from '../services/driveService';
+import { deleteSingleFile, type FileRow } from '../services/fileCleanup';
 import { extractReceiptData, extractCustomFields, CustomFieldSpec } from '../services/geminiService';
 import { env } from '../config/env';
 
@@ -77,56 +78,50 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-// DELETE /api/files/:id — remove unlinked file (draft upload cleaned up when user removes from form).
-// Normal users: own unlinked files only. Admins: any unlinked file.
-// Linked files (application_id IS NOT NULL) cannot be deleted this way — use application delete flow.
+// DELETE /api/files/:id — remove a file.
+//
+// Unlinked files (application_id IS NULL): any owner or admin.
+// Draft-linked files (application_id set, status = DRAFT): applicant or admin.
+// Submitted/approved files: blocked — use the application cancel/delete flow.
 router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
   try {
     const r = await query(
-      `SELECT id, application_id, uploader_id, stored_path, drive_file_id
-       FROM uploaded_files WHERE id = $1`,
+      `SELECT uf.id, uf.application_id, uf.uploader_id, uf.stored_path, uf.drive_file_id,
+              a.applicant_id, a.status AS app_status
+       FROM uploaded_files uf
+       LEFT JOIN applications a ON a.id = uf.application_id
+       WHERE uf.id = $1`,
       [req.params.id],
     );
     if (r.rows.length === 0) { res.status(404).json({ error: 'File not found' }); return; }
 
-    const f = r.rows[0] as {
-      id: string;
+    const f = r.rows[0] as FileRow & {
       application_id: string | null;
       uploader_id: string;
-      stored_path: string;
-      drive_file_id: string | null;
+      applicant_id: string | null;
+      app_status: string | null;
     };
-
     const actor = req.user!;
 
-    // Linked files are immutable via this endpoint — protect application integrity.
     if (f.application_id) {
-      res.status(409).json({ error: 'ファイルはアプリケーションに紐付いているため削除できません' });
-      return;
-    }
-
-    // Auth: uploader or admin
-    if (f.uploader_id !== actor.id && !isAdminUser(req.user)) {
-      res.status(403).json({ error: 'このファイルを削除する権限がありません' });
-      return;
-    }
-
-    // Delete physical file
-    if (f.drive_file_id && isDriveEnabled()) {
-      try {
-        await deleteFromDrive(f.drive_file_id);
-      } catch (driveErr) {
-        // Log but continue — Drive file may already be gone; still remove DB row.
-        console.warn('[files] Drive delete failed, removing DB row anyway:', driveErr);
+      // Draft-linked: applicant or admin may delete (e.g. replacing a receipt)
+      if (f.app_status !== 'DRAFT') {
+        res.status(409).json({ error: 'ファイルはアプリケーションに紐付いているため削除できません' });
+        return;
       }
-    } else if (f.stored_path && !f.stored_path.startsWith('drive:')) {
-      const abs = path.join(UPLOADS_DIR, f.stored_path);
-      if (fs.existsSync(abs)) {
-        try { fs.unlinkSync(abs); } catch { /* already gone */ }
+      if (f.applicant_id !== actor.id && !isAdminUser(req.user)) {
+        res.status(403).json({ error: 'このファイルを削除する権限がありません' });
+        return;
+      }
+    } else {
+      // Unlinked: uploader or admin
+      if (f.uploader_id !== actor.id && !isAdminUser(req.user)) {
+        res.status(403).json({ error: 'このファイルを削除する権限がありません' });
+        return;
       }
     }
 
-    await query(`DELETE FROM uploaded_files WHERE id = $1`, [f.id]);
+    await deleteSingleFile(f);
     res.status(204).end();
   } catch (err) {
     console.error('[files] delete failed:', err);

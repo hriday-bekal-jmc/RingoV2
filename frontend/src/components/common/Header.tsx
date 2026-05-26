@@ -12,7 +12,7 @@ export default function Header({ title }: HeaderProps) {
   const dept = user?.department_name || '';
 
   return (
-    <header className="glass border-b border-white/40 px-4 md:px-6 py-0 flex items-center justify-between h-14 shrink-0 sticky top-0 z-30">
+    <header className="glass border-b border-white/40 md:border-b-0 md:rounded-2xl px-4 md:px-6 py-0 flex items-center justify-between h-14 shrink-0 z-30">
       {/* Title */}
       <div className="flex items-center gap-2 md:gap-3 min-w-0">
         <div className="accent-bar shrink-0 hidden md:block" />

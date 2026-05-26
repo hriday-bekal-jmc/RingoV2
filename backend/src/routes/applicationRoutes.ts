@@ -6,6 +6,7 @@ import { mutationLimiter } from '../middlewares/rateLimit';
 import { resolveApprovalSteps, skipStepsThroughApplicant, type ResolvedStep } from '../services/approvalStepService';
 import { applyComputedFormData, validateFormData } from '../services/formValidation';
 import { insertOutboxEvent } from '../services/eventOutbox';
+import { deleteFilesForApplication } from '../services/fileCleanup';
 import { computeApplicationRecipients } from '../services/eventRecipients';
 import { invalidateDashboardCache } from '../services/dashboardCache';
 import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
@@ -1298,20 +1299,36 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-// DELETE /applications/:id — delete own DRAFT only
+// DELETE /applications/:id — delete own DRAFT only.
+// Physical files (Drive / local FS) are purged BEFORE the DB DELETE so the
+// uploaded_files rows are still queryable. ON DELETE CASCADE then removes them.
 router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
   try {
     await withTransaction(async (client: pg.PoolClient) => {
+      // Verify ownership + DRAFT status before touching anything
+      const check = await client.query(
+        `SELECT id FROM applications
+         WHERE id = $1 AND applicant_id = $2 AND status = 'DRAFT'`,
+        [req.params.id, req.user!.id],
+      );
+      if (check.rows.length === 0) {
+        throw Object.assign(
+          new Error('下書きが見つかりません（または削除権限がありません）'),
+          { status: 404 },
+        );
+      }
+
+      // Purge physical files first — CASCADE will clean DB rows after app delete
+      await deleteFilesForApplication(req.params.id as string, client);
+
       const result = await client.query(
         `DELETE FROM applications
          WHERE id = $1 AND applicant_id = $2 AND status = 'DRAFT'
          RETURNING id`,
         [req.params.id, req.user!.id],
       );
-      if (result.rows.length === 0) {
-        throw Object.assign(new Error('下書きが見つかりません（または削除権限がありません）'), { status: 404 });
-      }
       const app = result.rows[0] as { id: string };
+
       await insertOutboxEvent(client, {
         event_type:         'APPLICATION_CHANGED',
         entity_type:        'application',

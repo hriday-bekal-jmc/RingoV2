@@ -174,6 +174,49 @@ export async function getDriveDownloadStream(fileId: string): Promise<NodeJS.Rea
   return res.data as unknown as NodeJS.ReadableStream;
 }
 
+// ── Orphan scan (used by weekly driveAudit job) ───────────────────────────────
+// Returns Drive file IDs present in configured folder(s) but absent from knownIds.
+// Skips subfolders (mimeType filter). Paginates automatically.
+export async function listDriveOrphans(knownIds: Set<string>): Promise<string[]> {
+  if (!isDriveEnabled()) return [];
+  const drive = getDrive();
+
+  const folderIds = new Set<string>([
+    env.GDRIVE_FOLDER_ID as string,
+    ...(
+      [
+        env.GDRIVE_FOLDER_RECEIPTS,
+        env.GDRIVE_FOLDER_INVOICES,
+        env.GDRIVE_FOLDER_TRANSPORTATION,
+        env.GDRIVE_FOLDER_CONTRACTS,
+        env.GDRIVE_FOLDER_OTHER,
+      ] as (string | undefined)[]
+    ).filter(Boolean) as string[],
+  ]);
+
+  const orphans: string[] = [];
+
+  for (const folderId of folderIds) {
+    let pageToken: string | undefined;
+    do {
+      const resp = await drive.files.list({
+        q: `'${folderId}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'`,
+        fields: 'nextPageToken, files(id)',
+        pageSize: 200,
+        pageToken,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+      for (const f of resp.data.files ?? []) {
+        if (f.id && !knownIds.has(f.id)) orphans.push(f.id);
+      }
+      pageToken = resp.data.nextPageToken ?? undefined;
+    } while (pageToken);
+  }
+
+  return orphans;
+}
+
 // ── Get file bytes (for Gemini OCR) ──────────────────────────────────────────
 export async function getDriveFileBuffer(fileId: string): Promise<Buffer> {
   const stream = await getDriveDownloadStream(fileId);

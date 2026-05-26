@@ -754,7 +754,7 @@ function RouteEntryInput({
                 onChange={(val) => update(i, { mode: val, mode_custom: val !== 'other' ? undefined : r.mode_custom })}
                 placeholder={lang === 'en' ? 'Mode' : '交通手段'}
                 options={normalizedOptions}
-                className="text-xs w-full sm:w-auto sm:max-w-[180px]"
+                className="text-xs w-full sm:w-auto"
               />
               {r.mode === 'other' && (
                 <input

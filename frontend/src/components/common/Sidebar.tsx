@@ -70,7 +70,6 @@ const NAV_SHORT: Record<string, { ja: string; en: string }> = {
   '/admin':            { ja: '管理',     en: 'Admin'   },
 };
 
-
 export default function Sidebar() {
   const { user } = useAuth();
   const { collapsed, toggle } = useSidebar();
@@ -104,7 +103,8 @@ export default function Sidebar() {
         className={`
           hidden
           md:flex md:flex-col select-none glass-dark overflow-hidden
-          md:relative md:h-screen md:shrink-0
+          md:relative md:shrink-0
+          md:rounded-3xl md:border md:border-white/10
           md:transition-[width] md:duration-200 md:ease-in-out
           ${collapsed ? 'md:w-[60px]' : 'md:w-60'}
         `}
@@ -230,22 +230,29 @@ export default function Sidebar() {
       </aside>
 
       {/* ══════════════════════════════════════════════════════════════════════
-          MOBILE bottom tab bar (<md)
-          Apple iOS-style: full-width, warm frosted glass, color active state
+          MOBILE floating pill tab bar (<md)
+          Image-2 style: active item = icon+label capsule, inactive = icon only
+          Warm cream glass container, ringo-gradient active capsule
           ══════════════════════════════════════════════════════════════════════ */}
-      <nav
-        className="md:hidden fixed z-50 bottom-0 left-0 right-0 select-none"
-        style={{
-          background: 'rgba(251, 248, 244, 0.92)',
-          backdropFilter: 'blur(28px) saturate(1.8)',
-          WebkitBackdropFilter: 'blur(28px) saturate(1.8)',
-          borderTop: '1px solid rgba(154, 46, 34, 0.10)',
-          boxShadow: '0 -1px 0 rgba(0,0,0,0.06), 0 -6px 24px rgba(60,30,20,0.07)',
-          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-        }}
+      <div
+        className="md:hidden fixed z-50 left-1/2 -translate-x-1/2"
+        style={{ bottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))', willChange: 'transform' }}
       >
-        <div className="flex items-stretch justify-around">
-          {perms.navItems.map((item, idx) => {
+        {/* Outer pill container — warm cream frosted glass */}
+        <div
+          className="flex items-center"
+          style={{
+            background: 'rgba(251, 248, 244, 0.90)',
+            backdropFilter: 'blur(28px) saturate(1.8)',
+            WebkitBackdropFilter: 'blur(28px) saturate(1.8)',
+            borderRadius: '9999px',
+            border: '1px solid rgba(154, 46, 34, 0.13)',
+            boxShadow: '0 8px 36px rgba(60,20,10,0.16), 0 2px 8px rgba(60,20,10,0.08), inset 0 1px 0 rgba(255,255,255,0.85)',
+            padding: '5px',
+            gap: '2px',
+          }}
+        >
+            {perms.navItems.map((item, idx) => {
             const short = NAV_SHORT[item.to];
             const label = short
               ? (lang === 'en' ? short.en : short.ja)
@@ -257,64 +264,82 @@ export default function Sidebar() {
                 key={item.to}
                 to={item.to}
                 end={item.to === '/dashboard'}
-                className="flex flex-col items-center justify-center gap-[3px] flex-1 min-w-0
-                           py-2.5 transition-opacity duration-150 active:opacity-50"
-                style={{ minHeight: '52px' }}
+                className="select-none active:opacity-60 transition-opacity duration-100"
               >
-                {/* Icon with badge */}
-                <span className="relative flex items-center justify-center">
-                  <span
-                    className="transition-all duration-200"
-                    style={{
-                      color: isActive ? 'var(--ringo-600)' : 'rgba(120,110,104,0.65)',
-                      transform: isActive ? 'scale(1.08)' : 'scale(1)',
-                    }}
-                  >
-                    {/* Render icon at 22px for better mobile legibility */}
-                    {ICONS[item.to]
-                      ? <span className="[&>svg]:w-[22px] [&>svg]:h-[22px]">{ICONS[item.to]}</span>
-                      : <span className="w-[22px] h-[22px] text-sm flex items-center justify-center">{item.icon}</span>
-                    }
-                  </span>
-
-                  {/* Approval badge */}
-                  {item.to === '/approvals' && pendingCount > 0 && (
-                    <span
-                      className="absolute flex items-center justify-center leading-none font-bold"
-                      style={{
-                        top: '-5px',
-                        right: '-9px',
-                        minWidth: '17px',
-                        height: '17px',
-                        padding: '0 4px',
-                        borderRadius: '9999px',
-                        background: isActive ? 'var(--ringo-500)' : 'var(--ringo-500)',
-                        color: '#fff',
-                        fontSize: '9px',
-                        boxShadow: '0 1px 4px rgba(0,0,0,0.18)',
-                      }}
-                    >
-                      {pendingCount > 99 ? '99+' : pendingCount}
-                    </span>
-                  )}
-                </span>
-
-                {/* Label */}
+                {/*
+                  Capsule: padding is CONSTANT (no layout animation).
+                  Only background + shadow animate (compositor-only, no reflow).
+                  Label uses max-width with ease-out — no spring overshoot = no jitter.
+                */}
                 <span
-                  className="leading-none tracking-tight transition-all duration-200 font-medium"
+                  className="flex items-center overflow-hidden"
                   style={{
-                    fontSize: '10px',
-                    color: isActive ? 'var(--ringo-600)' : 'rgba(120,110,104,0.55)',
-                    fontWeight: isActive ? 600 : 500,
+                    gap: '5px',
+                    padding: '8px 12px',
+                    borderRadius: '9999px',
+                    background: isActive ? 'var(--ringo-gradient)' : 'transparent',
+                    boxShadow: isActive ? '0 2px 10px rgba(154,46,34,0.38)' : 'none',
+                    transition: 'background 260ms ease, box-shadow 260ms ease, color 200ms ease',
+                    color: isActive ? '#fff' : 'rgba(80,28,20,0.48)',
                   }}
                 >
-                  {label}
+                  {/* Icon — only scale animates, no layout change */}
+                  <span className="relative flex items-center justify-center shrink-0">
+                    <span style={{
+                      display: 'flex',
+                      color: 'inherit',
+                      transform: isActive ? 'scale(1.06)' : 'scale(1)',
+                      transition: 'transform 220ms ease-out',
+                    }}>
+                      {ICONS[item.to] ?? (
+                        <span className="w-[18px] h-[18px] text-xs flex items-center justify-center">{item.icon}</span>
+                      )}
+                    </span>
+                    {/* Badge */}
+                    {item.to === '/approvals' && pendingCount > 0 && (
+                      <span
+                        className="absolute flex items-center justify-center leading-none font-bold"
+                        style={{
+                          top: '-5px', right: '-7px',
+                          minWidth: '15px', height: '15px', padding: '0 3px',
+                          borderRadius: '9999px',
+                          background: isActive ? 'rgba(255,255,255,0.92)' : 'var(--ringo-500)',
+                          color: isActive ? 'var(--ringo-600)' : '#fff',
+                          fontSize: '8px',
+                          boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+                          transition: 'background 200ms ease, color 200ms ease',
+                        }}
+                      >
+                        {pendingCount > 99 ? '99+' : pendingCount}
+                      </span>
+                    )}
+                  </span>
+
+                  {/*
+                    Label: max-width 0→80px with ease-out (no overshoot).
+                    opacity fades slightly behind width so text doesn't clip visibly.
+                    willChange hints compositor to pre-promote layer.
+                  */}
+                  <span
+                    className="font-semibold leading-none tracking-tight whitespace-nowrap"
+                    style={{
+                      fontSize: '11px',
+                      color: 'inherit',
+                      maxWidth: isActive ? '80px' : '0px',
+                      opacity: isActive ? 1 : 0,
+                      overflow: 'hidden',
+                      willChange: 'max-width, opacity',
+                      transition: 'max-width 260ms ease-out, opacity 160ms ease',
+                    }}
+                  >
+                    {label}
+                  </span>
                 </span>
               </NavLink>
             );
           })}
         </div>
-      </nav>
+      </div>
     </>
   );
 }

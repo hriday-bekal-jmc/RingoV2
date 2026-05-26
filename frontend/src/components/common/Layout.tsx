@@ -11,14 +11,14 @@ interface LayoutProps {
 // Do NOT call useSSE here — it would open a SECOND connection per page.
 export default function Layout({ title, children }: LayoutProps) {
   return (
-    <div className="h-screen flex overflow-hidden">
+    <div className="h-screen flex md:p-2 md:gap-2 overflow-hidden">
       {/* Sidebar handles its own mobile-drawer vs desktop-rail layout */}
       <Sidebar />
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden md:gap-2">
         <Header title={title} />
         {/* Tighter padding on mobile, generous on desktop */}
-        {/* pb-[72px] on mobile clears the fixed 52px tab bar + env(safe-area-inset-bottom) */}
-        <main className="flex-1 p-4 pb-[72px] md:p-6 md:pb-6 lg:p-8 lg:pb-8 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">{children}</main>
+        {/* pb-24 on mobile adds clearance below floating bottom pill (pill height + safe-area) */}
+        <main className="flex-1 p-4 pb-24 md:p-6 md:pb-6 lg:p-8 lg:pb-8 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">{children}</main>
       </div>
     </div>
   );
