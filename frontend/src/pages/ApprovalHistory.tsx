@@ -147,7 +147,7 @@ function DetailPanel({ applicationId, onClose, lang }: { applicationId: string; 
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 md:px-7 py-4 md:py-5 space-y-6">
+        <div className="flex-1 overflow-y-auto [overflow-x:clip] [scrollbar-gutter:stable] px-4 md:px-7 py-4 md:py-5 space-y-6">
           {isLoading && (
             <div className="space-y-3">
               {[...Array(6)].map((_, i) => <div key={i} className="h-12 rounded-xl bg-white/40 animate-pulse" />)}
@@ -524,7 +524,7 @@ export default function ApprovalHistory() {
                 ))}
               </div>
               {/* Desktop skeleton */}
-              <div className="hidden md:block overflow-x-auto">
+              <div className="hidden md:block overflow-x-auto [scrollbar-gutter:stable]">
                 <table className="table-base">
                   <thead>
                     <tr>
@@ -627,7 +627,7 @@ export default function ApprovalHistory() {
               </div>
 
               {/* ── Desktop table ───────────────────────────────────────────── */}
-              <div className="hidden md:block overflow-x-auto">
+              <div className="hidden md:block overflow-x-auto [scrollbar-gutter:stable]">
                 <table className="table-base">
                   <thead>
                     <tr>
