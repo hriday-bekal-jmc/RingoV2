@@ -6,6 +6,7 @@ import { insertOutboxEvent } from '../services/eventOutbox';
 import { computeApplicationRecipients } from '../services/eventRecipients';
 import { resolveApprovalSteps, skipStepsThroughApplicant, type ResolvedStep } from '../services/approvalStepService';
 import { applyComputedFormData, validateFormData } from '../services/formValidation';
+import { notifyApplicationEvent }                 from '../services/notificationService';
 import type pg from 'pg';
 
 const router = Router();
@@ -123,6 +124,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       return settleRes.rows[0] as { id: string };
     });
 
+    notifyApplicationEvent('SETTLEMENT_SUBMITTED', application_id, { actor_id: applicant_id });
     res.status(201).json({ message: '精算申請を提出しました', settlement: result });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };

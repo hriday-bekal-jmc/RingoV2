@@ -72,7 +72,8 @@ async function loadAuthProfile(userId: string): Promise<Record<string, unknown> 
     const result = await query(
       `SELECT u.id, u.full_name, u.email, u.role, u.is_admin, u.department_id, u.avatar_url,
               COALESCE(u.daily_allowance_rate, ar.daily_rate_yen) AS daily_allowance_rate,
-              d.name AS department_name
+              d.name AS department_name,
+              u.notify_email, u.notify_gchat, u.gchat_webhook_url
        FROM users u
        LEFT JOIN departments d ON u.department_id = d.id
        LEFT JOIN allowance_rates ar ON ar.role = u.role
@@ -184,6 +185,48 @@ router.patch('/me', async (req: Request, res: Response): Promise<void> => {
     res.json({ user: result.rows[0] });
   } catch {
     res.status(500).json({ error: '更新に失敗しました' });
+  }
+});
+
+// PATCH /auth/me/notifications — update own notification preferences
+router.patch('/me/notifications', async (req: Request, res: Response): Promise<void> => {
+  const token = req.cookies?.token as string | undefined;
+  if (!token) { res.status(401).json({ error: 'Not authenticated' }); return; }
+
+  const { notify_email, notify_gchat, gchat_webhook_url } = req.body as {
+    notify_email?: boolean;
+    notify_gchat?: boolean;
+    gchat_webhook_url?: string | null;
+  };
+
+  // Validate webhook URL if provided and non-empty
+  if (gchat_webhook_url && !gchat_webhook_url.startsWith('https://chat.googleapis.com/')) {
+    res.status(400).json({ error: 'Google Chat Webhook URLが無効です' }); return;
+  }
+
+  try {
+    const { default: jwtLib } = await import('jsonwebtoken');
+    const decoded = jwtLib.verify(token, process.env.JWT_SECRET as string) as { id: string };
+
+    const r = await query(
+      `UPDATE users
+       SET notify_email      = COALESCE($1, notify_email),
+           notify_gchat      = COALESCE($2, notify_gchat),
+           gchat_webhook_url = CASE WHEN $3::text IS NOT NULL THEN $3 ELSE gchat_webhook_url END,
+           updated_at        = NOW()
+       WHERE id = $4 AND is_active = TRUE
+       RETURNING id, notify_email, notify_gchat, gchat_webhook_url`,
+      [
+        notify_email ?? null,
+        notify_gchat ?? null,
+        gchat_webhook_url !== undefined ? (gchat_webhook_url || null) : null,
+        decoded.id,
+      ],
+    );
+    if (r.rows.length === 0) { res.status(404).json({ error: 'ユーザーが見つかりません' }); return; }
+    res.json({ notifications: r.rows[0] });
+  } catch {
+    res.status(500).json({ error: '通知設定の更新に失敗しました' });
   }
 });
 

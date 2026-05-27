@@ -12,6 +12,10 @@ export interface User {
   department_name?: string;
   avatar_url?: string | null;
   daily_allowance_rate?: number | null;
+  // Notification preferences
+  notify_email:      boolean;
+  notify_gchat:      boolean;
+  gchat_webhook_url: string | null;
 }
 
 interface AuthContextType {

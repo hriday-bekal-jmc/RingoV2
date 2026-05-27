@@ -7,7 +7,8 @@
 // Production cleanup = delete this file + DevI18n route in App.tsx + devRoutes.ts
 // + i18n.overrides.json + the 3 DEV-OVERRIDES blocks in i18n.ts. All marked.
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, Fragment } from 'react';
+import { TEMPLATE_VAR_DEFS } from '../config/notificationVars';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Layout from '../components/common/Layout';
 import { useAuth } from '../context/AuthContext';
@@ -30,7 +31,7 @@ export default function DevI18n() {
     return <Navigate to="/dashboard" replace />;
   }
 
-  const [tab, setTab] = useState<'dict' | 'db'>('dict');
+  const [tab, setTab] = useState<'dict' | 'db' | 'notify-vars'>('dict');
 
   return (
     <Layout title="DEV — i18n editor">
@@ -40,10 +41,10 @@ export default function DevI18n() {
         <div className="card !p-4 bg-amber-50/60 border border-amber-300/60">
           <p className="text-xs font-bold text-amber-800 uppercase tracking-widest">DEV-ONLY PAGE</p>
           <p className="text-xs text-amber-700 mt-1">
-            Edit translations missing in app. Two scopes — <b>Dict</b>: code-side UI
+            Edit translations missing in app. Three scopes — <b>Dict</b>: code-side UI
             strings via <code className="bg-white/60 px-1.5 py-0.5 rounded">i18n.overrides.json</code>.
-            {' '}<b>DB</b>: form_templates titles, descriptions, field labels, options —
-            updates the DB row + active version. Save then reload to see effects.
+            {' '}<b>DB</b>: form_templates titles/labels — updates DB + active version.
+            {' '}<b>Notify Vars</b>: add/edit notification template variable display names without touching code.
           </p>
         </div>
 
@@ -51,9 +52,12 @@ export default function DevI18n() {
         <div className="flex gap-2 border-b border-warmgray-200">
           <TabBtn active={tab === 'dict'} onClick={() => setTab('dict')}>Dict overrides (code UI)</TabBtn>
           <TabBtn active={tab === 'db'} onClick={() => setTab('db')}>DB strings (forms)</TabBtn>
+          <TabBtn active={tab === 'notify-vars'} onClick={() => setTab('notify-vars')}>🔔 Notify vars</TabBtn>
         </div>
 
-        {tab === 'dict' ? <DictTab /> : <DbTab />}
+        {tab === 'dict'        && <DictTab />}
+        {tab === 'db'          && <DbTab />}
+        {tab === 'notify-vars' && <NotifyVarsTab />}
       </div>
     </Layout>
   );
@@ -408,6 +412,438 @@ function DbTab() {
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TAB 3: Notification variable definitions
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ResolveConfig {
+  source:    string;
+  field:     string;
+  fallback?: string;
+}
+
+interface NotifyVarEntry {
+  key:     string;
+  labelJa: string;
+  labelEn: string;
+  descJa:  string;
+  group:   string;
+  resolve?: ResolveConfig;
+}
+
+interface ResolveSource {
+  key:        string;
+  label:      string;
+  hintFields: string[];
+}
+
+const BUILTIN_KEYS = new Set<string>(TEMPLATE_VAR_DEFS.map((v) => v.key));
+const GROUPS = ['basic', 'progress'];
+
+function NotifyVarsTab() {
+  const qc = useQueryClient();
+
+  const { data, isLoading } = useQuery<{ vars: NotifyVarEntry[] }>({
+    queryKey: ['dev', 'notify-vars'],
+    queryFn:  async () => (await apiClient.get('/dev/notify-vars')).data,
+    staleTime: 30_000,
+  });
+
+  const [working, setWorking] = useState<NotifyVarEntry[]>([]);
+  const [expandedResolve, setExpandedResolve] = useState<Set<number>>(new Set());
+  const [newEntry, setNewEntry] = useState<NotifyVarEntry>({
+    key: '', labelJa: '', labelEn: '', descJa: '', group: 'basic',
+  });
+  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
+
+  useEffect(() => {
+    if (data) setWorking(data.vars.map((v) => ({ ...v })));
+  }, [data]);
+
+  const toggleResolvePanel = (idx: number) =>
+    setExpandedResolve((s) => { const n = new Set(s); n.has(idx) ? n.delete(idx) : n.add(idx); return n; });
+
+  const setCell = (idx: number, field: keyof NotifyVarEntry, val: string) =>
+    setWorking((p) => p.map((v, i) => i === idx ? { ...v, [field]: val } : v));
+
+  // Source change also clears field so stale column name from previous source is gone
+  const setResolveSource = (idx: number, source: string) =>
+    setWorking((p) => p.map((v, i) => {
+      if (i !== idx) return v;
+      return { ...v, resolve: { source, field: '', fallback: v.resolve?.fallback } };
+    }));
+
+  const setResolveField = (idx: number, field: keyof ResolveConfig, val: string) =>
+    setWorking((p) => p.map((v, i) => {
+      if (i !== idx) return v;
+      return { ...v, resolve: { source: v.resolve?.source ?? '', field: v.resolve?.field ?? '', fallback: v.resolve?.fallback, [field]: val } };
+    }));
+
+  const clearResolve = (idx: number) =>
+    setWorking((p) => p.map((v, i) => {
+      if (i !== idx) return v;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { resolve: _r, ...rest } = v;
+      return rest as NotifyVarEntry;
+    }));
+
+  const addEntry = () => {
+    const k = newEntry.key.trim();
+    if (!k) { setToast({ msg: 'Key required', ok: false }); return; }
+    if (working.find((v) => v.key === k) || BUILTIN_KEYS.has(k)) {
+      setToast({ msg: `Key "${k}" already exists (built-in or custom)`, ok: false }); return;
+    }
+    setWorking((p) => [...p, { ...newEntry, key: k }]);
+    setNewEntry({ key: '', labelJa: '', labelEn: '', descJa: '', group: 'basic' });
+  };
+
+  const removeEntry = (idx: number) => {
+    setExpandedResolve((s) => { const n = new Set(s); n.delete(idx); return n; });
+    setWorking((p) => p.filter((_, i) => i !== idx));
+  };
+
+  const save = useMutation({
+    mutationFn: async () => (await apiClient.put('/dev/notify-vars', { vars: working })).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['dev', 'notify-vars'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'notify-var-defs'] });
+      setToast({ msg: 'Saved. Chips in notification templates update within 5 min.', ok: true });
+    },
+    onError: (e: any) => setToast({ msg: e?.response?.data?.error ?? e.message, ok: false }),
+  });
+
+  const customCount  = working.filter((v) => !BUILTIN_KEYS.has(v.key)).length;
+  const resolvedCount = working.filter((v) => !!(v.resolve?.source && v.resolve?.field)).length;
+
+  return (
+    <div className="space-y-6">
+      <StatGrid stats={[
+        { label: 'Built-in vars',  value: TEMPLATE_VAR_DEFS.length },
+        { label: 'Custom vars',    value: customCount,    accent: 'emerald' },
+        { label: 'Auto-resolved',  value: resolvedCount,  accent: 'ringo' },
+      ]} />
+
+      {/* ── Section 1: Built-in (read-only reference) ───────────────────────── */}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2 px-1">
+          <p className="text-xs font-bold uppercase tracking-widest text-warmgray-500">Built-in variables</p>
+          <span className="text-[10px] bg-warmgray-100 text-warmgray-500 px-1.5 py-0.5 rounded font-medium">read-only · hardcoded in notificationVars.ts</span>
+        </div>
+        <div className="card !p-0 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-warmgray-50 border-b border-warmgray-200">
+              <tr>
+                <th className="px-3 py-2 text-left font-bold text-[10px] uppercase tracking-widest text-warmgray-400 w-8">#</th>
+                <th className="px-3 py-2 text-left font-bold text-[10px] uppercase tracking-widest text-warmgray-400">Key</th>
+                <th className="px-3 py-2 text-left font-bold text-[10px] uppercase tracking-widest text-warmgray-400">日本語ラベル</th>
+                <th className="px-3 py-2 text-left font-bold text-[10px] uppercase tracking-widest text-warmgray-400">English</th>
+                <th className="px-3 py-2 text-left font-bold text-[10px] uppercase tracking-widest text-warmgray-400">説明</th>
+                <th className="px-3 py-2 text-left font-bold text-[10px] uppercase tracking-widest text-warmgray-400">Group</th>
+              </tr>
+            </thead>
+            <tbody>
+              {TEMPLATE_VAR_DEFS.map((def, i) => (
+                <tr key={def.key} className="border-b border-warmgray-100 bg-warmgray-50/40">
+                  <td className="px-3 py-1.5 text-[10px] text-warmgray-400 tabular-nums">{i + 1}</td>
+                  <td className="px-3 py-1.5 font-mono text-xs text-warmgray-600">{def.key}</td>
+                  <td className="px-3 py-1.5 text-xs text-warmgray-700">{def.labelJa}</td>
+                  <td className="px-3 py-1.5 text-xs text-warmgray-600">{def.labelEn}</td>
+                  <td className="px-3 py-1.5 text-xs text-warmgray-500">{def.descJa}</td>
+                  <td className="px-3 py-1.5">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                      def.group === 'progress' ? 'bg-teal-100 text-teal-700' : 'bg-warmgray-100 text-warmgray-500'
+                    }`}>{def.group}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── Section 2: Custom vars (editable) ───────────────────────────────── */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 px-1">
+          <p className="text-xs font-bold uppercase tracking-widest text-warmgray-500">Custom variables</p>
+          <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded font-medium">
+            add here → appear as chips · set auto-resolve for no-code DB values
+          </span>
+        </div>
+
+        {/* Add form */}
+        <div className="card !p-4 space-y-2">
+          <p className="text-xs font-bold text-warmgray-500">+ Add custom variable</p>
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
+            <input className="input text-sm font-mono" placeholder="key_name"
+              value={newEntry.key}
+              onChange={(e) => setNewEntry((p) => ({ ...p, key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') }))} />
+            <input className="input text-sm" placeholder="日本語ラベル"
+              value={newEntry.labelJa} onChange={(e) => setNewEntry((p) => ({ ...p, labelJa: e.target.value }))} />
+            <input className="input text-sm" placeholder="English label"
+              value={newEntry.labelEn} onChange={(e) => setNewEntry((p) => ({ ...p, labelEn: e.target.value }))} />
+            <input className="input text-sm" placeholder="説明（日本語）"
+              value={newEntry.descJa} onChange={(e) => setNewEntry((p) => ({ ...p, descJa: e.target.value }))} />
+            <select className="input text-sm" value={newEntry.group}
+              onChange={(e) => setNewEntry((p) => ({ ...p, group: e.target.value }))}>
+              {GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
+            </select>
+            <button onClick={addEntry} className="btn-primary text-sm">+ Add</button>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={() => { if (data) setWorking(data.vars.map((v) => ({ ...v }))); }}
+            className="btn-ghost text-sm"
+          >Reset</button>
+          <button onClick={() => save.mutate()} disabled={save.isPending} className="btn-primary text-sm">
+            {save.isPending ? 'Saving…' : 'Save custom vars'}
+          </button>
+        </div>
+
+        <ToastBanner toast={toast} onDismiss={() => setToast(null)} />
+
+        {isLoading ? <Loading /> : (
+          <div className="card !p-0 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-warmgray-50 border-b border-warmgray-200">
+                <tr>
+                  <th className="px-3 py-2 text-left font-bold text-[10px] uppercase tracking-widest text-warmgray-400">Key</th>
+                  <th className="px-3 py-2 text-left font-bold text-[10px] uppercase tracking-widest text-warmgray-400">日本語ラベル</th>
+                  <th className="px-3 py-2 text-left font-bold text-[10px] uppercase tracking-widest text-warmgray-400">English</th>
+                  <th className="px-3 py-2 text-left font-bold text-[10px] uppercase tracking-widest text-warmgray-400">説明</th>
+                  <th className="px-3 py-2 text-left font-bold text-[10px] uppercase tracking-widest text-warmgray-400">Group</th>
+                  <th className="px-3 py-2 text-left font-bold text-[10px] uppercase tracking-widest text-warmgray-400">Auto-resolve</th>
+                  <th className="px-3 py-2 w-8" />
+                </tr>
+              </thead>
+              <tbody>
+                {working.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-3 py-8 text-center text-warmgray-400 text-xs">
+                      No custom vars yet. Add above — they appear as chips in the notification template editor.
+                    </td>
+                  </tr>
+                )}
+                {working.map((v, i) => {
+                  const hasResolve = !!(v.resolve?.source && v.resolve?.field);
+                  const expanded   = expandedResolve.has(i);
+                  return (
+                    <Fragment key={v.key}>
+                      <tr className="border-b border-warmgray-100 hover:bg-warmgray-50/40">
+                        <td className="px-3 py-1.5 font-mono text-xs text-warmgray-700">
+                          {v.key}
+                          {BUILTIN_KEYS.has(v.key) && (
+                            <span className="ml-1 text-[9px] bg-amber-100 text-amber-700 px-1 rounded font-bold">⚠ overrides built-in</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <input className="input text-xs w-full" value={v.labelJa}
+                            onChange={(e) => setCell(i, 'labelJa', e.target.value)} />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <input className="input text-xs w-full" value={v.labelEn}
+                            onChange={(e) => setCell(i, 'labelEn', e.target.value)} />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <input className="input text-xs w-full" value={v.descJa}
+                            onChange={(e) => setCell(i, 'descJa', e.target.value)} />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <select className="input text-xs" value={v.group}
+                            onChange={(e) => setCell(i, 'group', e.target.value)}>
+                            {GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
+                          </select>
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <button
+                            onClick={() => toggleResolvePanel(i)}
+                            className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded transition-colors ${
+                              hasResolve
+                                ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                : 'bg-warmgray-100 text-warmgray-500 hover:bg-warmgray-200'
+                            }`}
+                          >
+                            {hasResolve ? `⚡ ${v.resolve!.source}.${v.resolve!.field}` : '+ set resolve'}
+                            <span>{expanded ? ' ▲' : ' ▼'}</span>
+                          </button>
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <button onClick={() => removeEntry(i)} className="text-red-400 hover:text-red-600 text-base leading-none">×</button>
+                        </td>
+                      </tr>
+
+                      {/* Resolve panel — own component so it can own the preview query */}
+                      {expanded && (
+                        <tr className="border-b border-warmgray-200 bg-emerald-50/50">
+                          <td colSpan={7} className="px-4 py-3">
+                            <ResolvePanel
+                              varKey={v.key}
+                              resolve={v.resolve}
+                              onSetSource={(src) => setResolveSource(i, src)}
+                              onSetField={(val)  => setResolveField(i, 'field',    val)}
+                              onSetFallback={(val) => setResolveField(i, 'fallback', val)}
+                              onClear={() => clearResolve(i)}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ResolvePanel — own component so it can own its preview query.
+// Only mounts when expanded, so query only fires on demand.
+// ─────────────────────────────────────────────────────────────────────────────
+function ResolvePanel({
+  varKey,
+  resolve,
+  onSetSource,
+  onSetField,
+  onSetFallback,
+  onClear,
+}: {
+  varKey:       string;
+  resolve?:     ResolveConfig;
+  onSetSource:  (src: string) => void;
+  onSetField:   (val: string) => void;
+  onSetFallback:(val: string) => void;
+  onClear:      () => void;
+}) {
+  // Sources list — cached for session (rarely changes)
+  const { data: sourcesData, isLoading: sourcesLoading } = useQuery<{ sources: ResolveSource[] }>({
+    queryKey: ['dev', 'resolve-sources'],
+    queryFn:  async () => (await apiClient.get('/dev/resolve-sources')).data,
+    staleTime: Infinity,    // source table list never changes at runtime
+  });
+  const sources = sourcesData?.sources ?? [];
+
+  // Live DB preview — only fetches once a source is picked, cached per source
+  const { data: preview, isFetching: previewLoading } = useQuery<{
+    values: Record<string, string | null>;
+    app_id?: string;
+    note?: string;
+  }>({
+    queryKey: ['dev', 'resolve-preview', resolve?.source],
+    queryFn:  async () =>
+      (await apiClient.get(`/dev/resolve-preview?source=${resolve!.source}`)).data,
+    enabled:  !!(resolve?.source),
+    staleTime: 60_000,   // re-fetch each minute — dev may insert test data
+  });
+
+  const selectedSrc = sources.find((s) => s.key === resolve?.source);
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-700">
+        ⚡ Auto-resolve — backend SELECTs this column and injects as{' '}
+        <code className="bg-white/60 px-1 rounded font-mono">{`{{${varKey}}}`}</code>
+      </p>
+
+      <div className="flex flex-wrap gap-4 items-start">
+        {/* ── Source picker ── */}
+        <div className="space-y-1 min-w-[160px]">
+          <label className="text-[10px] text-warmgray-500 font-semibold block">Source table</label>
+          {sourcesLoading ? (
+            <div className="input text-xs w-44 text-warmgray-400">Loading…</div>
+          ) : (
+            <select
+              className="input text-xs w-44"
+              value={resolve?.source ?? ''}
+              onChange={(e) => onSetSource(e.target.value)}
+            >
+              <option value="">— select —</option>
+              {sources.map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.label}　({s.key})
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        {/* ── Column picker with live DB values ── */}
+        {resolve?.source && (
+          <div className="space-y-1 flex-1 min-w-[260px]">
+            <label className="text-[10px] text-warmgray-500 font-semibold flex items-center gap-2">
+              Column — click row to select
+              {previewLoading && <span className="text-warmgray-400 font-normal animate-pulse">fetching values…</span>}
+              {preview?.app_id && !previewLoading && (
+                <span className="text-warmgray-300 font-normal font-mono text-[9px]">
+                  from app {preview.app_id.slice(0, 8)}…
+                </span>
+              )}
+            </label>
+            <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
+              {(selectedSrc?.hintFields ?? []).map((f) => {
+                const rawVal  = preview?.values?.[f];
+                const display = rawVal == null ? <span className="text-warmgray-300 italic">null</span>
+                              : rawVal === ''   ? <span className="text-warmgray-300 italic">empty</span>
+                              : <span className="truncate max-w-[200px]">{rawVal}</span>;
+                const isSelected = resolve?.field === f;
+                return (
+                  <button
+                    key={f}
+                    onClick={() => onSetField(f)}
+                    className={`flex items-center gap-3 px-3 py-2 rounded-lg text-left text-xs transition-all ${
+                      isSelected
+                        ? 'bg-emerald-500 text-white shadow-sm'
+                        : 'bg-white border border-warmgray-200 text-warmgray-700 hover:border-emerald-400 hover:bg-emerald-50'
+                    }`}
+                  >
+                    <span className={`font-mono font-bold shrink-0 ${isSelected ? 'text-white' : 'text-warmgray-600'}`}>
+                      {f}
+                    </span>
+                    <span className={`text-[10px] flex-1 ${isSelected ? 'text-emerald-100' : 'text-warmgray-400'}`}>
+                      = {display}
+                    </span>
+                    {isSelected && <span className="text-emerald-200 text-[10px] shrink-0">✓ selected</span>}
+                  </button>
+                );
+              })}
+            </div>
+            {preview?.note && (
+              <p className="text-[10px] text-amber-600 mt-1">{preview.note}</p>
+            )}
+          </div>
+        )}
+
+        {/* ── Fallback ── */}
+        <div className="space-y-1">
+          <label className="text-[10px] text-warmgray-500 font-semibold block">
+            Fallback <span className="font-normal">(blank = empty string)</span>
+          </label>
+          <input
+            className="input text-xs w-32"
+            placeholder='e.g. "—"'
+            value={resolve?.fallback ?? ''}
+            onChange={(e) => onSetFallback(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {/* Remove resolve link */}
+      {(resolve?.source || resolve?.field) && (
+        <button
+          onClick={onClear}
+          className="text-[10px] text-red-500 hover:text-red-700 underline underline-offset-2"
+        >
+          Remove auto-resolve
+        </button>
       )}
     </div>
   );

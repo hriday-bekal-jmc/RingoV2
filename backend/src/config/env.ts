@@ -63,6 +63,14 @@ const schema = z.object({
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL:   z.string().default('gemini-2.0-flash'),
 
+  // ── Email (SMTP) — all optional; if absent, email notifications silently disabled ──
+  SMTP_HOST:   z.string().optional(),
+  SMTP_PORT:   z.coerce.number().int().positive().default(587),
+  SMTP_SECURE: z.string().optional(), // 'true' for port 465 TLS (SMTPS); default STARTTLS
+  SMTP_USER:   z.string().optional(),
+  SMTP_PASS:   z.string().optional(),
+  EMAIL_FROM:  z.string().optional(), // e.g. "RINGO <noreply@example.com>"
+
   // ── Misc ──
   SUPER_ADMIN_EMAIL: z.string().email().optional(),
   SUPER_ADMIN_EMAILS: z.string().optional(),

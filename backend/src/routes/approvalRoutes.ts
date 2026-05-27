@@ -6,6 +6,7 @@ import { mutationLimiter } from '../middlewares/rateLimit';
 import { insertOutboxEvent } from '../services/eventOutbox';
 import { computeApplicationRecipients } from '../services/eventRecipients';
 import { invalidateDashboardCache } from '../services/dashboardCache';
+import { notifyApplicationEvent }  from '../services/notificationService';
 import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
 import { extractRowPreview } from '../services/rowPreview';
 import type pg from 'pg';
@@ -281,6 +282,23 @@ async function processSingleApprove(
   });
 
   invalidateDashboardCache(recipients);
+
+  // Fire-and-forget notifications — never blocks response
+  const resultStatus = (result as { status?: string }).status;
+  const isFinalApprove = resultStatus === 'APPROVED' || resultStatus === 'COMPLETED';
+  const isSettleFinal  = resultStatus === 'SETTLEMENT_APPROVED';
+  if (isFinalApprove || isSettleFinal) {
+    // Final approval — notify applicant
+    notifyApplicationEvent(
+      isSettleFinal ? 'SETTLEMENT_APPROVED' : 'APP_APPROVED',
+      appId,
+      { actor_id: userId },
+    );
+  } else {
+    // Intermediate step — notify next assigned approver
+    notifyApplicationEvent('STEP_ACTION_REQUIRED', appId, { actor_id: userId });
+  }
+
   return result as Record<string, unknown>;
 }
 
@@ -426,6 +444,7 @@ router.post('/:id/return', async (req: Request, res: Response): Promise<void> =>
       returnRecipients = recipients;
     });
     invalidateDashboardCache(returnRecipients);
+    notifyApplicationEvent('APP_RETURNED', String(id), { actor_id: userId, comment: comment ?? '' });
     res.json({ message: '差し戻しました' });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
@@ -485,6 +504,7 @@ router.post('/:id/reject', async (req: Request, res: Response): Promise<void> =>
       rejectRecipients = recipients;
     });
     invalidateDashboardCache(rejectRecipients);
+    notifyApplicationEvent('APP_REJECTED', String(id), { actor_id: userId, comment: comment ?? '' });
     res.json({ message: '却下しました' });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };

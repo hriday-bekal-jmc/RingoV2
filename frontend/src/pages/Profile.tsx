@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import Layout from '../components/common/Layout';
@@ -18,6 +18,36 @@ export default function Profile() {
 
   const [name, setName] = useState(user?.full_name ?? '');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
+
+  // Notification settings — typed properly now that User interface includes these fields
+  const [notifyEmail,   setNotifyEmail]  = useState<boolean>(user?.notify_email  ?? true);
+  const [notifyGchat,   setNotifyGchat]  = useState<boolean>(user?.notify_gchat  ?? false);
+  const [webhookUrl,    setWebhookUrl]   = useState<string>(user?.gchat_webhook_url ?? '');
+  const [notifStatus,   setNotifStatus]  = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  const webhookValid = !webhookUrl || webhookUrl.startsWith('https://chat.googleapis.com/');
+
+  const saveNotifications = useCallback(async () => {
+    if (!webhookValid) return;
+    setNotifStatus('saving');
+    try {
+      const res = await apiClient.patch('/auth/me/notifications', {
+        notify_email: notifyEmail,
+        notify_gchat: notifyGchat,
+        gchat_webhook_url: webhookUrl || null,
+      });
+      // Patch AuthContext so navigating away + back shows the saved values
+      const saved = res.data.notifications as {
+        notify_email: boolean; notify_gchat: boolean; gchat_webhook_url: string | null;
+      };
+      setUser((prev) => prev ? { ...prev, ...saved } : prev);
+      setNotifStatus('saved');
+      setTimeout(() => setNotifStatus('idle'), 2500);
+    } catch {
+      setNotifStatus('error');
+      setTimeout(() => setNotifStatus('idle'), 3000);
+    }
+  }, [notifyEmail, notifyGchat, webhookUrl, webhookValid, setUser]);
   const [avatarStatus, setAvatarStatus] = useState<'idle' | 'uploading' | 'saved' | 'error'>('idle');
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -278,6 +308,73 @@ export default function Profile() {
                 )}
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* Notification settings */}
+        <div className="card animate-fade-up space-y-4">
+          <p className="section-title">{lang === 'ja' ? '通知設定' : 'Notifications'}</p>
+
+          {/* Google Chat webhook */}
+          <div>
+            <label className="label">{lang === 'ja' ? 'Google Chat Webhook URL' : 'Google Chat Webhook URL'}</label>
+            <input
+              type="url"
+              className="input"
+              value={webhookUrl}
+              onChange={(e) => setWebhookUrl(e.target.value)}
+              placeholder="https://chat.googleapis.com/v1/spaces/..."
+            />
+            {webhookUrl && !webhookValid && (
+              <p className="text-xs text-red-500 mt-1">
+                {lang === 'ja' ? 'https://chat.googleapis.com/ から始まるURLを入力してください' : 'URL must start with https://chat.googleapis.com/'}
+              </p>
+            )}
+            {!webhookUrl && (
+              <p className="text-xs text-warmgray-400 mt-1">
+                {lang === 'ja'
+                  ? 'Google Chat スペースの Webhook URL を貼り付けてください'
+                  : 'Paste the Incoming Webhook URL from your Google Chat space'}
+              </p>
+            )}
+          </div>
+
+          {/* Toggles */}
+          <div className="flex flex-col gap-3">
+            {([
+              { key: 'email', label: lang === 'ja' ? 'メール通知' : 'Email notifications', desc: lang === 'ja' ? '各イベントでメールを受け取ります' : 'Receive email for each event', value: notifyEmail, set: setNotifyEmail },
+              { key: 'gchat', label: lang === 'ja' ? 'Google Chat通知' : 'Google Chat', desc: lang === 'ja' ? 'Webhookに通知を送信します' : 'Send notifications to your webhook', value: notifyGchat, set: setNotifyGchat },
+            ] as const).map((item) => (
+              <div key={item.key} className="flex items-center justify-between gap-4 bg-white/60 border border-white/70 rounded-xl px-4 py-3">
+                <div>
+                  <p className="text-sm font-semibold text-warmgray-800">{item.label}</p>
+                  <p className="text-xs text-warmgray-400">{item.desc}</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={item.value}
+                  onClick={() => item.set(!item.value)}
+                  className={`relative h-6 w-11 rounded-full transition-colors focus:outline-none ${item.value ? 'bg-ringo-500' : 'bg-warmgray-300'}`}
+                >
+                  <span className={`absolute top-[3px] left-[3px] h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-transform duration-200 ${item.value ? 'translate-x-[20px]' : 'translate-x-0'}`} />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between pt-1">
+            {notifStatus === 'saved'  && <span className="text-xs text-emerald-600">{lang === 'ja' ? '保存しました ✓' : 'Saved ✓'}</span>}
+            {notifStatus === 'error'  && <span className="text-xs text-red-500">{lang === 'ja' ? '保存に失敗しました' : 'Save failed'}</span>}
+            {notifStatus !== 'saved' && notifStatus !== 'error' && <span />}
+            <button
+              type="button"
+              disabled={notifStatus === 'saving' || !webhookValid}
+              onClick={saveNotifications}
+              className={`btn-primary text-sm px-5 py-2 ${notifStatus === 'saving' || !webhookValid ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              {notifStatus === 'saving' ? (lang === 'ja' ? '保存中...' : 'Saving...') : (lang === 'ja' ? '保存する' : 'Save')}
+            </button>
           </div>
         </div>
 

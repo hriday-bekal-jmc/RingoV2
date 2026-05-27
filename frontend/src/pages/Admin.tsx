@@ -8,7 +8,8 @@ import Layout from '../components/common/Layout';
 import { ROLE_MAP, Role } from '../config/permissions';
 import InlineConfirm from '../components/common/InlineConfirm';
 import AdminAppDetailModal from '../components/admin/AdminAppDetailModal';
-import FormsTab from '../components/admin/FormsTab';
+import FormsTab                    from '../components/admin/FormsTab';
+import NotificationTemplatesTab   from '../components/admin/NotificationTemplatesTab';
 import RingoLoader from '../components/common/RingoLoader';
 import { Sk } from '../components/common/Skeleton';
 import Toast, { useToast } from '../components/common/Toast';
@@ -28,6 +29,10 @@ interface User {
   department_name?: string;
   department_id?: string;
   avatar_url?: string | null;
+  // Notification preferences — included in GET /admin/users since schema fix
+  notify_email:      boolean;
+  notify_gchat:      boolean;
+  gchat_webhook_url: string | null;
 }
 
 interface Department { id: string; name: string; code: string }
@@ -100,18 +105,21 @@ interface UserModalProps {
 
 function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalProps) {
   const isNew = !user;
-  const { t } = useLang();
+  const { t, lang } = useLang();
 
   // Lock page scroll while this modal is open — same reason as ConfirmDialog
   useScrollLock(true);
   const [form, setForm] = useState({
-    full_name:     user?.full_name ?? '',
-    email:         user?.email ?? '',
-    password:      '',
-    role:          user?.role ?? 'MEMBER',
-    is_admin:      user?.is_admin ?? false,
-    department_id: user?.department_id ?? '',
-    is_active:     user?.is_active ?? true,
+    full_name:         user?.full_name ?? '',
+    email:             user?.email ?? '',
+    password:          '',
+    role:              user?.role ?? 'MEMBER',
+    is_admin:          user?.is_admin ?? false,
+    department_id:     user?.department_id ?? '',
+    is_active:         user?.is_active ?? true,
+    gchat_webhook_url: user?.gchat_webhook_url ?? '',
+    notify_email:      user?.notify_email      ?? true,
+    notify_gchat:      user?.notify_gchat      ?? false,
   });
 
   const set = (k: string, v: any) => setForm((p) => ({ ...p, [k]: v }));
@@ -200,6 +208,42 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
               <label htmlFor="is_active" className="text-sm font-medium text-warmgray-700">{t('admin_field_active')}</label>
             </div>
           )}
+          {/* Notification settings */}
+          <div className="col-span-2 space-y-2">
+            <p className="text-xs font-semibold text-warmgray-500 uppercase tracking-wider">
+              {lang === 'ja' ? '通知設定' : 'Notifications'}
+            </p>
+            <div>
+              <label className="label text-xs">{lang === 'ja' ? 'Google Chat Webhook URL' : 'Google Chat Webhook URL'}</label>
+              <input
+                className="input text-xs"
+                type="url"
+                value={form.gchat_webhook_url ?? ''}
+                onChange={(e) => set('gchat_webhook_url', e.target.value)}
+                placeholder="https://chat.googleapis.com/v1/spaces/..."
+              />
+              {form.gchat_webhook_url && !form.gchat_webhook_url.startsWith('https://chat.googleapis.com/') && (
+                <p className="text-[11px] text-red-500 mt-0.5">{lang === 'ja' ? '無効なURLです' : 'Invalid URL'}</p>
+              )}
+            </div>
+            <div className="flex gap-4">
+              {(['notify_email', 'notify_gchat'] as const).map((field) => (
+                <label key={field} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(form[field] ?? (field === 'notify_email'))}
+                    onChange={(e) => set(field, e.target.checked)}
+                    className="w-4 h-4 accent-ringo-500"
+                  />
+                  <span className="text-xs text-warmgray-700">
+                    {field === 'notify_email'
+                      ? (lang === 'ja' ? 'メール通知' : 'Email')
+                      : (lang === 'ja' ? 'Google Chat通知' : 'Google Chat')}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
         </div>
 
         <div className="flex justify-end gap-3 pt-2">
@@ -261,8 +305,17 @@ function UsersTab({ showToast, onGoToRoutes }: {
   });
 
   const updateUser = useMutation({
-    mutationFn: async ({ id, ...patch }: { id: string } & Record<string, any>) =>
-      (await apiClient.patch(`/admin/users/${id}`, patch)).data,
+    mutationFn: async ({ id, notify_email, notify_gchat, gchat_webhook_url, ...patch }: { id: string } & Record<string, any>) => {
+      // Send core user fields and notification settings in parallel
+      await Promise.all([
+        apiClient.patch(`/admin/users/${id}`, patch),
+        apiClient.patch(`/admin/users/${id}/notifications`, {
+          notify_email,
+          notify_gchat,
+          gchat_webhook_url: gchat_webhook_url || null,
+        }),
+      ]);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
       setEditUser(null);
@@ -1898,11 +1951,11 @@ function AllowanceTab({ showToast }: { showToast: (msg: string, type?: 'success'
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-type Tab = 'routes' | 'users' | 'applications' | 'permissions' | 'forms' | 'allowance';
+type Tab = 'routes' | 'users' | 'applications' | 'permissions' | 'forms' | 'allowance' | 'notifications';
 
 export default function Admin() {
   const [tab, setTab] = useState<Tab>('routes');
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const { toast, show: showToast, dismiss } = useToast();
 
   const TAB_CONFIG: { key: Tab; label: string; icon: string }[] = [
@@ -1912,6 +1965,7 @@ export default function Admin() {
     { key: 'forms',        label: t('admin_forms_tab'),   icon: '📝' },
     { key: 'allowance',    label: '日当レート',             icon: '💴' },
     { key: 'permissions',  label: t('admin_perms_tab'),   icon: '🛡️' },
+    { key: 'notifications', label: lang === 'ja' ? '通知テンプレート' : 'Notifications', icon: '🔔' },
   ];
 
   return (
@@ -1945,7 +1999,8 @@ export default function Admin() {
           {tab === 'applications' && <ApplicationsTab showToast={showToast} />}
           {tab === 'forms'        && <FormsTab showToast={showToast} />}
           {tab === 'permissions'  && <PermissionsTab showToast={showToast} />}
-          {tab === 'allowance'    && <AllowanceTab showToast={showToast} />}
+          {tab === 'allowance'     && <AllowanceTab showToast={showToast} />}
+          {tab === 'notifications' && <NotificationTemplatesTab showToast={showToast} />}
         </div>
       </div>
     </Layout>

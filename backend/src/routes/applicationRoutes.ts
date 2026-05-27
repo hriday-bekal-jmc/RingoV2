@@ -8,7 +8,8 @@ import { applyComputedFormData, validateFormData } from '../services/formValidat
 import { insertOutboxEvent } from '../services/eventOutbox';
 import { deleteFilesForApplication } from '../services/fileCleanup';
 import { computeApplicationRecipients } from '../services/eventRecipients';
-import { invalidateDashboardCache } from '../services/dashboardCache';
+import { invalidateDashboardCache }  from '../services/dashboardCache';
+import { notifyApplicationEvent }   from '../services/notificationService';
 import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
 import { extractRowPreview } from '../services/rowPreview';
 import { validateBody } from '../middlewares/validate';
@@ -581,6 +582,7 @@ router.post('/:id/submit', async (req: Request, res: Response): Promise<void> =>
       };
     });
     invalidateDashboardCache((result as any)._recipients ?? []);
+    notifyApplicationEvent('APP_SUBMITTED', String(req.params.id));
     res.json({ message: '申請を提出しました', application: result });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };

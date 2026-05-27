@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import fs from 'fs/promises';
+import path from 'path';
 import argon2 from 'argon2';
 import { query, withTransaction, pool } from '../config/db';
 import { requireAuth, requireAdmin, invalidateUserStateCache } from '../middlewares/authMiddleware';
@@ -8,7 +10,9 @@ import { computeApplicationRecipients } from '../services/eventRecipients';
 import { redis } from '../config/redis';
 import { SUPER_ADMIN_EMAILS } from '../config/env';
 import { getJsonCache, setJsonCache } from '../services/cache';
-import { invalidateRolePermissionsCache } from '../services/rolePermissionsCache';
+import { invalidateRolePermissionsCache }  from '../services/rolePermissionsCache';
+import { invalidateNotificationCache }    from '../services/notificationCache';
+import { isValidGChatWebhook }            from '../services/gchatService';
 import {
   ADMIN_REF_CACHE_TTL_SEC,
   adminRefCacheKey,
@@ -60,6 +64,7 @@ router.get('/users', async (_req: Request, res: Response): Promise<void> => {
              (u.is_admin OR lower(u.email) = ANY($1::text[])) AS is_admin,
              u.is_active, u.department_id,
              u.avatar_url,
+             u.notify_email, u.notify_gchat, u.gchat_webhook_url,
              d.name AS department_name
       FROM users u
       LEFT JOIN departments d ON u.department_id = d.id
@@ -902,6 +907,136 @@ router.patch('/role-permissions/:role', validateBody(updatePermissionsSchema), a
   } catch (err) {
     console.error('[admin] role-permissions update failed:', err);
     res.status(500).json({ error: '権限の更新に失敗しました' });
+  }
+});
+
+// ─── Notification Templates ───────────────────────────────────────────────────
+
+const VALID_EVENT_TYPES = new Set([
+  'APP_SUBMITTED', 'APP_APPROVED', 'APP_RETURNED', 'APP_REJECTED',
+  'SETTLEMENT_SUBMITTED', 'SETTLEMENT_APPROVED', 'STEP_ACTION_REQUIRED',
+]);
+
+// GET /admin/notification-templates — list all templates
+router.get('/notification-templates', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const r = await pool.query(
+      `SELECT event_type, subject, body_html, is_active, updated_at
+       FROM notification_templates ORDER BY event_type`,
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error('[admin] notification-templates fetch failed:', err);
+    res.status(500).json({ error: 'テンプレートの取得に失敗しました' });
+  }
+});
+
+// PATCH /admin/notification-templates/:eventType — update one template
+router.patch('/notification-templates/:eventType', async (req: Request, res: Response): Promise<void> => {
+  const eventType = String(req.params.eventType);
+  if (!VALID_EVENT_TYPES.has(eventType)) {
+    res.status(400).json({ error: '無効なイベントタイプです' });
+    return;
+  }
+
+  const { subject, body_html, is_active } = req.body as {
+    subject?: string; body_html?: string; is_active?: boolean;
+  };
+
+  if (subject !== undefined && typeof subject !== 'string') {
+    res.status(400).json({ error: 'subject must be a string' }); return;
+  }
+  if (body_html !== undefined && typeof body_html !== 'string') {
+    res.status(400).json({ error: 'body_html must be a string' }); return;
+  }
+  if (is_active !== undefined && typeof is_active !== 'boolean') {
+    res.status(400).json({ error: 'is_active must be a boolean' }); return;
+  }
+
+  try {
+    const r = await pool.query(
+      `INSERT INTO notification_templates (event_type, subject, body_html, is_active, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (event_type) DO UPDATE
+         SET subject    = COALESCE($2, notification_templates.subject),
+             body_html  = COALESCE($3, notification_templates.body_html),
+             is_active  = COALESCE($4, notification_templates.is_active),
+             updated_at = NOW()
+       RETURNING event_type, subject, body_html, is_active, updated_at`,
+      [
+        eventType,
+        subject   ?? null,
+        body_html ?? null,
+        is_active ?? null,
+      ],
+    );
+
+    // Bust in-memory cache so all instances pick up change within one request cycle
+    invalidateNotificationCache(eventType);
+
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error('[admin] notification-template update failed:', err);
+    res.status(500).json({ error: 'テンプレートの更新に失敗しました' });
+  }
+});
+
+// ─── User Notification Settings (admin side) ─────────────────────────────────
+
+// PATCH /admin/users/:id/notifications — update webhook + toggles
+router.patch('/users/:id/notifications', async (req: Request, res: Response): Promise<void> => {
+  const targetId = String(req.params.id);
+  const { notify_email, notify_gchat, gchat_webhook_url } = req.body as {
+    notify_email?: boolean;
+    notify_gchat?: boolean;
+    gchat_webhook_url?: string | null;
+  };
+
+  // Validate webhook URL if provided
+  if (gchat_webhook_url !== undefined && gchat_webhook_url !== null && gchat_webhook_url !== '') {
+    if (!isValidGChatWebhook(gchat_webhook_url)) {
+      res.status(400).json({ error: 'Google Chat Webhook URLが無効です。https://chat.googleapis.com/ で始まる必要があります。' });
+      return;
+    }
+  }
+
+  try {
+    const r = await pool.query(
+      `UPDATE users
+       SET notify_email      = COALESCE($1, notify_email),
+           notify_gchat      = COALESCE($2, notify_gchat),
+           gchat_webhook_url = CASE WHEN $3::text IS NOT NULL THEN $3 ELSE gchat_webhook_url END,
+           updated_at        = NOW()
+       WHERE id = $4 AND deleted_at IS NULL
+       RETURNING id, notify_email, notify_gchat, gchat_webhook_url`,
+      [
+        notify_email ?? null,
+        notify_gchat ?? null,
+        gchat_webhook_url !== undefined ? (gchat_webhook_url || null) : null,
+        targetId,
+      ],
+    );
+    if (r.rows.length === 0) {
+      res.status(404).json({ error: 'ユーザーが見つかりません' }); return;
+    }
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error('[admin] user notification update failed:', err);
+    res.status(500).json({ error: '通知設定の更新に失敗しました' });
+  }
+});
+
+// GET /admin/notify-var-defs — serve overrides JSON for the notification chips
+// All admins can read (non-destructive). Only dev page can write (via devRoutes).
+const NOTIFY_VARS_PATH = path.resolve(__dirname, '../../../frontend/src/config/notificationVars.overrides.json');
+
+router.get('/notify-var-defs', async (_req: Request, res: Response) => {
+  try {
+    const raw = await fs.readFile(NOTIFY_VARS_PATH, 'utf8');
+    const parsed = JSON.parse(raw) as { vars?: unknown[] };
+    res.json({ vars: Array.isArray(parsed.vars) ? parsed.vars : [] });
+  } catch {
+    res.json({ vars: [] }); // file missing → empty overrides, frontend uses hardcoded
   }
 });
 

@@ -15,10 +15,12 @@ import fs from 'fs/promises';
 import path from 'path';
 import { requireAuth } from '../middlewares/authMiddleware';
 import { query, withTransaction } from '../config/db';
+import { RESOLVE_SOURCES, invalidateVarOverrideCache } from '../services/notificationService';
 import type pg from 'pg';
 
 const DEV_EMAIL = 'h-bekal@jmc-ltd.co.jp';
-const OVERRIDES_PATH = path.resolve(__dirname, '../../../frontend/src/i18n.overrides.json');
+const OVERRIDES_PATH       = path.resolve(__dirname, '../../../frontend/src/i18n.overrides.json');
+const NOTIFY_VARS_OVERRIDE = path.resolve(__dirname, '../../../frontend/src/config/notificationVars.overrides.json');
 
 function requireDev(req: Request, res: Response, next: NextFunction): void {
   const email = (req.user?.email ?? '').toLowerCase();
@@ -323,6 +325,130 @@ router.put('/db-strings', async (req: Request, res: Response): Promise<void> => 
   } catch (err) {
     console.error('[dev/db-strings] write failed:', err);
     res.status(500).json({ error: 'Failed to update DB strings' });
+  }
+});
+
+// ── Notification variable definitions ────────────────────────────────────────
+// Stores user-added/edited var metadata in notificationVars.overrides.json.
+// Frontend merges with its hardcoded baseline at runtime.
+
+interface NotifyVarEntry {
+  key:     string;
+  labelJa: string;
+  labelEn: string;
+  descJa:  string;
+  group:   string;
+  resolve?: { source: string; field: string; fallback?: string };
+}
+interface NotifyVarsOverride { vars: NotifyVarEntry[] }
+
+async function readNotifyVarsOverride(): Promise<NotifyVarsOverride> {
+  try {
+    const raw = await fs.readFile(NOTIFY_VARS_OVERRIDE, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<NotifyVarsOverride>;
+    return { vars: Array.isArray(parsed.vars) ? parsed.vars : [] };
+  } catch {
+    return { vars: [] };
+  }
+}
+
+async function writeNotifyVarsOverride(data: NotifyVarsOverride): Promise<void> {
+  await fs.writeFile(NOTIFY_VARS_OVERRIDE, JSON.stringify(data, null, 2) + '\n', 'utf8');
+}
+
+// GET /api/dev/notify-vars — read overrides (dev only writes, but all admins can read via /admin)
+router.get('/notify-vars', async (_req: Request, res: Response) => {
+  try {
+    res.json(await readNotifyVarsOverride());
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to read notify-vars overrides' });
+  }
+});
+
+// PUT /api/dev/notify-vars — replace full overrides
+router.put('/notify-vars', async (req: Request, res: Response) => {
+  const body = req.body as Partial<NotifyVarsOverride>;
+  if (!Array.isArray(body?.vars)) {
+    res.status(400).json({ error: 'Body must be { vars: [...] }' });
+    return;
+  }
+  // Validate each entry + optional resolve config
+  for (const v of body.vars) {
+    if (typeof v.key !== 'string' || !v.key.trim()) {
+      res.status(400).json({ error: 'Each var must have a non-empty key' });
+      return;
+    }
+    if (v.resolve) {
+      if (!RESOLVE_SOURCES[v.resolve.source]) {
+        res.status(400).json({ error: `Unknown resolve source: ${v.resolve.source}` });
+        return;
+      }
+      if (!/^[a-z_][a-z0-9_]{0,62}$/.test(v.resolve.field)) {
+        res.status(400).json({ error: `Invalid field name: ${v.resolve.field}` });
+        return;
+      }
+    }
+  }
+  try {
+    const clean: NotifyVarsOverride = { vars: body.vars };
+    await writeNotifyVarsOverride(clean);
+    invalidateVarOverrideCache();   // flush 30s in-process cache immediately
+    res.json({ ok: true, count: clean.vars.length });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to write notify-vars overrides' });
+  }
+});
+
+// GET /api/dev/resolve-sources — allowed source table list for UI picker
+router.get('/resolve-sources', (_req: Request, res: Response) => {
+  const sources = Object.entries(RESOLVE_SOURCES).map(([key, cfg]) => ({
+    key,
+    label:      cfg.label,
+    hintFields: cfg.hintFields,
+  }));
+  res.json({ sources });
+});
+
+// GET /api/dev/resolve-preview?source=<source>
+// Returns actual DB values for each hint field using the most recent application.
+// Powers the column-picker UI — dev sees real data, not just column names.
+router.get('/resolve-preview', async (req: Request, res: Response): Promise<void> => {
+  const { source } = req.query as { source?: string };
+  if (!source || !RESOLVE_SOURCES[source]) {
+    res.status(400).json({ error: `Unknown source: ${source ?? '(empty)'}` });
+    return;
+  }
+  const src = RESOLVE_SOURCES[source];
+  try {
+    // Most recent application — gives representative data
+    const recent = await query(`SELECT id FROM applications ORDER BY created_at DESC LIMIT 1`);
+    if (recent.rows.length === 0) {
+      res.json({ values: {}, note: 'No applications in DB yet' });
+      return;
+    }
+    const appId: string = recent.rows[0].id;
+
+    // Only allow safe field names (already guaranteed by hintFields whitelist, but re-check)
+    const safeFields = src.hintFields.filter((f: string) => /^[a-z_][a-z0-9_]{0,62}$/.test(f));
+    if (safeFields.length === 0) { res.json({ values: {}, app_id: appId }); return; }
+
+    const selects   = safeFields.map((f: string) => `${src.alias}.${f}::text AS "${f}"`);
+    const extraJoin = src.join ?? '';
+
+    const r = await query(
+      `SELECT ${selects.join(', ')}
+       FROM applications a
+       JOIN users u           ON u.id  = a.applicant_id
+       JOIN form_templates ft ON ft.id = a.template_id
+       LEFT JOIN departments d ON d.id = u.department_id
+       ${extraJoin}
+       WHERE a.id = $1`,
+      [appId],
+    );
+    res.json({ values: (r.rows[0] ?? {}) as Record<string, string | null>, app_id: appId });
+  } catch (err) {
+    console.error('[dev/resolve-preview] failed:', err);
+    res.status(500).json({ error: 'Preview query failed' });
   }
 });
 

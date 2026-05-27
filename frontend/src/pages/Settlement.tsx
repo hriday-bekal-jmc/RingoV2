@@ -9,6 +9,7 @@ import { useLang } from '../context/LanguageContext';
 import CustomSelect from '../components/forms/CustomSelect';
 import RouteTimeline from '../components/common/RouteTimeline';
 import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
+import { FieldValueContent, type DisplayField } from '../components/forms/FieldValueDisplay';
 
 interface FormField {
   name: string;
@@ -53,16 +54,39 @@ function shouldSpanSummary(value: unknown, type?: string): boolean {
   return type === 'repeat_group' || type === 'textarea' || type === 'file' || text.length > 80 || text.includes('\n');
 }
 
+const RICH_TYPES = new Set(['user_picker', 'route_entry', 'allowance_days', 'file', 'ai_file_reader']);
+
 function ReadField({
   label,
   value,
+  field,
   fullWidth = false,
 }: {
   label: string;
   value: unknown;
+  field?: DisplayField;
   fullWidth?: boolean;
 }) {
   if (value == null || value === '') return null;
+
+  // Rich types: delegate to FieldValueContent for proper rendering
+  if (field && RICH_TYPES.has(field.type)) {
+    return (
+      <div className={`min-w-0 ${fullWidth ? 'md:col-span-2' : ''}`}>
+        <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-0.5 break-words [overflow-wrap:anywhere]">
+          {label}
+        </dt>
+        <dd className="text-sm leading-relaxed text-warmgray-800 break-words [overflow-wrap:anywhere]">
+          <FieldValueContent
+            field={field}
+            value={value}
+            renderRepeat={(f, v) => <RepeatGroupDisplay field={f as FormField} value={v} compact />}
+          />
+        </dd>
+      </div>
+    );
+  }
+
   const text = formatReadValue(value);
   return (
     <div className={`min-w-0 ${fullWidth ? 'md:col-span-2' : ''}`}>
@@ -111,6 +135,7 @@ function RingiSummary({ app, badge }: { app: AppDetail; badge: string }) {
                   key={f.name}
                   label={f.label}
                   value={data[f.name]}
+                  field={f as DisplayField}
                   fullWidth={shouldSpanSummary(data[f.name], f.type)}
                 />
               );
