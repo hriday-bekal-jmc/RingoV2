@@ -11,6 +11,15 @@ import { computeApplicationRecipients } from '../services/eventRecipients';
 import { invalidateDashboardCache } from '../services/dashboardCache';
 import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
 import { extractRowPreview } from '../services/rowPreview';
+import { validateBody } from '../middlewares/validate';
+import {
+  createApplicationSchema, type CreateApplicationBody,
+  saveApplicationSchema, type SaveApplicationBody,
+  submitApplicationSchema, type SubmitApplicationBody,
+  startSettlementSchema, type StartSettlementBody,
+  submitSettlementSchema, type SubmitSettlementBody,
+  adminSubmitSchema, type AdminSubmitBody,
+} from '../schemas/applicationSchemas';
 import type pg from 'pg';
 
 const router = Router();
@@ -199,11 +208,8 @@ router.get('/route-preview', async (req: Request, res: Response): Promise<void> 
 });
 
 // POST /applications/draft — save a draft (no approval steps, no route required)
-router.post('/draft', async (req: Request, res: Response): Promise<void> => {
-  const { template_id, form_data } = req.body as {
-    template_id: string;
-    form_data: Record<string, unknown>;
-  };
+router.post('/draft', validateBody(createApplicationSchema), async (req: Request, res: Response): Promise<void> => {
+  const { template_id, form_data } = req.body as CreateApplicationBody;
   try {
     const applicant_id = req.user!.id;
     const result = await withTransaction(async (client: pg.PoolClient) => {
@@ -238,8 +244,8 @@ router.post('/draft', async (req: Request, res: Response): Promise<void> => {
 });
 
 // PATCH /applications/:id — update form_data for DRAFT or RETURNED applications
-router.patch('/:id', async (req: Request, res: Response): Promise<void> => {
-  const { form_data } = req.body as { form_data: Record<string, unknown> };
+router.patch('/:id', validateBody(saveApplicationSchema), async (req: Request, res: Response): Promise<void> => {
+  const { form_data } = req.body as SaveApplicationBody;
   const applicant_id = req.user!.id;
   try {
     const result = await withTransaction(async (client: pg.PoolClient) => {
@@ -288,11 +294,8 @@ router.patch('/:id', async (req: Request, res: Response): Promise<void> => {
 });
 
 // POST /applications/:id/resubmit — RETURNED → PENDING_APPROVAL (fresh approval steps)
-router.post('/:id/resubmit', async (req: Request, res: Response): Promise<void> => {
-  const { form_data, route_id: chosen_route_id } = req.body as {
-    form_data?: Record<string, unknown>;
-    route_id?: string;
-  };
+router.post('/:id/resubmit', validateBody(submitApplicationSchema), async (req: Request, res: Response): Promise<void> => {
+  const { form_data, route_id: chosen_route_id } = req.body as SubmitApplicationBody;
   const applicant_id = req.user!.id;
   const department_id = req.user!.department_id;
 
@@ -588,11 +591,8 @@ router.post('/:id/submit', async (req: Request, res: Response): Promise<void> =>
 });
 
 // POST /applications/:id/start-settlement — APPROVED app → PENDING_SETTLEMENT
-router.post('/:id/start-settlement', async (req: Request, res: Response): Promise<void> => {
-  const { settlement_data, route_id: chosen_route_id } = req.body as {
-    settlement_data: Record<string, unknown>;
-    route_id?: string;
-  };
+router.post('/:id/start-settlement', validateBody(startSettlementSchema), async (req: Request, res: Response): Promise<void> => {
+  const { settlement_data, route_id: chosen_route_id } = req.body as StartSettlementBody;
   const applicant_id = req.user!.id;
   const department_id = req.user!.department_id;
 
@@ -754,11 +754,8 @@ router.post('/:id/start-settlement', async (req: Request, res: Response): Promis
 
 // POST /applications/:id/resubmit-settlement — RETURNED (settlement phase) → PENDING_SETTLEMENT
 // Mirrors resubmit but for settlement round: keeps RINGI history, restarts settlement steps only.
-router.post('/:id/resubmit-settlement', async (req: Request, res: Response): Promise<void> => {
-  const { settlement_data, route_id: chosen_route_id } = req.body as {
-    settlement_data: Record<string, unknown>;
-    route_id?: string;
-  };
+router.post('/:id/resubmit-settlement', validateBody(submitSettlementSchema), async (req: Request, res: Response): Promise<void> => {
+  const { settlement_data, route_id: chosen_route_id } = req.body as SubmitSettlementBody;
   const applicant_id = req.user!.id;
   const department_id = req.user!.department_id;
 
@@ -973,13 +970,8 @@ router.post('/:id/resubmit-settlement', async (req: Request, res: Response): Pro
 });
 
 // POST /applications — submit new ringi
-router.post('/', async (req: Request, res: Response): Promise<void> => {
-  const { template_id, stage, form_data, route_id: chosen_route_id } = req.body as {
-    template_id: string;
-    stage?: string;
-    form_data: Record<string, unknown>;
-    route_id?: string;
-  };
+router.post('/', validateBody(adminSubmitSchema), async (req: Request, res: Response): Promise<void> => {
+  const { template_id, stage, form_data, route_id: chosen_route_id } = req.body as AdminSubmitBody;
 
   try {
     const result = await withTransaction(async (client: pg.PoolClient) => {

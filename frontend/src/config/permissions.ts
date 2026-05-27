@@ -2,10 +2,16 @@
 // Each role lists what it can access and do.
 
 export type Role =
-  | 'EMPLOYEE'
-  | 'MANAGER'
+  | 'SHITSUCHO'
   | 'GM'
-  | 'SOUMU'
+  | 'SENIOR_MANAGER'
+  | 'MANAGER'
+  | 'SUB_MANAGER'
+  | 'SUB_MANAGER_TSUKI'
+  | 'LEADER'
+  | 'SUB_LEADER'
+  | 'CHIEF'
+  | 'MEMBER'
   | 'SENMU'
   | 'PRESIDENT'
   | 'ADMIN';
@@ -15,11 +21,11 @@ export interface RolePermissions {
   label_en: string;       // English display name
   description: string;    // Japanese description
   description_en: string; // English description
-  canSubmit: boolean;     // submit new applications
-  canApprove: boolean;    // access approval inbox
-  canSettle: boolean;     // access settlements / accounting dashboard
-  canAdmin: boolean;      // access /admin (user + route management)
-  approverRoles: string[]; // which approval step roles this user can act on
+  canSubmit: boolean;
+  canApprove: boolean;
+  canSettle: boolean;
+  canAdmin: boolean;
+  approverRoles: string[];
   navItems: NavPermission[];
 }
 
@@ -29,89 +35,156 @@ export interface NavPermission {
   icon: string;
 }
 
+const BASE_NAV: NavPermission[] = [
+  { to: '/dashboard', label: 'ダッシュボード', icon: '▦' },
+  { to: '/history',   label: '申請履歴',       icon: '⟲' },
+];
+
+const APPROVER_FULL_NAV: NavPermission[] = [
+  { to: '/dashboard',        label: 'ダッシュボード', icon: '▦' },
+  { to: '/approvals',        label: '承認待ち',       icon: '🔔' },
+  { to: '/approval-history', label: '承認履歴',       icon: '📋' },
+  { to: '/history',          label: '申請履歴',       icon: '⟲' },
+];
+
+const EXEC_NAV: NavPermission[] = [
+  { to: '/dashboard',        label: 'ダッシュボード', icon: '▦' },
+  { to: '/approvals',        label: '承認待ち',       icon: '🔔' },
+  { to: '/approval-history', label: '承認履歴',       icon: '📋' },
+];
+
 const ROLE_MAP: Record<Role, RolePermissions> = {
-  EMPLOYEE: {
-    label: '一般社員',
-    label_en: 'Employee',
-    description: '稟議を申請し、自分の申請履歴を閲覧できます。',
-    description_en: 'Can submit applications and view own application history.',
+  SHITSUCHO: {
+    label: '室長',
+    label_en: 'Division Chief',
+    description: '部門の承認・稟議申請を担当します。',
+    description_en: 'Handles departmental approvals and can submit applications.',
     canSubmit: true,
-    canApprove: false,
+    canApprove: true,
     canSettle: false,
     canAdmin: false,
-    approverRoles: [],
-    navItems: [
-      { to: '/dashboard', label: 'ダッシュボード', icon: '▦' },
-      { to: '/history',   label: '申請履歴',       icon: '⟲' },
-    ],
+    approverRoles: ['SHITSUCHO'],
+    navItems: APPROVER_FULL_NAV,
+  },
+  GM: {
+    label: 'ゼネラルマネージャー',
+    label_en: 'General Manager',
+    description: '上位承認者として最終判断を担当します。',
+    description_en: 'Senior approver with final decision authority.',
+    canSubmit: true,
+    canApprove: true,
+    canSettle: false,
+    canAdmin: false,
+    approverRoles: ['GM'],
+    navItems: APPROVER_FULL_NAV,
+  },
+  SENIOR_MANAGER: {
+    label: 'シニアマネージャー',
+    label_en: 'Senior Manager',
+    description: '承認・稟議申請を担当します。',
+    description_en: 'Approves applications and can submit their own.',
+    canSubmit: true,
+    canApprove: true,
+    canSettle: false,
+    canAdmin: false,
+    approverRoles: ['SENIOR_MANAGER'],
+    navItems: APPROVER_FULL_NAV,
   },
   MANAGER: {
-    label: '管理職',
+    label: 'マネージャー',
     label_en: 'Manager',
-    description: '部下の稟議申請を承認 / 差し戻しできます。',
+    description: '部下の稟議申請を承認・差し戻しできます。',
     description_en: 'Approves or returns subordinate applications.',
     canSubmit: true,
     canApprove: true,
     canSettle: false,
     canAdmin: false,
     approverRoles: ['MANAGER'],
-    navItems: [
-      { to: '/dashboard',        label: 'ダッシュボード', icon: '▦' },
-      { to: '/approvals',        label: '承認待ち',       icon: '🔔' },
-      { to: '/approval-history', label: '承認履歴',       icon: '📋' },
-      { to: '/history',          label: '申請履歴',       icon: '⟲' },
-    ],
+    navItems: APPROVER_FULL_NAV,
   },
-  GM: {
-    label: '部門長',
-    label_en: 'General Manager',
-    description: 'マネージャー承認後の稟議を最終承認します。',
-    description_en: 'Final approver after manager sign-off.',
+  SUB_MANAGER: {
+    label: 'サブマネージャー',
+    label_en: 'Sub Manager',
+    description: '承認補佐・稟議申請を担当します。',
+    description_en: 'Assists with approvals and can submit applications.',
     canSubmit: true,
     canApprove: true,
     canSettle: false,
     canAdmin: false,
-    approverRoles: ['GM'],
-    navItems: [
-      { to: '/dashboard',        label: 'ダッシュボード', icon: '▦' },
-      { to: '/approvals',        label: '承認待ち',       icon: '🔔' },
-      { to: '/approval-history', label: '承認履歴',       icon: '📋' },
-      { to: '/history',          label: '申請履歴',       icon: '⟲' },
-    ],
+    approverRoles: ['SUB_MANAGER'],
+    navItems: APPROVER_FULL_NAV,
   },
-  SOUMU: {
-    label: '総務部',
-    label_en: 'General Affairs',
-    description: '総務ステップの承認・精算確認・領収書確認を担当します（経理機能含む）。',
-    description_en: 'Handles approval steps, settlement verification, and receipt review (includes accounting duties).',
+  SUB_MANAGER_TSUKI: {
+    label: 'サブマネージャー付',
+    label_en: 'Associate Sub Manager',
+    description: '稟議申請を行います。',
+    description_en: 'Can submit applications.',
     canSubmit: true,
-    canApprove: true,
-    canSettle: true,  // 総務部が経理業務を兼務
+    canApprove: false,
+    canSettle: false,
     canAdmin: false,
-    approverRoles: ['SOUMU'],
-    navItems: [
-      { to: '/dashboard',        label: 'ダッシュボード', icon: '▦' },
-      { to: '/approvals',        label: '承認待ち',       icon: '🔔' },
-      { to: '/approval-history', label: '承認履歴',       icon: '📋' },
-      { to: '/accounting',       label: '精算管理',       icon: '▤' },
-      { to: '/history',          label: '申請履歴',       icon: '⟲' },
-    ],
+    approverRoles: [],
+    navItems: BASE_NAV,
+  },
+  LEADER: {
+    label: 'リーダー',
+    label_en: 'Leader',
+    description: '稟議申請を行います。',
+    description_en: 'Can submit applications.',
+    canSubmit: true,
+    canApprove: false,
+    canSettle: false,
+    canAdmin: false,
+    approverRoles: [],
+    navItems: BASE_NAV,
+  },
+  SUB_LEADER: {
+    label: 'サブリーダー',
+    label_en: 'Sub Leader',
+    description: '稟議申請を行います。',
+    description_en: 'Can submit applications.',
+    canSubmit: true,
+    canApprove: false,
+    canSettle: false,
+    canAdmin: false,
+    approverRoles: [],
+    navItems: BASE_NAV,
+  },
+  CHIEF: {
+    label: 'チーフ',
+    label_en: 'Chief',
+    description: '稟議申請を行います。',
+    description_en: 'Can submit applications.',
+    canSubmit: true,
+    canApprove: false,
+    canSettle: false,
+    canAdmin: false,
+    approverRoles: [],
+    navItems: BASE_NAV,
+  },
+  MEMBER: {
+    label: 'メンバー',
+    label_en: 'Member',
+    description: '稟議を申請し、自分の申請履歴を閲覧できます。',
+    description_en: 'Can submit applications and view own history.',
+    canSubmit: true,
+    canApprove: false,
+    canSettle: false,
+    canAdmin: false,
+    approverRoles: [],
+    navItems: BASE_NAV,
   },
   SENMU: {
     label: '専務',
-    label_en: 'Executive Director',
-    description: '専務・社長確認ステップの承認を担当します。',
-    description_en: 'Handles executive and presidential confirmation steps.',
+    label_en: 'Managing Director',
+    description: '専務確認ステップの承認を担当します。',
+    description_en: 'Handles executive confirmation steps.',
     canSubmit: false,
     canApprove: true,
     canSettle: false,
     canAdmin: false,
-    approverRoles: ['SENMU', 'PRESIDENT'],
-    navItems: [
-      { to: '/dashboard',        label: 'ダッシュボード', icon: '▦' },
-      { to: '/approvals',        label: '承認待ち',       icon: '🔔' },
-      { to: '/approval-history', label: '承認履歴',       icon: '📋' },
-    ],
+    approverRoles: ['SENMU'],
+    navItems: EXEC_NAV,
   },
   PRESIDENT: {
     label: '社長',
@@ -123,11 +196,7 @@ const ROLE_MAP: Record<Role, RolePermissions> = {
     canSettle: false,
     canAdmin: false,
     approverRoles: ['PRESIDENT'],
-    navItems: [
-      { to: '/dashboard',        label: 'ダッシュボード', icon: '▦' },
-      { to: '/approvals',        label: '承認待ち',       icon: '🔔' },
-      { to: '/approval-history', label: '承認履歴',       icon: '📋' },
-    ],
+    navItems: EXEC_NAV,
   },
   ADMIN: {
     label: 'システム管理者',
@@ -138,7 +207,11 @@ const ROLE_MAP: Record<Role, RolePermissions> = {
     canApprove: true,
     canSettle: true,
     canAdmin: true,
-    approverRoles: ['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ADMIN'],
+    approverRoles: [
+      'SHITSUCHO', 'GM', 'SENIOR_MANAGER', 'MANAGER', 'SUB_MANAGER',
+      'SUB_MANAGER_TSUKI', 'LEADER', 'SUB_LEADER', 'CHIEF', 'MEMBER',
+      'SENMU', 'PRESIDENT', 'ADMIN',
+    ],
     navItems: [
       { to: '/dashboard',        label: 'ダッシュボード', icon: '▦' },
       { to: '/approvals',        label: '承認待ち',       icon: '🔔' },
@@ -169,7 +242,7 @@ function mergeNav(base: NavPermission[], extra: NavPermission[]): NavPermission[
 }
 
 export function getPermissions(role?: string, isAdmin = false): RolePermissions {
-  const base = ROLE_MAP[(role as Role) ?? 'EMPLOYEE'] ?? ROLE_MAP.EMPLOYEE;
+  const base = ROLE_MAP[(role as Role) ?? 'MEMBER'] ?? ROLE_MAP.MEMBER;
   if (!isAdmin && role !== 'ADMIN') return base;
 
   return {
@@ -179,7 +252,9 @@ export function getPermissions(role?: string, isAdmin = false): RolePermissions 
     canAdmin:   true,
     approverRoles: Array.from(new Set([
       ...base.approverRoles,
-      'EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT',
+      'SHITSUCHO', 'GM', 'SENIOR_MANAGER', 'MANAGER', 'SUB_MANAGER',
+      'SUB_MANAGER_TSUKI', 'LEADER', 'SUB_LEADER', 'CHIEF', 'MEMBER',
+      'SENMU', 'PRESIDENT',
     ])),
     navItems: mergeNav(base.navItems, ADMIN_NAV),
   };

@@ -58,10 +58,12 @@ export async function computeApplicationRecipients(
   }
 
   if (options.includeAccounting) {
+    // Notify all users whose role has can_settle=true, plus admins
     const acctRes = await client.query(
-      `SELECT id FROM users
-       WHERE is_active = TRUE
-         AND (is_admin = TRUE OR role = 'SOUMU')`,
+      `SELECT u.id FROM users u
+       LEFT JOIN role_permissions rp ON rp.role = u.role
+       WHERE u.is_active = TRUE
+         AND (u.is_admin = TRUE OR rp.can_settle = TRUE)`,
     );
     for (const r of acctRes.rows as Array<{ id: string }>) {
       recipients.add(r.id);

@@ -386,6 +386,21 @@ const dict = {
     admin_perm_token_title:        'セキュリティ',
     admin_perm_token_body:         'ファイルは認証済みルート経由のみ取得可。JWT は HttpOnly Cookie で管理。',
 
+    // Role names (switchable via dev i18n page)
+    role_SHITSUCHO:         '室長',
+    role_GM:                'ゼネラルマネージャー',
+    role_SENIOR_MANAGER:    'シニアマネージャー',
+    role_MANAGER:           'マネージャー',
+    role_SUB_MANAGER:       'サブマネージャー',
+    role_SUB_MANAGER_TSUKI: 'サブマネージャー付',
+    role_LEADER:            'リーダー',
+    role_SUB_LEADER:        'サブリーダー',
+    role_CHIEF:             'チーフ',
+    role_MEMBER:            'メンバー',
+    role_SENMU:             '専務',
+    role_PRESIDENT:         '社長',
+    role_ADMIN:             'システム管理者',
+
     // Common
     loading:   '読み込み中...',
     error_load: 'データ取得に失敗しました',
@@ -732,6 +747,21 @@ const dict = {
     admin_perm_admin_body:         'Can act on any approval step across all roles. Manages users, routes, and templates.',
     admin_perm_token_title:        'Security',
     admin_perm_token_body:         'Files served via auth-gated routes only. JWT stored in HttpOnly cookies.',
+
+    // Role names (switchable via dev i18n page)
+    role_SHITSUCHO:         'Division Chief',
+    role_GM:                'General Manager',
+    role_SENIOR_MANAGER:    'Senior Manager',
+    role_MANAGER:           'Manager',
+    role_SUB_MANAGER:       'Sub Manager',
+    role_SUB_MANAGER_TSUKI: 'Associate Sub Manager',
+    role_LEADER:            'Leader',
+    role_SUB_LEADER:        'Sub Leader',
+    role_CHIEF:             'Chief',
+    role_MEMBER:            'Member',
+    role_SENMU:             'Managing Director',
+    role_PRESIDENT:         'President',
+    role_ADMIN:             'System Administrator',
 
     // Common
     loading:   'Loading...',

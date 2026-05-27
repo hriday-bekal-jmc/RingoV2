@@ -1,4 +1,8 @@
 // Server-side form validation against admin-configured schema.
+// RE2 is used for user-supplied regex patterns — it runs in linear time and
+// cannot catastrophically backtrack (no ReDoS risk).
+import RE2 from 're2';
+import { evalFormula, formulaDeps } from './formulaEval';
 //
 // Honours:
 //   - required (skipped when field is hidden via conditional_on)
@@ -15,6 +19,7 @@ export interface FormField {
   type: string;
   required?: boolean;
   computed?: boolean;
+  formula?: string;
   sum_target?: string;
   fields?: FormField[];
   min_rows?: number;
@@ -94,7 +99,11 @@ export function applyComputedFormData(schema: FormSchema | null | undefined, dat
   const computedTargets = new Set(
     schema.fields.filter((field) => field.type === 'number' && field.computed).map((field) => field.name),
   );
-  if (computedTargets.size === 0) return data;
+  const formulaFields = schema.fields.filter(
+    (field) => field.type === 'number' && field.formula,
+  );
+
+  if (computedTargets.size === 0 && formulaFields.length === 0) return data;
 
   const next: Record<string, unknown> = { ...data };
   const totals = new Map<string, number>();
@@ -128,6 +137,18 @@ export function applyComputedFormData(schema: FormSchema | null | undefined, dat
   totals.forEach((total, target) => {
     next[target] = total;
   });
+
+  // Recalculate formula fields server-side — client value is untrusted.
+  for (const field of formulaFields) {
+    if (!field.formula) continue;
+    const deps = formulaDeps(field.formula);
+    const numValues: Record<string, number> = {};
+    for (const dep of deps) {
+      const v = next[dep];
+      numValues[dep] = typeof v === 'number' ? v : parseFloat(String(v ?? '0')) || 0;
+    }
+    next[field.name] = evalFormula(field.formula, numValues);
+  }
 
   return next;
 }
@@ -167,7 +188,7 @@ function validateFieldList(
 
     if (validation.regex) {
       try {
-        if (!new RegExp(validation.regex).test(stringValue)) {
+        if (!new RE2(validation.regex).test(stringValue)) {
           errors.push({ field: path, message: `${field.label ?? field.name} format is invalid` });
         }
       } catch {

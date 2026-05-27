@@ -15,6 +15,14 @@ import {
   invalidateAdminReferenceCache,
 } from '../services/adminReferenceCache';
 import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
+import { validateBody } from '../middlewares/validate';
+import {
+  createUserSchema, type CreateUserBody,
+  updateUserSchema, type UpdateUserBody,
+  createRouteSchema, type CreateRouteBody,
+  addRouteStepSchema, type AddRouteStepBody,
+  updatePermissionsSchema, type UpdatePermissionsBody,
+} from '../schemas/adminSchemas';
 import type pg from 'pg';
 
 const router = Router();
@@ -22,7 +30,11 @@ router.use(requireAuth);
 router.use(requireAdmin);
 router.use(mutationLimiter);
 
-const USER_ROLES = new Set(['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT']);
+const USER_ROLES = new Set([
+  'SHITSUCHO', 'GM', 'SENIOR_MANAGER', 'MANAGER', 'SUB_MANAGER',
+  'SUB_MANAGER_TSUKI', 'LEADER', 'SUB_LEADER', 'CHIEF', 'MEMBER',
+  'SENMU', 'PRESIDENT',
+]);
 const isValidBusinessRole = (role: unknown): role is string =>
   typeof role === 'string' && USER_ROLES.has(role);
 
@@ -61,15 +73,8 @@ router.get('/users', async (_req: Request, res: Response): Promise<void> => {
   }
 });
 
-router.post('/users', async (req: Request, res: Response): Promise<void> => {
-  const { full_name, email, role, is_admin, department_id, password, is_active } = req.body as {
-    full_name: string; email: string; role: string;
-    is_admin?: boolean; department_id?: string; password?: string; is_active?: boolean;
-  };
-  if (!isValidBusinessRole(role)) {
-    res.status(400).json({ error: 'Invalid business role' });
-    return;
-  }
+router.post('/users', validateBody(createUserSchema), async (req: Request, res: Response): Promise<void> => {
+  const { full_name, email, role, is_admin, department_id, password, is_active } = req.body as CreateUserBody;
   try {
     const hash = password ? await argon2.hash(password) : null;
     await query(
@@ -89,16 +94,9 @@ router.post('/users', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-router.patch('/users/:id', async (req: Request, res: Response): Promise<void> => {
+router.patch('/users/:id', validateBody(updateUserSchema), async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
-  const { full_name, email, role, is_admin, department_id, password, is_active } = req.body as {
-    full_name?: string; email?: string; role?: string;
-    is_admin?: boolean; department_id?: string | null; password?: string; is_active?: boolean;
-  };
-  if (role !== undefined && !isValidBusinessRole(role)) {
-    res.status(400).json({ error: 'Invalid business role' });
-    return;
-  }
+  const { full_name, email, role, is_admin, department_id, password, is_active } = req.body as UpdateUserBody;
 
   try {
     // ─── SUPER ADMIN SAFEGUARD (スーパー管理者の保護) ───
@@ -343,10 +341,8 @@ router.get('/routes', async (_req: Request, res: Response): Promise<void> => {
   }
 });
 
-router.post('/routes', async (req: Request, res: Response): Promise<void> => {
-  const { template_id, department_id, name, stage } = req.body as {
-    template_id: string; department_id: string; name: string; stage?: string;
-  };
+router.post('/routes', validateBody(createRouteSchema), async (req: Request, res: Response): Promise<void> => {
+  const { template_id, department_id, name, stage } = req.body as CreateRouteBody;
   try {
     await query(
       `INSERT INTO approval_routes (template_id, department_id, name, stage, is_active)
@@ -371,10 +367,8 @@ router.delete('/routes/:id', async (req: Request, res: Response): Promise<void> 
   }
 });
 
-router.post('/routes/:id/steps', async (req: Request, res: Response): Promise<void> => {
-  const { approver_id, label, action_type } = req.body as {
-    approver_id?: string; label?: string; action_type?: string;
-  };
+router.post('/routes/:id/steps', validateBody(addRouteStepSchema), async (req: Request, res: Response): Promise<void> => {
+  const { approver_id, label, action_type } = req.body as AddRouteStepBody;
   try {
     await withTransaction(async (client: pg.PoolClient) => {
       const orderRes = await client.query(
@@ -800,7 +794,11 @@ router.delete('/applications/:id', async (req: Request, res: Response): Promise<
 
 // ─── Role Permissions ─────────────────────────────────────────────────────────
 
-const KNOWN_ROLES = new Set(['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT', 'ADMIN']);
+const KNOWN_ROLES = new Set([
+  'SHITSUCHO', 'GM', 'SENIOR_MANAGER', 'MANAGER', 'SUB_MANAGER',
+  'SUB_MANAGER_TSUKI', 'LEADER', 'SUB_LEADER', 'CHIEF', 'MEMBER',
+  'SENMU', 'PRESIDENT', 'ADMIN',
+]);
 
 interface RolePermRowAdmin {
   role: string;
@@ -842,7 +840,7 @@ router.get('/role-permissions', async (_req: Request, res: Response): Promise<vo
 });
 
 // PATCH /admin/role-permissions/:role — update one role's permissions
-router.patch('/role-permissions/:role', async (req: Request, res: Response): Promise<void> => {
+router.patch('/role-permissions/:role', validateBody(updatePermissionsSchema), async (req: Request, res: Response): Promise<void> => {
   const role = String(req.params.role);
 
   if (!KNOWN_ROLES.has(role)) {
@@ -854,32 +852,9 @@ router.patch('/role-permissions/:role', async (req: Request, res: Response): Pro
     return;
   }
 
-  const { canSubmit, canApprove, canSettle, canAdmin, navPages } = req.body as {
-    canSubmit?: boolean;
-    canApprove?: boolean;
-    canSettle?: boolean;
-    canAdmin?: boolean;
-    navPages?: string[];
-  };
+  const { canSubmit, canApprove, canSettle, canAdmin, navPages } = req.body as UpdatePermissionsBody;
 
   try {
-    // Fetch current row first
-    const current = await pool.query<RolePermRowAdmin>(
-      'SELECT * FROM role_permissions WHERE role = $1',
-      [role],
-    );
-    if (current.rows.length === 0) {
-      res.status(404).json({ error: 'ロールが見つかりません' });
-      return;
-    }
-    const cur = current.rows[0];
-
-    const newCanSubmit  = canSubmit  ?? cur.can_submit;
-    const newCanApprove = canApprove ?? cur.can_approve;
-    const newCanSettle  = canSettle  ?? cur.can_settle;
-    const newCanAdmin   = canAdmin   ?? cur.can_admin;
-    const newNavPages   = navPages   ?? cur.nav_pages;
-
     // Get all active user IDs for SSE broadcast
     const { rows: allUsers } = await pool.query<{ id: string }>(
       'SELECT id FROM users WHERE is_active = TRUE',
@@ -887,17 +862,19 @@ router.patch('/role-permissions/:role', async (req: Request, res: Response): Pro
     const recipientIds = allUsers.map((u) => u.id);
 
     const updated = await withTransaction(async (client: pg.PoolClient) => {
+      // UPSERT — creates the row if it was missing (e.g. migration not yet applied)
       const updateRes = await client.query<RolePermRowAdmin>(
-        `UPDATE role_permissions
-         SET can_submit  = $1,
-             can_approve = $2,
-             can_settle  = $3,
-             can_admin   = $4,
-             nav_pages   = $5,
-             updated_at  = NOW()
-         WHERE role = $6
+        `INSERT INTO role_permissions (role, can_submit, can_approve, can_settle, can_admin, nav_pages, updated_at)
+         VALUES ($6, $1, $2, $3, $4, $5, NOW())
+         ON CONFLICT (role) DO UPDATE
+           SET can_submit  = EXCLUDED.can_submit,
+               can_approve = EXCLUDED.can_approve,
+               can_settle  = EXCLUDED.can_settle,
+               can_admin   = EXCLUDED.can_admin,
+               nav_pages   = EXCLUDED.nav_pages,
+               updated_at  = NOW()
          RETURNING *`,
-        [newCanSubmit, newCanApprove, newCanSettle, newCanAdmin, newNavPages, role],
+        [canSubmit, canApprove, canSettle, canAdmin, navPages, role],
       );
 
       await insertOutboxEvent(client, {

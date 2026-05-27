@@ -153,7 +153,7 @@ export default function Profile() {
               <div className="text-lg font-bold text-warmgray-800 truncate">{user?.full_name}</div>
               <div className="text-sm text-warmgray-400 truncate">{user?.email}</div>
               <div className="flex items-center gap-2 mt-1.5">
-                <span className="badge-ringo">{perms.label}</span>
+                <span className="badge-ringo">{t(`role_${user?.role}`) !== `role_${user?.role}` ? t(`role_${user?.role}`) : (lang === 'en' ? perms.label_en : perms.label)}</span>
                 {user?.department_name && (
                   <span className="text-xs text-warmgray-400">{user.department_name}</span>
                 )}
@@ -291,7 +291,7 @@ export default function Profile() {
             </div>
             <div className="flex justify-between text-sm">
               <dt className="text-warmgray-400 font-medium">{t('profile_role_label')}</dt>
-              <dd><span className="badge-ringo">{perms.label}</span></dd>
+              <dd><span className="badge-ringo">{t(`role_${user?.role}`) !== `role_${user?.role}` ? t(`role_${user?.role}`) : (lang === 'en' ? perms.label_en : perms.label)}</span></dd>
             </div>
             {user?.department_name && (
               <div className="flex justify-between text-sm">

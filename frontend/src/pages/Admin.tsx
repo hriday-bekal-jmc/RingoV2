@@ -57,22 +57,33 @@ interface ApprovalRoute {
 
 interface Template { id: string; code: string; title_ja: string }
 
-const ROLES = ['EMPLOYEE', 'MANAGER', 'GM', 'SOUMU', 'SENMU', 'PRESIDENT'];
-
+const ROLES = [
+  'SHITSUCHO', 'GM', 'SENIOR_MANAGER', 'MANAGER', 'SUB_MANAGER',
+  'SUB_MANAGER_TSUKI', 'LEADER', 'SUB_LEADER', 'CHIEF', 'MEMBER',
+  'SENMU', 'PRESIDENT',
+];
 
 function RoleBadge({ role }: { role: string }) {
+  const { t } = useLang();
   const colors: Record<string, string> = {
-    ADMIN:      'bg-ringo-500 text-white',
-    PRESIDENT:  'bg-warmgray-800 text-white',
-    SENMU:      'bg-indigo-500 text-white',
-    GM:         'bg-violet-500 text-white',
-    MANAGER:    'bg-sky-500 text-white',
-    SOUMU:      'bg-teal-500 text-white',
-    EMPLOYEE:   'bg-surface-200 text-warmgray-600',
+    ADMIN:              'bg-ringo-500 text-white',
+    PRESIDENT:          'bg-warmgray-800 text-white',
+    SENMU:              'bg-indigo-500 text-white',
+    SHITSUCHO:          'bg-violet-600 text-white',
+    GM:                 'bg-violet-500 text-white',
+    SENIOR_MANAGER:     'bg-sky-600 text-white',
+    MANAGER:            'bg-sky-500 text-white',
+    SUB_MANAGER:        'bg-sky-400 text-white',
+    SUB_MANAGER_TSUKI:  'bg-teal-500 text-white',
+    LEADER:             'bg-teal-400 text-white',
+    SUB_LEADER:         'bg-emerald-400 text-white',
+    CHIEF:              'bg-emerald-300 text-emerald-900',
+    MEMBER:             'bg-surface-200 text-warmgray-600',
   };
+  const label = t(`role_${role}`) !== `role_${role}` ? t(`role_${role}`) : (ROLE_MAP[role as Role]?.label ?? role);
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${colors[role] ?? 'bg-surface-200 text-warmgray-500'}`}>
-      {role}
+      {label}
     </span>
   );
 }
@@ -97,7 +108,7 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
     full_name:     user?.full_name ?? '',
     email:         user?.email ?? '',
     password:      '',
-    role:          user?.role ?? 'EMPLOYEE',
+    role:          user?.role ?? 'MEMBER',
     is_admin:      user?.is_admin ?? false,
     department_id: user?.department_id ?? '',
     is_active:     user?.is_active ?? true,
@@ -144,7 +155,7 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
           <div>
             <label className="label">{t('admin_field_role')}</label>
             <CustomSelect
-              options={ROLES.map((r) => ({ value: r, label: r }))}
+              options={ROLES.map((r) => ({ value: r, label: t(`role_${r}`) !== `role_${r}` ? t(`role_${r}`) : (ROLE_MAP[r as Role]?.label ?? r) }))}
               value={form.role}
               onChange={(v) => set('role', v)}
             />
@@ -335,7 +346,7 @@ function UsersTab({ showToast, onGoToRoutes }: {
             className="w-full sm:w-36"
             options={[
               { value: '', label: t('admin_filter_all_role') },
-              ...ROLES.map((r) => ({ value: r, label: r })),
+              ...ROLES.map((r) => ({ value: r, label: ROLE_MAP[r as Role]?.label ?? r })),
             ]}
             value={roleFilter}
             onChange={setRoleFilter}
@@ -362,33 +373,45 @@ function UsersTab({ showToast, onGoToRoutes }: {
         </div>
       </div>
 
-      {routeConflict && (
-        <div className="rounded-2xl border border-amber-300/70 bg-amber-50/80 px-4 py-3.5 flex items-start gap-3 animate-fade-up">
-          <span className="text-xl shrink-0">⚠️</span>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-amber-800">アーカイブ前に承認ルートから外してください</p>
-            <p className="text-xs text-amber-700 mt-0.5">このユーザーは以下のルートに承認者として設定されています：</p>
-            <ul className="mt-1.5 space-y-0.5">
-              {routeConflict.routes.map((r) => (
-                <li key={r.id} className="text-xs font-medium text-amber-900">• {r.name}</li>
-              ))}
-            </ul>
-            <div className="flex items-center gap-3 mt-3">
+      {routeConflict && createPortal(
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-warmgray-900/50 backdrop-blur-sm" onClick={() => setRouteConflict(null)} />
+          <div className="relative glass rounded-2xl shadow-2xl w-full max-w-sm p-5 animate-scale-in">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-warmgray-800">アーカイブできません</p>
+                <p className="text-xs text-warmgray-600 mt-1">このユーザーは以下の承認ルートに設定されています。先にルートから外してください。</p>
+                <ul className="mt-2.5 space-y-1">
+                  {routeConflict.routes.map((r) => (
+                    <li key={r.id} className="text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200/70 rounded-lg px-2.5 py-1">
+                      {r.name}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 mt-4 pt-4 border-t border-white/40">
               <button
                 onClick={() => { setRouteConflict(null); onGoToRoutes(); }}
-                className="text-xs font-semibold text-ringo-600 hover:text-ringo-800 underline underline-offset-2 transition-colors"
+                className="btn-primary flex-1 text-xs"
               >
                 ルート設定を開く →
               </button>
               <button
                 onClick={() => setRouteConflict(null)}
-                className="text-xs text-warmgray-400 hover:text-warmgray-600 transition-colors"
+                className="btn-ghost text-xs text-warmgray-500"
               >
                 閉じる
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {isLoading ? (
@@ -541,7 +564,7 @@ function ApproverPicker({ users, departments, value, onChange }: ApproverPickerP
           className="w-32"
           options={[
             { value: '', label: t('admin_filter_all_role') },
-            ...ROLES.map((r) => ({ value: r, label: r })),
+            ...ROLES.map((r) => ({ value: r, label: ROLE_MAP[r as Role]?.label ?? r })),
           ]}
           value={roleFilter}
           onChange={setRoleFilter}
@@ -1449,7 +1472,10 @@ function PermissionsTab({ showToast }: { showToast: (msg: string, type?: 'succes
       setDirty((d) => { const n = { ...d }; delete n[payload.role]; return n; });
       showToast('保存しました', 'success');
     },
-    onError: () => showToast('保存に失敗しました', 'error'),
+    onError: (err: unknown) => {
+      const msg = (err as { data?: { error?: string } })?.data?.error ?? '保存に失敗しました';
+      showToast(msg, 'error');
+    },
   });
 
   const toggleBool = (role: string, field: keyof Omit<PermRowDraft, 'navPages'>, value: boolean) => {
@@ -1519,7 +1545,7 @@ function PermissionsTab({ showToast }: { showToast: (msg: string, type?: 'succes
                       )}
                     </div>
                     <div className="text-[10px] text-warmgray-400 mt-0.5">
-                      {lang === 'en' ? ROLE_MAP[role].label_en : ROLE_MAP[role].label}
+                      {t(`role_${role}`) !== `role_${role}` ? t(`role_${role}`) : (lang === 'en' ? ROLE_MAP[role as Role]?.label_en : ROLE_MAP[role as Role]?.label)}
                     </div>
                   </td>
 
@@ -1723,7 +1749,7 @@ interface AllowanceRate {
 }
 
 function AllowanceTab({ showToast }: { showToast: (msg: string, type?: 'success' | 'error') => void }) {
-  const { lang } = useLang();
+  const { lang, t } = useLang();
   const queryClient = useQueryClient();
   const [editingRole, setEditingRole] = useState<string | null>(null);
   const [editVal, setEditVal] = useState<string>('');
@@ -1762,12 +1788,18 @@ function AllowanceTab({ showToast }: { showToast: (msg: string, type?: 'success'
   };
 
   const ROLE_LABELS: Record<string, string> = {
-    EMPLOYEE: lang === 'ja' ? '一般社員' : 'Employee',
-    MANAGER:  lang === 'ja' ? '課長' : 'Manager',
-    GM:       lang === 'ja' ? '部長' : 'General Manager',
-    SOUMU:    lang === 'ja' ? '総務' : 'General Affairs',
-    SENMU:    lang === 'ja' ? '専務' : 'Senior Managing Director',
-    PRESIDENT:lang === 'ja' ? '社長' : 'President',
+    SHITSUCHO:         lang === 'ja' ? '室長'             : 'Division Chief',
+    GM:                lang === 'ja' ? 'ゼネラルマネージャー' : 'General Manager',
+    SENIOR_MANAGER:    lang === 'ja' ? 'シニアマネージャー'   : 'Senior Manager',
+    MANAGER:           lang === 'ja' ? 'マネージャー'        : 'Manager',
+    SUB_MANAGER:       lang === 'ja' ? 'サブマネージャー'     : 'Sub Manager',
+    SUB_MANAGER_TSUKI: lang === 'ja' ? 'サブマネージャー付'   : 'Associate Sub Manager',
+    LEADER:            lang === 'ja' ? 'リーダー'           : 'Leader',
+    SUB_LEADER:        lang === 'ja' ? 'サブリーダー'        : 'Sub Leader',
+    CHIEF:             lang === 'ja' ? 'チーフ'             : 'Chief',
+    MEMBER:            lang === 'ja' ? 'メンバー'           : 'Member',
+    SENMU:             lang === 'ja' ? '専務'              : 'Managing Director',
+    PRESIDENT:         lang === 'ja' ? '社長'              : 'President',
   };
 
   if (isLoading) return <div className="card flex justify-center py-12"><RingoLoader.Block /></div>;
@@ -1796,7 +1828,7 @@ function AllowanceTab({ showToast }: { showToast: (msg: string, type?: 'success'
           >
             {/* Role badge */}
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-warmgray-100 text-warmgray-700 shrink-0 min-w-[80px] justify-center">
-              {ROLE_LABELS[rate.role] ?? rate.role}
+              {t(`role_${rate.role}`) !== `role_${rate.role}` ? t(`role_${rate.role}`) : (ROLE_LABELS[rate.role] ?? rate.role)}
             </span>
 
             {/* Rate display or edit */}
