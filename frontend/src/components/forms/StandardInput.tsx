@@ -824,7 +824,7 @@ function RouteEntryInput({
             type="button"
             onClick={copyReturn}
             disabled={routes.length === 0}
-            className="inline-flex items-center gap-1 rounded-lg border border-dashed border-amber-400/70 bg-amber-50/60 px-2.5 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-40 transition-colors"
+            className="inline-flex items-center gap-1 rounded-lg border border-dashed border-ringo-300/70 bg-ringo-50/60 px-2.5 py-1 text-xs font-semibold text-ringo-600 hover:bg-ringo-50 disabled:opacity-40 transition-colors"
           >
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />

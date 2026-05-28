@@ -1,58 +1,78 @@
--- Migration 010: Add sum_target + computed to BUSINESS_TRIP settlement_schema
--- Moves actual_amount to end, adds sum_target on category fields so the
--- frontend auto-calculates the total. Also pre-fills expected_amount hint.
+-- Migration 010: Full BUSINESS_TRIP schema — ringi + settlement
+-- Idempotent — safe to re-run on existing DBs.
+--
+-- Conditional logic (ringi):
+--   accommodation fields          → has_accommodation = yes
+--   has_backpay / backpay_est     → has_accommodation = yes  (packaged fare only relevant when staying)
+--   has_expressway / driving_sec  → transport_mode includes car OR rental (array conditional)
+--   mileage                       → has_expressway = yes
 
 UPDATE form_templates
-SET settlement_schema = '{
-  "fields": [
-    {
-      "name": "transportation_fee",
-      "label": "交通費（円）",
-      "type": "number",
-      "required": false,
-      "sum_target": "actual_amount"
-    },
-    {
-      "name": "accommodation_fee",
-      "label": "宿泊費（円）",
-      "type": "number",
-      "required": false,
-      "sum_target": "actual_amount"
-    },
-    {
-      "name": "food_fee",
-      "label": "食事代（円）",
-      "type": "number",
-      "required": false,
-      "sum_target": "actual_amount"
-    },
-    {
-      "name": "other_fee",
-      "label": "その他（円）",
-      "type": "number",
-      "required": false,
-      "sum_target": "actual_amount"
-    },
-    {
-      "name": "actual_amount",
-      "label": "実費合計（円）",
-      "type": "number",
-      "required": true,
-      "computed": true
-    },
-    {
-      "name": "receipt_files",
-      "label": "領収書（PDF/画像）",
-      "type": "file",
-      "multiple": true,
-      "required": true
-    },
-    {
-      "name": "notes",
-      "label": "備考",
-      "type": "textarea",
-      "required": false
-    }
-  ]
-}'::jsonb
+SET
+  schema_definition = '{
+    "fields": [
+      {"name":"application_date","label":"申請日","label_en":"Application Date","type":"date","required":true,"default_value":"__today__"},
+      {"name":"subject","label":"件名","label_en":"Subject","type":"text","required":true,"placeholder":"例）大阪出張 2025年6月","show_in_row":true},
+      {"name":"destination","label":"出張先","label_en":"Destination","type":"text","required":true,"show_in_row":true},
+      {"name":"purpose","label":"出張目的","label_en":"Purpose","type":"textarea","required":true},
+      {"name":"departure_date","label":"出発日","label_en":"Departure Date","type":"date","required":true},
+      {"name":"return_date","label":"帰着日","label_en":"Return Date","type":"date","required":true},
+      {"name":"companions","label":"同行者","label_en":"Accompanying Persons","type":"user_picker","required":false},
+      {"name":"pc_takeout","label":"PCの持ち出し","label_en":"Taking Company PC","type":"select","required":true,"options":[{"value":"yes","label_ja":"あり"},{"value":"no","label_ja":"なし"}]},
+      {"name":"has_accommodation","label":"宿泊の有無","label_en":"Accommodation Required","type":"select","required":true,"options":[{"value":"yes","label_ja":"あり"},{"value":"no","label_ja":"なし"}]},
+      {"name":"has_backpay","label":"パッケージ料金利用","label_en":"Using Packaged Fare","type":"select","required":false,"options":[{"value":"yes","label_ja":"あり"},{"value":"no","label_ja":"なし"}],"conditional_on":{"field":"has_accommodation","equals":"yes"}},
+      {"name":"backpay_estimate","label":"パッケージ料金概算（円）","label_en":"Estimated Packaged Fare","type":"number","required":false,"unit":"円","validation":{"min":0},"conditional_on":{"field":"has_backpay","equals":"yes"}},
+      {"name":"accommodation_name","label":"宿泊施設名","label_en":"Accommodation Name","type":"text","required":false,"conditional_on":{"field":"has_accommodation","equals":"yes"}},
+      {"name":"nights","label":"泊数","label_en":"Number of Nights","type":"number","required":false,"unit":"泊","validation":{"min":0},"conditional_on":{"field":"has_accommodation","equals":"yes"}},
+      {"name":"accommodation_fee_estimate","label":"宿泊費概算（円）","label_en":"Estimated Accommodation Fee","type":"number","required":false,"unit":"円","validation":{"min":0},"conditional_on":{"field":"has_accommodation","equals":"yes"}},
+      {"name":"transport_mode","label":"交通手段","label_en":"Transportation Means","type":"checkbox","required":true,"options":[{"value":"shinkansen","label_ja":"新幹線"},{"value":"airplane","label_ja":"飛行機"},{"value":"train","label_ja":"在来線・地下鉄"},{"value":"bus","label_ja":"バス"},{"value":"taxi","label_ja":"タクシー"},{"value":"car","label_ja":"営業車"},{"value":"rental","label_ja":"レンタルカー"}]},
+      {"name":"departure_location","label":"出発地","label_en":"Departure Place","type":"text","required":true},
+      {"name":"arrival_location","label":"目的地","label_en":"Destination Place","type":"text","required":true},
+      {"name":"has_expressway","label":"高速・ETCカードの有無","label_en":"Possession of Highway/ETC Card","type":"select","required":false,"options":[{"value":"yes","label_ja":"あり"},{"value":"no","label_ja":"なし"}],"conditional_on":{"field":"transport_mode","equals":["car","rental"]}},
+      {"name":"driving_section","label":"走行区間","label_en":"Driving Section","type":"text","required":false,"placeholder":"例）自宅 → 大阪営業所","conditional_on":{"field":"has_expressway","equals":"yes"}},
+      {"name":"mileage","label":"走行距離（km）","label_en":"Mileage","type":"number","required":false,"unit":"km","validation":{"min":0},"conditional_on":{"field":"has_expressway","equals":"yes"}},
+      {"name":"routes","label":"交通費明細","label_en":"Train / Bus Route Table","type":"route_entry","required":false,"show_mode":true,"options":[{"value":"shinkansen","label_ja":"新幹線"},{"value":"airplane","label_ja":"飛行機"},{"value":"train","label_ja":"在来線・地下鉄"},{"value":"bus","label_ja":"バス"},{"value":"taxi","label_ja":"タクシー"},{"value":"other","label_ja":"その他"}],"conditional_on":{"field":"transport_mode","equals":["shinkansen","airplane","train","bus","taxi"]}},
+      {"name":"transport_total","label":"交通費合計（円）","label_en":"Total Transportation Expenses","type":"number","computed":true,"sum_target":"routes","sum_field":"fare","unit":"円"},
+      {"name":"expected_amount","label":"申請合計（円）","label_en":"Total Application Amount","type":"number","computed":true,"formula":"transport_total+accommodation_fee_estimate+backpay_estimate","unit":"円","show_in_row":true}
+    ]
+  }'::jsonb,
+
+  settlement_schema = '{
+    "fields": [
+      {"name":"settlement_date","label":"精算申請日","label_en":"Settlement Application Date","type":"date","required":true,"default_value":"__today__"},
+      {"name":"destination","label":"出張先","label_en":"Destination","type":"text","required":true},
+      {"name":"purpose","label":"出張目的","label_en":"Purpose","type":"textarea","required":false},
+      {"name":"departure_date","label":"出発日","label_en":"Departure Date","type":"date","required":true},
+      {"name":"return_date","label":"帰着日","label_en":"Return Date","type":"date","required":true},
+      {"name":"companions","label":"同行者","label_en":"Accompanying Persons","type":"user_picker","required":false},
+      {"name":"backpay_amount","label":"パッケージ料金（円）","label_en":"Packaged Fare","type":"number","required":false,"unit":"円","validation":{"min":0}},
+      {"name":"accommodation_fee","label":"宿泊費合計（円）","label_en":"Total Accommodation Fee","type":"number","required":false,"unit":"円","validation":{"min":0}},
+      {"name":"expressway_toll","label":"高速料金立替（円）","label_en":"Highway Toll Advance Payment","type":"number","required":false,"unit":"円","validation":{"min":0}},
+      {"name":"routes","label":"実費交通費明細","label_en":"Actual Route Table","type":"route_entry","required":false,"show_mode":true,"options":[{"value":"shinkansen","label_ja":"新幹線"},{"value":"airplane","label_ja":"飛行機"},{"value":"train","label_ja":"在来線・地下鉄"},{"value":"bus","label_ja":"バス"},{"value":"taxi","label_ja":"タクシー"},{"value":"car","label_ja":"営業車"},{"value":"rental","label_ja":"レンタルカー"},{"value":"other","label_ja":"その他"}]},
+      {"name":"transport_total","label":"交通費合計（円）","label_en":"Total Transportation","type":"number","computed":true,"sum_target":"routes","sum_field":"fare","unit":"円"},
+      {"name":"daily_allowance_days","label":"日当支給日数","label_en":"Per Diem Days","type":"select","required":false,"options":[{"value":"0","label_ja":"0日"},{"value":"0.5","label_ja":"0.5日"},{"value":"1","label_ja":"1日"}]},
+      {"name":"daily_allowance_total","label":"日当合計（円）","label_en":"Total Per Diem","type":"number","computed":true,"formula":"daily_allowance_days*3000","unit":"円"},
+      {"name":"other_expenses","label":"その他費用（円）","label_en":"Other Expenses","type":"number","required":false,"unit":"円","validation":{"min":0}},
+      {"name":"receipts","label":"領収書","label_en":"Receipts","type":"repeat_group","required":false,"min_rows":0,"add_label":"領収書を追加","add_label_en":"Add Receipt","fields":[
+        {"name":"receipt_file","label":"領収書ファイル","label_en":"Receipt File","type":"ai_file_reader","required":false,"file_category":"receipts","target_amount_field":"receipt_amount"},
+        {"name":"receipt_description","label":"内容","label_en":"Description","type":"text","required":true},
+        {"name":"receipt_amount","label":"金額（円）","label_en":"Amount","type":"number","required":true,"unit":"円","validation":{"min":0},"sum_target":"receipt_total"}
+      ]},
+      {"name":"receipt_total","label":"領収書合計","label_en":"Receipt Total","type":"number","computed":true,"unit":"円"},
+      {"name":"remarks","label":"備考","label_en":"Remarks","type":"textarea","required":false},
+      {"name":"settlement_total","label":"精算合計（円）","label_en":"Grand Total","type":"number","computed":true,"formula":"backpay_amount+transport_total+accommodation_fee+daily_allowance_total+expressway_toll+other_expenses","unit":"円","show_in_row":true},
+      {"name":"transfer_date","label":"振込予定日","label_en":"Scheduled Transfer Date","type":"date","required":false}
+    ]
+  }'::jsonb
+
 WHERE code = 'BUSINESS_TRIP';
+
+-- Sync active version snapshot
+UPDATE form_template_versions ftv
+SET
+  schema_definition = ft.schema_definition,
+  settlement_schema = ft.settlement_schema
+FROM form_templates ft
+WHERE ftv.template_id = ft.id
+  AND ft.code         = 'BUSINESS_TRIP'
+  AND ftv.is_active   = TRUE;

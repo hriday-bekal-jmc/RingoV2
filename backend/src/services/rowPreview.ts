@@ -106,7 +106,7 @@ function processField(
 
   if (f.type === 'route_entry' && out.numbers.length < 2) {
     const routes = Array.isArray(data[f.name]) ? (data[f.name] as { fare?: unknown }[]) : [];
-    const total = routes.reduce((s, r) => s + (Number(r.fare) || 0), 0) * 2;
+    const total = routes.reduce((s, r) => s + (Number(r.fare) || 0), 0);
     if (total > 0) {
       out.numbers.push({
         label:        f.label,

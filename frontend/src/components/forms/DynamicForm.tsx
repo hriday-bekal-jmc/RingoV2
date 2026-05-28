@@ -29,7 +29,7 @@ interface FormField {
   };
   conditional_on?: {
     field: string;
-    equals: string | number | boolean;
+    equals: string | number | boolean | Array<string | number | boolean>;
   };
   col_span?: 'half' | 'full';
 }
@@ -117,17 +117,27 @@ export default function DynamicForm({
   const { t } = useLang();
   const [isDrafting, setIsDrafting] = useState(false);
 
+  const activeSchema = isSettlementPhase ? template.settlement_schema : template.schema_definition;
+  const allFields: FormField[] = useMemo(() => activeSchema?.fields ?? [], [activeSchema]);
+
+  const resolvedDefaults = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const schema: Record<string, unknown> = {};
+    allFields.forEach((f) => {
+      if (f.default_value === '__today__') schema[f.name] = today;
+      else if (f.default_value != null) schema[f.name] = f.default_value;
+    });
+    return { ...schema, ...defaultValues };
+  }, []); // intentionally static — only used as initial form values
+
   const {
     register, handleSubmit, getValues, setValue, watch, control,
     formState: { errors, isSubmitting },
   } = useForm<Record<string, unknown>>({
-    defaultValues,
+    defaultValues: resolvedDefaults,
     mode: 'onSubmit',
     reValidateMode: 'onSubmit',
   });
-
-  const activeSchema = isSettlementPhase ? template.settlement_schema : template.schema_definition;
-  const allFields: FormField[] = useMemo(() => activeSchema?.fields ?? [], [activeSchema]);
 
   const conditionalSources = useMemo(
     () => Array.from(new Set(allFields.map((f) => f.conditional_on?.field).filter(Boolean))) as string[],
@@ -144,7 +154,11 @@ export default function DynamicForm({
     return allFields.filter((f) => {
       if (!f.conditional_on) return true;
       const got = sourceMap[f.conditional_on.field];
-      return got != null && String(got) === String(f.conditional_on.equals);
+      if (got == null) return false;
+      const eq = f.conditional_on.equals;
+      const eqArr = Array.isArray(eq) ? eq.map(String) : [String(eq)];
+      const gotArr = Array.isArray(got) ? got.map(String) : [String(got)];
+      return gotArr.some((v) => eqArr.includes(v));
     });
   }, [allFields, watchedConds, conditionalSources]);
 
@@ -167,6 +181,20 @@ export default function DynamicForm({
               targetName: child.sum_target,
               kind: 'repeat_group',
               childName: child.name,
+            });
+          }
+        });
+      }
+
+      // route_entry stores [{fare, ...}] — sum_target+sum_field on the computed field declares the link
+      if (field.type === 'route_entry') {
+        activeFields.forEach((cf) => {
+          if (cf.computed && cf.sum_target === field.name && cf.sum_field) {
+            sources.push({
+              watchName: field.name,
+              targetName: cf.name,
+              kind: 'repeat_group',
+              childName: cf.sum_field,
             });
           }
         });
@@ -211,7 +239,7 @@ export default function DynamicForm({
     if (field.col_span === 'full') return true;
     if (field.col_span === 'half') return false;
     // Auto: type-based defaults
-    return field.type === 'textarea' || field.type === 'file' || field.type === 'repeat_group' || field.type === 'computed';
+    return field.type === 'textarea' || field.type === 'file' || field.type === 'repeat_group' || field.type === 'computed' || field.type === 'route_entry' || field.type === 'checkbox' || field.type === 'user_picker';
   };
 
   return (

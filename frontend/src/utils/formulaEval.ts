@@ -16,27 +16,28 @@ export function evalFormula(
 ): number {
   if (!formula) return 0;
   try {
-    // Replace Math.min / Math.max with numeric identifiers first so they survive
-    // the field-name substitution step.
+    // Protect built-in identifiers before field-name substitution
     let expr = formula
       .replace(/\bMath\.min\b/g, '__min__')
-      .replace(/\bMath\.max\b/g, '__max__');
+      .replace(/\bMath\.max\b/g, '__max__')
+      .replace(/\bNumber\b/g,    '__Number__');
 
     // Replace every word-boundary identifier with its numeric value (0 if missing)
     expr = expr.replace(/\b([a-zA-Z_]\w*)\b/g, (match) => {
-      if (match === '__min__' || match === '__max__') return match;
+      if (match === '__min__' || match === '__max__' || match === '__Number__') return match;
       const v = values[match];
       const n = typeof v === 'number' ? v : parseFloat(String(v ?? '0'));
       return String(isFinite(n) ? n : 0);
     });
 
-    // Restore Math functions
+    // Restore built-ins
     expr = expr
-      .replace(/__min__/g, 'Math.min')
-      .replace(/__max__/g, 'Math.max');
+      .replace(/__min__/g,    'Math.min')
+      .replace(/__max__/g,    'Math.max')
+      .replace(/__Number__/g, 'Number');
 
-    // Allowlist check — after substitution only digits/ops/Math calls allowed
-    const stripped = expr.replace(/Math\.(min|max)/g, '');
+    // Allowlist check — after substitution only digits/ops/Math/Number calls allowed
+    const stripped = expr.replace(/Math\.(min|max)/g, '').replace(/Number/g, '');
     if (!SAFE_EXPR.test(stripped)) return 0;
 
     // eslint-disable-next-line no-new-func
@@ -51,7 +52,7 @@ export function evalFormula(
 // Extract field names referenced in a formula string.
 export function formulaDeps(formula: string): string[] {
   if (!formula) return [];
-  const reserved = new Set(['Math', 'min', 'max']);
+  const reserved = new Set(['Math', 'min', 'max', 'Number']);
   const matches = formula.match(/\b([a-zA-Z_]\w*)\b/g) ?? [];
   return [...new Set(matches.filter((m) => !reserved.has(m)))];
 }
