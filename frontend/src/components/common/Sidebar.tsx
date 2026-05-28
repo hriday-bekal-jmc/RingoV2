@@ -106,7 +106,7 @@ export default function Sidebar() {
           md:relative md:shrink-0
           md:rounded-3xl md:border md:border-white/10
           md:transition-[width] md:duration-200 md:ease-in-out
-          ${collapsed ? 'md:w-[60px]' : 'md:w-60'}
+          ${collapsed ? 'md:w-[60px]' : 'md:w-60 xl:w-72'}
         `}
       >
         <div className="relative flex flex-col flex-1 overflow-hidden">

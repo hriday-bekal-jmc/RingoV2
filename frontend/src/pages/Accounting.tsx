@@ -479,7 +479,7 @@ export default function Accounting() {
 
   return (
     <Layout title={t('title_accounting')}>
-      <div className="max-w-7xl mx-auto space-y-6">
+      <div className="max-w-7xl 2xl:max-w-[1400px] mx-auto space-y-6">
 
         {/* Header */}
         <div className="animate-fade-up flex items-end justify-between">

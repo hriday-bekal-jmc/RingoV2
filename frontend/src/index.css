@@ -354,16 +354,26 @@
 .dropdown-scroll { scrollbar-width: thin; scrollbar-color: rgba(160,148,133,0.35) transparent; }
 
 /* Stagger children */
-.stagger > *:nth-child(1) { animation-delay: 0.05s; }
-.stagger > *:nth-child(2) { animation-delay: 0.10s; }
-.stagger > *:nth-child(3) { animation-delay: 0.15s; }
-.stagger > *:nth-child(4) { animation-delay: 0.20s; }
-.stagger > *:nth-child(5) { animation-delay: 0.25s; }
-.stagger > *:nth-child(6) { animation-delay: 0.30s; }
+.stagger > *:nth-child(1)  { animation-delay: 0.05s; }
+.stagger > *:nth-child(2)  { animation-delay: 0.10s; }
+.stagger > *:nth-child(3)  { animation-delay: 0.15s; }
+.stagger > *:nth-child(4)  { animation-delay: 0.20s; }
+.stagger > *:nth-child(5)  { animation-delay: 0.25s; }
+.stagger > *:nth-child(6)  { animation-delay: 0.30s; }
 .stagger > *:nth-child(7)  { animation-delay: 0.35s; }
 .stagger > *:nth-child(8)  { animation-delay: 0.40s; }
 .stagger > *:nth-child(9)  { animation-delay: 0.45s; }
 .stagger > *:nth-child(10) { animation-delay: 0.50s; }
+.stagger > *:nth-child(11) { animation-delay: 0.55s; }
+.stagger > *:nth-child(12) { animation-delay: 0.60s; }
+.stagger > *:nth-child(13) { animation-delay: 0.65s; }
+.stagger > *:nth-child(14) { animation-delay: 0.70s; }
+.stagger > *:nth-child(15) { animation-delay: 0.75s; }
+.stagger > *:nth-child(16) { animation-delay: 0.80s; }
+.stagger > *:nth-child(17) { animation-delay: 0.85s; }
+.stagger > *:nth-child(18) { animation-delay: 0.90s; }
+.stagger > *:nth-child(19) { animation-delay: 0.95s; }
+.stagger > *:nth-child(20) { animation-delay: 1.00s; }
 
 /* ─── Long-list virtualization (CSS-native) ────────────────────────────────
    content-visibility: auto lets the browser skip rendering, layout, and

@@ -299,7 +299,7 @@ export default function Dashboard() {
       {loading ? (
         <RingoLoader.Block />
       ) : (
-        <div className="max-w-6xl mx-auto space-y-8">
+        <div className="max-w-6xl xl:max-w-7xl 2xl:max-w-[1400px] mx-auto space-y-8">
 
           {/* Header row: greeting + admin toggle */}
           <div className="flex items-start justify-between gap-4 animate-fade-up">
@@ -518,8 +518,6 @@ export default function Dashboard() {
                       const desc = lang === 'en'
                         ? (tmpl.description_en ?? legacy?.desc_en ?? '')
                         : (tmpl.description_ja ?? legacy?.desc_ja ?? '');
-                      // Pattern badge shown via shared PatternBadge component below.
-                      // Legacy `twoStage` flag falls back to pattern_id=3.
                       const effectivePattern = tmpl.pattern_id ?? (legacy?.twoStage ? 3 : 1);
                       return (
                         <Link
@@ -536,7 +534,6 @@ export default function Dashboard() {
                                 {title}
                               </p>
                               <PatternBadge patternId={effectivePattern} />
-
                             </div>
                             <p className="text-[11px] text-warmgray-400 mt-0.5 leading-tight">{desc}</p>
                           </div>

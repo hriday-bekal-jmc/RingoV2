@@ -42,6 +42,7 @@ export const addRouteStepSchema = z.object({
   approver_id:  z.string().uuid().optional(),
   label:        z.string().max(255).optional(),
   action_type:  z.enum(ACTION_TYPES).optional(),
+  insert_after: z.number().int().nonnegative().optional(),
 });
 export type AddRouteStepBody = z.infer<typeof addRouteStepSchema>;
 

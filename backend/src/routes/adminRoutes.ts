@@ -373,14 +373,25 @@ router.delete('/routes/:id', async (req: Request, res: Response): Promise<void> 
 });
 
 router.post('/routes/:id/steps', validateBody(addRouteStepSchema), async (req: Request, res: Response): Promise<void> => {
-  const { approver_id, label, action_type } = req.body as AddRouteStepBody;
+  const { approver_id, label, action_type, insert_after } = req.body as AddRouteStepBody;
   try {
     await withTransaction(async (client: pg.PoolClient) => {
-      const orderRes = await client.query(
-        `SELECT COALESCE(MAX(step_order), 0) + 1 AS n FROM approval_route_steps WHERE route_id = $1`,
-        [req.params.id],
-      );
-      const order = orderRes.rows[0].n as number;
+      let order: number;
+      if (insert_after !== undefined) {
+        // Shift all steps after the insertion point up by 1, then insert at insert_after + 1
+        await client.query(
+          `UPDATE approval_route_steps SET step_order = step_order + 1
+           WHERE route_id = $1 AND step_order > $2`,
+          [req.params.id, insert_after],
+        );
+        order = insert_after + 1;
+      } else {
+        const orderRes = await client.query(
+          `SELECT COALESCE(MAX(step_order), 0) + 1 AS n FROM approval_route_steps WHERE route_id = $1`,
+          [req.params.id],
+        );
+        order = orderRes.rows[0].n as number;
+      }
       await client.query(
         `INSERT INTO approval_route_steps (route_id, step_order, approver_id, label, action_type)
          VALUES ($1, $2, $3, $4, $5)`,

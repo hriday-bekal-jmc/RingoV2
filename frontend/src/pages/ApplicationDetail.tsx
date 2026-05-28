@@ -769,7 +769,7 @@ export default function ApplicationDetail() {
         </svg>
         {lang === 'en' ? 'Back' : '戻る'}
       </button>
-      <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-up">
+      <div className="max-w-5xl xl:max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-up">
 
         {/* Left: main content */}
         <div className="lg:col-span-2 space-y-6">

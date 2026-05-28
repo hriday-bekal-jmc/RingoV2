@@ -722,6 +722,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
   const queryClient = useQueryClient();
   const { lang, t } = useLang();
   const [addingStepToRoute, setAddingStepToRoute] = useState<string | null>(null);
+  const [insertAfterOrder, setInsertAfterOrder] = useState<number | null>(null);
   const [newStep, setNewStep] = useState({ approver_id: '', label: '', action_type: 'APPROVE' });
   const [showNewRoute, setShowNewRoute] = useState(false);
   const [newRoute, setNewRoute] = useState({ template_id: '', department_id: '', name: '', stage: 'RINGI' });
@@ -760,11 +761,12 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
   const refetch = () => queryClient.invalidateQueries({ queryKey: ['admin', 'routes'] });
 
   const addStep = useMutation({
-    mutationFn: async ({ routeId, ...step }: { routeId: string; approver_id: string; label: string; action_type: string }) =>
-      (await apiClient.post(`/admin/routes/${routeId}/steps`, step)).data,
+    mutationFn: async ({ routeId, insert_after, ...step }: { routeId: string; approver_id: string; label: string; action_type: string; insert_after?: number }) =>
+      (await apiClient.post(`/admin/routes/${routeId}/steps`, insert_after !== undefined ? { ...step, insert_after } : step)).data,
     onSuccess: () => {
       refetch();
       setAddingStepToRoute(null);
+      setInsertAfterOrder(null);
       setNewStep({ approver_id: '', label: '', action_type: 'APPROVE' });
       showToast('ステップを追加しました');
     },
@@ -953,9 +955,19 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
               {route.steps.length === 0 ? (
                 <p className="text-xs text-warmgray-400 italic ml-2">{t('admin_no_steps')}</p>
               ) : (
-                route.steps.map((step) => (
+                route.steps.map((step, stepIdx) => {
+                  const prevOrder = stepIdx === 0 ? 0 : route.steps[stepIdx - 1].step_order;
+                  return (
                   <div key={step.id} className="flex flex-col items-center md:flex-row gap-3">
-                    <ChainArrow />
+                    {/* Insert-before arrow — shows + badge on hover */}
+                    <div className="relative group/insert flex items-center justify-center shrink-0">
+                      <ChainArrow />
+                      <button
+                        className="absolute hidden group-hover/insert:flex w-4 h-4 rounded-full bg-ringo-500 text-white text-[9px] items-center justify-center shadow-md hover:bg-ringo-600 transition-colors z-10 font-bold"
+                        onClick={() => { setAddingStepToRoute(route.id); setInsertAfterOrder(prevOrder); }}
+                        title="ここにステップを挿入"
+                      >+</button>
+                    </div>
                     <div className="flex flex-col items-center gap-1 group/step relative">
                       {/* Avatar or step number */}
                       <div className="relative">
@@ -967,8 +979,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
                         />
                         {/* Delete badge — first click arms, second confirms.
                             Inline-on-avatar to keep chain layout compact. */}
-                        {step.step_order > 1 && (
-                          confirmingStepId === step.id ? (
+                        {confirmingStepId === step.id ? (
                             <button
                               className="absolute -top-1.5 -right-1.5 px-1.5 h-4 rounded-full bg-red-600 text-white text-[9px] font-bold flex items-center justify-center shadow-md ring-2 ring-white animate-scale-in"
                               onClick={() => deleteStep.mutate(step.id)}
@@ -989,7 +1000,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
                               ×
                             </button>
                           )
-                        )}
+                        }
                       </div>
                       <div className="text-center max-w-[72px]">
                         <p className="text-[10px] font-semibold text-warmgray-700 leading-tight truncate">
@@ -1004,7 +1015,8 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
                       </div>
                     </div>
                   </div>
-                ))
+                  );
+                })
               )}
 
               {/* End node */}
@@ -1062,11 +1074,15 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
               </div>
 
               <div className="flex gap-2 justify-end pt-1">
-                <button className="btn-ghost text-xs" onClick={() => setAddingStepToRoute(null)}>{t('btn_cancel')}</button>
+                <button className="btn-ghost text-xs" onClick={() => { setAddingStepToRoute(null); setInsertAfterOrder(null); }}>{t('btn_cancel')}</button>
                 <button
                   className="btn-primary text-xs"
                   disabled={!newStep.approver_id || addStep.isPending}
-                  onClick={() => addStep.mutate({ routeId: route.id, ...newStep })}
+                  onClick={() => addStep.mutate({
+                    routeId: route.id,
+                    ...newStep,
+                    ...(insertAfterOrder !== null ? { insert_after: insertAfterOrder } : {}),
+                  })}
                 >
                   {addStep.isPending ? t('admin_adding') : t('admin_step_form_title')}
                 </button>
@@ -1075,7 +1091,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
           ) : (
             <button
               className="w-full py-2 text-xs font-semibold text-warmgray-400 hover:text-ringo-600 hover:bg-ringo-50/50 rounded-xl transition-all duration-150 border border-dashed border-warmgray-200 hover:border-ringo-200 flex items-center justify-center gap-1"
-              onClick={() => setAddingStepToRoute(route.id)}
+              onClick={() => { setAddingStepToRoute(route.id); setInsertAfterOrder(null); }}
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -1972,7 +1988,7 @@ export default function Admin() {
     <Layout title={t('title_admin')}>
       {toast && <Toast {...toast} onDismiss={dismiss} />}
 
-      <div className="max-w-5xl mx-auto space-y-6">
+      <div className="max-w-5xl xl:max-w-7xl 2xl:max-w-[1400px] mx-auto space-y-6">
         {/* Pill tab bar — scrolls horizontally on narrow viewports if too wide to fit */}
         <div className="animate-fade-up overflow-x-auto -mx-4 md:mx-0 px-4 md:px-0">
           <div className="inline-flex items-center gap-1 bg-white/50 backdrop-blur-sm border border-white/70 rounded-2xl p-1.5 shadow-sm whitespace-nowrap">
