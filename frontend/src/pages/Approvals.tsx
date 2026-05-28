@@ -464,9 +464,10 @@ interface DetailModalProps {
   onClose: () => void;
   onAction: (id: string, action: 'approve' | 'return' | 'reject', comment: string) => void;
   isMutating: boolean;
+  proxyMode?: boolean; // When true: only proxy-approve action available (no return/reject)
 }
 
-function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
+function DetailModal({ app, onClose, onAction, isMutating, proxyMode = false }: DetailModalProps) {
   const { t, lang } = useLang();
   const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
   const [activeAction, setActiveAction] = useState<'approve' | 'return' | 'reject' | null>(null);
@@ -488,11 +489,15 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
 
   const actionConfig = {
     approve: {
-      title:    isConfirmStep ? (lang === 'en' ? 'Confirm' : '確認する') : t('approvals_approve_btn'),
+      title:    proxyMode
+        ? (lang === 'en' ? 'Proxy Approve' : '代理承認')
+        : isConfirmStep
+          ? (lang === 'en' ? 'Confirm' : '確認する')
+          : t('approvals_approve_btn'),
       btnClass: 'btn-primary',
       require:  false,
-      icon:     '✓',
-      iconBg:   'bg-emerald-100 text-emerald-600',
+      icon:     proxyMode ? '↔' : '✓',
+      iconBg:   proxyMode ? 'bg-violet-100 text-violet-600' : 'bg-emerald-100 text-emerald-600',
     },
     return:  { title: t('btn_return'), btnClass: 'btn-outline', require: true, icon: '↩', iconBg: 'bg-amber-100 text-amber-600' },
     reject:  { title: t('btn_reject'), btnClass: 'btn-danger',  require: true, icon: '✕', iconBg: 'bg-red-100 text-red-600'    },
@@ -681,7 +686,7 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
               </button>
               {/* Action buttons — right */}
               <div className="flex items-center gap-1.5 shrink-0">
-                {app.current_step_action !== 'CONFIRM' && (
+                {!proxyMode && app.current_step_action !== 'CONFIRM' && (
                   <>
                     <button className="btn-outline text-xs sm:text-sm" onClick={() => { setActiveAction('return'); setComment(''); }} disabled={isMutating}>
                       ↩ {t('btn_return')}
@@ -692,11 +697,13 @@ function DetailModal({ app, onClose, onAction, isMutating }: DetailModalProps) {
                   </>
                 )}
                 <button className="btn-primary text-xs sm:text-sm" onClick={() => { setActiveAction('approve'); setComment(''); }} disabled={isMutating}>
-                  {app.current_step_action === 'CONFIRM'
-                    ? `✓ ${lang === 'en' ? 'Confirm' : '確認する'}`
-                    : Number(app.current_step) === Number(app.total_steps)
-                      ? `✓ ${t('approvals_final_btn')}`
-                      : `✓ ${t('approvals_approve_btn')}`}
+                  {proxyMode
+                    ? `↔ ${lang === 'en' ? 'Proxy Approve' : '代理承認'}`
+                    : app.current_step_action === 'CONFIRM'
+                      ? `✓ ${lang === 'en' ? 'Confirm' : '確認する'}`
+                      : Number(app.current_step) === Number(app.total_steps)
+                        ? `✓ ${t('approvals_final_btn')}`
+                        : `✓ ${t('approvals_approve_btn')}`}
                 </button>
               </div>
             </div>
@@ -714,6 +721,8 @@ export default function Approvals() {
   const { toast, show: showToast, dismiss } = useToast();
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
   const [systemView, setSystemView] = useState(false);
+  const [proxyView, setProxyView] = useState(false);
+  const [selectedProxyApp, setSelectedProxyApp] = useState<Application | null>(null);
   // ── Selection / bulk-approve state ────────────────────────────────────────
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -747,8 +756,40 @@ export default function Approvals() {
   });
 
   const applications = data?.pages.flatMap(p => p.items) ?? [];
-  // total from first page (COUNT(*) OVER() on the full resultset)
   const totalCount = data?.pages[0]?.total ?? applications.length;
+
+  // ── Proxy approval queue ───────────────────────────────────────────────────
+  const {
+    data: proxyData,
+    hasNextPage: hasNextProxyPage,
+    isFetchingNextPage: isFetchingNextProxyPage,
+    isLoading: isProxyLoading,
+  } = useInfiniteQuery<{ items: Application[]; hasMore: boolean; total: number; nextCursor?: string | null }>({
+    queryKey: ['proxyApprovals'],
+    queryFn: async ({ pageParam = null }) => {
+      const cursor = pageParam ? `&cursor=${encodeURIComponent(String(pageParam))}` : '';
+      return (await apiClient.get(`/approvals/pending/proxy?limit=${PAGE}${cursor}`)).data;
+    },
+    initialPageParam: null,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    staleTime: 30_000,
+    placeholderData: keepPreviousData,
+  });
+  const proxyApplications = proxyData?.pages.flatMap(p => p.items) ?? [];
+  const proxyTotalCount = proxyData?.pages[0]?.total ?? proxyApplications.length;
+
+  const proxyApproveMutation = useMutation({
+    mutationFn: async ({ id, comment }: { id: string; comment: string }) =>
+      (await apiClient.post(`/approvals/${id}/proxy-approve`, { comment })).data,
+    onSuccess: (data) => {
+      showToast(data.final ? `↔ 代理承認（最終）しました` : `↔ 代理承認しました`);
+      queryClient.invalidateQueries({ queryKey: ['proxyApprovals'] });
+      queryClient.invalidateQueries({ queryKey: ['pendingApprovals'] });
+      queryClient.invalidateQueries({ queryKey: ['myApplications'] });
+      setSelectedProxyApp(null);
+    },
+    onError: (err: any) => showToast(`代理承認に失敗しました: ${err.response?.data?.error ?? err.message}`, 'error'),
+  });
 
   const sentinelRef = useScrollEnd(
     useCallback(() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }, [hasNextPage, isFetchingNextPage, fetchNextPage]),
@@ -757,6 +798,7 @@ export default function Approvals() {
 
   const invalidate = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['pendingApprovals'] });
+    queryClient.invalidateQueries({ queryKey: ['proxyApprovals'] });
     queryClient.invalidateQueries({ queryKey: ['myApplications'] });
     setSelectedApp(null);
   }, [queryClient]);
@@ -802,7 +844,7 @@ export default function Approvals() {
     else rejectMutation.mutate(payload);
   };
 
-  const isMutating = approveMutation.isPending || returnMutation.isPending || rejectMutation.isPending;
+  const isMutating = approveMutation.isPending || returnMutation.isPending || rejectMutation.isPending || proxyApproveMutation.isPending;
 
   // ── Bulk approve ──────────────────────────────────────────────────────────
   const toggleSelect = (id: string) => {
@@ -821,25 +863,33 @@ export default function Approvals() {
   };
 
   const selectAll = () => {
-    setSelectedIds(new Set(applications.map((a) => a.id)));
+    const list = proxyView ? proxyApplications : applications;
+    setSelectedIds(new Set(list.map((a) => a.id)));
   };
 
   const bulkApproveMutation = useMutation({
     mutationFn: async ({ applicationIds, comment }: { applicationIds: string[]; comment?: string }) =>
       (await apiClient.post('/approvals/bulk-approve', { applicationIds, comment })).data,
     onSuccess: (data: { succeeded: number; failed: { applicationId: string; reason: string }[] }) => {
-      if (data.failed.length === 0) {
-        showToast(`✅ ${data.succeeded}件を承認しました`);
-      } else {
-        showToast(
-          `✅ ${data.succeeded}件承認 / ⚠ ${data.failed.length}件失敗: ${data.failed.map((f) => f.reason).join(', ')}`,
-          'error',
-        );
-      }
+      if (data.failed.length === 0) showToast(`✅ ${data.succeeded}件を承認しました`);
+      else showToast(`✅ ${data.succeeded}件承認 / ⚠ ${data.failed.length}件失敗: ${data.failed.map((f) => f.reason).join(', ')}`, 'error');
       exitSelectionMode();
       invalidate();
     },
     onError: (err: any) => showToast(`一括承認に失敗しました: ${err.message}`, 'error'),
+  });
+
+  const bulkProxyApproveMutation = useMutation({
+    mutationFn: async ({ applicationIds, comment }: { applicationIds: string[]; comment?: string }) =>
+      (await apiClient.post('/approvals/bulk-proxy-approve', { applicationIds, comment })).data,
+    onSuccess: (data: { succeeded: number; failed: { applicationId: string; reason: string }[] }) => {
+      if (data.failed.length === 0) showToast(`↔ ${data.succeeded}件を代理承認しました`);
+      else showToast(`↔ ${data.succeeded}件代理承認 / ⚠ ${data.failed.length}件失敗`, 'error');
+      exitSelectionMode();
+      queryClient.invalidateQueries({ queryKey: ['proxyApprovals'] });
+      queryClient.invalidateQueries({ queryKey: ['pendingApprovals'] });
+    },
+    onError: (err: any) => showToast(`一括代理承認に失敗しました: ${err.message}`, 'error'),
   });
 
   return (
@@ -856,11 +906,34 @@ export default function Approvals() {
             <p className="text-sm text-warmgray-400 mt-1">{t('approvals_subtitle')}</p>
           </div>
           <div className="flex items-center gap-2 shrink-0 mt-1">
-            {totalCount > 0 && !selectionMode && (
-              <span className="badge-pending px-3 py-1.5 text-sm">{totalCount} {t('approvals_pending_badge')}</span>
+            {(proxyTotalCount > 0 || totalCount > 0) && !selectionMode && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => { setProxyView(false); setSelectedProxyApp(null); exitSelectionMode(); }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all duration-150 ${
+                    !proxyView
+                      ? 'bg-ringo-500 text-white border-ringo-500 shadow-sm'
+                      : 'bg-white/60 text-warmgray-500 border-white/80 hover:bg-white/90'
+                  }`}
+                >
+                  {lang === 'en' ? 'Approval' : '承認'}
+                  {totalCount > 0 && <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${!proxyView ? 'bg-white/30' : 'bg-ringo-100 text-ringo-600'}`}>{totalCount}</span>}
+                </button>
+                <button
+                  onClick={() => { setProxyView(true); setSelectedApp(null); exitSelectionMode(); }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all duration-150 ${
+                    proxyView
+                      ? 'bg-violet-600 text-white border-violet-600 shadow-sm'
+                      : 'bg-white/60 text-warmgray-500 border-white/80 hover:bg-white/90'
+                  }`}
+                >
+                  {lang === 'en' ? 'Proxy' : '代理承認'}
+                  {proxyTotalCount > 0 && <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${proxyView ? 'bg-white/30' : 'bg-violet-100 text-violet-600'}`}>{proxyTotalCount}</span>}
+                </button>
+              </div>
             )}
-            {/* Bulk-select toggle — shown when there are apps to select */}
-            {applications.length > 0 && (
+            {/* Bulk-select toggle — shown when active list has items */}
+            {(proxyView ? proxyApplications : applications).length > 0 && !systemView && (
               selectionMode ? (
                 <button
                   onClick={exitSelectionMode}
@@ -1094,7 +1167,124 @@ export default function Approvals() {
         )}
       </div>
 
-      {/* Detail modal */}
+      {/* Proxy approval list */}
+      {proxyView && (
+        <div className="space-y-4 animate-fade-up">
+          <div className="flex items-center gap-3 px-1">
+            <div className="w-2 h-2 rounded-full bg-violet-500" />
+            <p className="text-sm font-bold text-warmgray-700">
+              {lang === 'en' ? 'Proxy Approvals — you can approve on behalf of the current approver' : '代理承認 — 現在の承認者に代わって承認できる申請'}
+            </p>
+          </div>
+
+          {isProxyLoading && <div className="card py-10 flex justify-center"><RingoLoader.Inline /></div>}
+
+          {!isProxyLoading && proxyApplications.length === 0 && (
+            <div className="card flex flex-col items-center justify-center py-16 text-warmgray-400">
+              <span className="text-3xl mb-3">↔</span>
+              <p className="text-sm font-medium">{lang === 'en' ? 'No proxy approvals pending' : '代理承認待ちはありません'}</p>
+            </div>
+          )}
+
+          {proxyApplications.length > 0 && (
+            <div className="card !p-0 md:overflow-hidden border-violet-200/60">
+              <table className="table-base table-responsive">
+                <thead>
+                  <tr>
+                    <th>{t('approvals_col_app')}</th>
+                    <th>{lang === 'en' ? 'Waiting for' : '現在の承認者'}</th>
+                    <th>{t('approvals_col_date')}</th>
+                    <th className="hidden md:table-cell text-right w-32">{lang === 'en' ? 'Amount' : '金額'}</th>
+                  </tr>
+                </thead>
+                <tbody className="md:divide-y md:divide-white/30">
+                  {proxyApplications.map((app, i) => (
+                    <tr
+                      key={app.id}
+                      className={`cursor-pointer hover:bg-violet-50/40 transition-colors duration-100 group animate-fade-up ${selectedIds.has(app.id) ? '!bg-violet-50/80' : ''}`}
+                      style={{ animationDelay: `${Math.min(i, 14) * 30}ms` }}
+                      onClick={() => selectionMode ? toggleSelect(app.id) : setSelectedProxyApp(app)}
+                    >
+                      <td data-label={t('approvals_col_app')} className={selectedIds.has(app.id) ? 'border-l-[3px] border-violet-500' : 'border-l-[3px] border-violet-300'}>
+                        <div className="flex items-center gap-3 min-w-0">
+                          {selectionMode ? (
+                            <div className="w-8 h-8 flex items-center justify-center shrink-0">
+                              <input type="checkbox" checked={selectedIds.has(app.id)} readOnly className="w-5 h-5 accent-violet-600 pointer-events-none rounded" />
+                            </div>
+                          ) : (
+                            <UserAvatar name={app.applicant_name ?? '?'} avatarUrl={app.applicant_avatar} size={8} />
+                          )}
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-semibold text-warmgray-800 truncate">{app.template_name}</p>
+                              {app.current_stage === 'SETTLEMENT' && (
+                                <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700">{t('approvals_settlement_badge')}</span>
+                              )}
+                            </div>
+                            {app.row_preview?.text && (
+                              <p className="text-[11px] text-warmgray-600 mt-0.5 truncate font-medium md:max-w-[200px]">
+                                {lang === 'en' ? app.row_preview.text.label_en : app.row_preview.text.label}: {app.row_preview.text.value}
+                              </p>
+                            )}
+                            <p className="text-[11px] text-warmgray-400 mt-0.5">{app.applicant_name}
+                              {app.department_name && app.department_name !== '—' && (
+                                <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-surface-100/80 text-warmgray-500 border border-surface-200/60">{app.department_name}</span>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td data-label={lang === 'en' ? 'Waiting for' : '現在の承認者'}>
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            {Array.from({ length: Number(app.total_steps) }).map((_, idx) => {
+                              const n = idx + 1;
+                              const cur = Number(app.current_step);
+                              return (
+                                <span key={idx} className={`w-2 h-2 rounded-full ${n < cur ? 'bg-emerald-400' : n === cur ? 'bg-amber-400 ring-2 ring-amber-200' : 'bg-violet-300'}`} />
+                              );
+                            })}
+                            <span className="text-[10px] text-warmgray-400 ml-1">{app.current_step}/{app.total_steps}</span>
+                          </div>
+                          {app.current_approver_name && (
+                            <p className="text-[10px] text-warmgray-400 mt-1 truncate md:max-w-[120px]">
+                              {lang === 'en' ? 'Approver: ' : '承認者: '}{app.current_approver_name}
+                            </p>
+                          )}
+                          {app.current_step_label && (
+                            <p className="text-[10px] text-warmgray-400 mt-0.5 truncate md:max-w-[120px]">{app.current_step_label}</p>
+                          )}
+                        </div>
+                      </td>
+                      <td data-label={t('approvals_col_date')} className="text-[11px] text-warmgray-400 whitespace-nowrap">
+                        {new Date(app.created_at).toLocaleDateString(dateLocale, { month: 'short', day: 'numeric' })}
+                      </td>
+                      <td className="hidden md:table-cell text-right w-32 align-middle">
+                        {app.row_preview?.numbers && app.row_preview.numbers.length > 0 && (
+                          <div className="flex flex-col items-end gap-0.5">
+                            {app.row_preview.numbers.map((n, ni) => (
+                              <span key={ni} className="text-xs font-bold tabular-nums text-warmgray-700">
+                                {n.value !== null ? n.value.toLocaleString() : '—'}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {(isFetchingNextProxyPage || (!hasNextProxyPage && proxyApplications.length >= PAGE)) && (
+                <div className="px-5 py-3 flex items-center justify-center gap-2 text-warmgray-400 text-xs border-t border-white/20">
+                  {isFetchingNextProxyPage ? <RingoLoader.Inline /> : <span className="text-warmgray-300">{lang === 'en' ? 'All loaded' : '全件表示済み'}</span>}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Detail modal — regular */}
       {selectedApp && (
         <DetailModal
           app={selectedApp}
@@ -1104,23 +1294,42 @@ export default function Approvals() {
         />
       )}
 
-      {/* Bulk approve confirm dialog */}
+      {/* Detail modal — proxy */}
+      {selectedProxyApp && (
+        <DetailModal
+          app={selectedProxyApp}
+          onClose={() => setSelectedProxyApp(null)}
+          onAction={(id, _action, comment) =>
+            proxyApproveMutation.mutate({ id, comment })
+          }
+          isMutating={proxyApproveMutation.isPending}
+          proxyMode
+        />
+      )}
+
+      {/* Bulk approve / bulk proxy-approve confirm dialog */}
       <ConfirmDialog
         isOpen={showBulkConfirm}
-        title={lang === 'en' ? 'Bulk Approve' : '一括承認'}
+        title={proxyView ? (lang === 'en' ? 'Bulk Proxy Approve' : '一括代理承認') : (lang === 'en' ? 'Bulk Approve' : '一括承認')}
         message={
-          lang === 'en'
-            ? `Approve ${selectedIds.size} application${selectedIds.size > 1 ? 's' : ''}? This cannot be undone.`
-            : `${selectedIds.size}件の申請をまとめて承認します。この操作は取り消せません。`
+          proxyView
+            ? (lang === 'en'
+                ? `Proxy-approve ${selectedIds.size} application${selectedIds.size > 1 ? 's' : ''} on behalf of the current approver? This cannot be undone.`
+                : `${selectedIds.size}件の申請を代理承認します。この操作は取り消せません。`)
+            : (lang === 'en'
+                ? `Approve ${selectedIds.size} application${selectedIds.size > 1 ? 's' : ''}? This cannot be undone.`
+                : `${selectedIds.size}件の申請をまとめて承認します。この操作は取り消せません。`)
         }
-        confirmLabel={lang === 'en' ? `✓ Approve ${selectedIds.size}` : `✓ ${selectedIds.size}件を承認`}
+        confirmLabel={proxyView
+          ? (lang === 'en' ? `↔ Proxy ${selectedIds.size}` : `↔ ${selectedIds.size}件を代理承認`)
+          : (lang === 'en' ? `✓ Approve ${selectedIds.size}` : `✓ ${selectedIds.size}件を承認`)}
         confirmClass="btn-primary"
         onConfirm={() => {
           setShowBulkConfirm(false);
-          bulkApproveMutation.mutate({
-            applicationIds: Array.from(selectedIds),
-            comment: bulkComment.trim() || undefined,
-          });
+          const ids = Array.from(selectedIds);
+          const comment = bulkComment.trim() || undefined;
+          if (proxyView) bulkProxyApproveMutation.mutate({ applicationIds: ids, comment });
+          else bulkApproveMutation.mutate({ applicationIds: ids, comment });
         }}
         onCancel={() => setShowBulkConfirm(false)}
       />
@@ -1137,7 +1346,8 @@ export default function Approvals() {
                     ? (lang === 'en' ? `${selectedIds.size} selected` : `${selectedIds.size}件選択中`)
                     : (lang === 'en' ? 'Tap rows to select' : '行をタップして選択')}
                 </span>
-                {applications.length > 0 && selectedIds.size < applications.length && (
+                {(proxyView ? proxyApplications : applications).length > 0 &&
+                  selectedIds.size < (proxyView ? proxyApplications : applications).length && (
                   <button
                     onClick={selectAll}
                     className="text-xs font-semibold text-ringo-500 hover:text-ringo-700 transition-colors"
@@ -1174,17 +1384,21 @@ export default function Approvals() {
                 </button>
                 <button
                   onClick={() => setShowBulkConfirm(true)}
-                  disabled={selectedIds.size === 0 || bulkApproveMutation.isPending}
+                  disabled={selectedIds.size === 0 || bulkApproveMutation.isPending || bulkProxyApproveMutation.isPending}
                   className="btn-primary text-xs sm:text-sm flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {bulkApproveMutation.isPending ? (
+                  {(bulkApproveMutation.isPending || bulkProxyApproveMutation.isPending) ? (
                     <span className="flex items-center justify-center gap-2">
                       <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                       </svg>
-                      {lang === 'en' ? 'Approving…' : '承認中…'}
+                      {lang === 'en' ? 'Processing…' : '処理中…'}
                     </span>
+                  ) : proxyView ? (
+                    `↔ ${selectedIds.size > 0
+                      ? (lang === 'en' ? `Proxy ${selectedIds.size}` : `${selectedIds.size}件を代理承認`)
+                      : (lang === 'en' ? 'Proxy approve selected' : '選択して代理承認')}`
                   ) : (
                     `✓ ${selectedIds.size > 0
                       ? (lang === 'en' ? `Approve ${selectedIds.size}` : `${selectedIds.size}件を承認`)

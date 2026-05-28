@@ -16,6 +16,8 @@ interface FormField {
   add_label?: string;
   add_label_en?: string;
   sum_target?: string;
+  sum_field?:  string;
+  formula?:    string;
   computed?: boolean;
   placeholder?: string;
   helper_text?: string;

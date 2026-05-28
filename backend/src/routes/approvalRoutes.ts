@@ -23,22 +23,35 @@ router.get('/pending/count', async (req: Request, res: Response): Promise<void> 
   try {
     const r = await query(
       systemView
-        ? `SELECT COUNT(*)::int AS total
+        ? `SELECT COUNT(*)::int AS total, 0::int AS proxy_total
            FROM approval_steps s
            JOIN applications a ON a.id = s.application_id
            WHERE s.status = 'PENDING'
              AND a.status IN ('PENDING_APPROVAL','PENDING_SETTLEMENT')
              AND a.archived_at IS NULL`
-        : `SELECT COUNT(*)::int AS total
-           FROM approval_steps s
-           JOIN applications a ON a.id = s.application_id
-           WHERE s.status = 'PENDING'
-             AND a.status IN ('PENDING_APPROVAL','PENDING_SETTLEMENT')
-             AND a.archived_at IS NULL
-             AND s.approver_id = $1`,
+        : `SELECT
+             (SELECT COUNT(*)::int FROM approval_steps s
+              JOIN applications a ON a.id = s.application_id
+              WHERE s.status = 'PENDING'
+                AND a.status IN ('PENDING_APPROVAL','PENDING_SETTLEMENT')
+                AND a.archived_at IS NULL
+                AND s.approver_id = $1) AS total,
+             (SELECT COUNT(DISTINCT a.id)::int
+              FROM applications a
+              JOIN approval_steps ps ON ps.application_id = a.id AND ps.status = 'PENDING'
+              WHERE a.status IN ('PENDING_APPROVAL','PENDING_SETTLEMENT')
+                AND a.archived_at IS NULL
+                AND EXISTS (
+                  SELECT 1 FROM approval_steps ms
+                  WHERE ms.application_id = a.id
+                    AND ms.stage = ps.stage
+                    AND ms.status = 'WAITING'
+                    AND ms.approver_id = $1
+                    AND ms.step_order > ps.step_order
+                )) AS proxy_total`,
       systemView ? [] : [userId],
     );
-    res.json({ total: r.rows[0]?.total ?? 0 });
+    res.json({ total: r.rows[0]?.total ?? 0, proxy_total: r.rows[0]?.proxy_total ?? 0 });
   } catch (err) {
     console.error('[approvals] count failed:', err);
     res.status(500).json({ error: 'カウント取得に失敗しました' });
@@ -146,12 +159,100 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-// ── Shared approve logic — used by single /:id/approve and bulk /bulk-approve ──
+// GET /approvals/pending/proxy — apps the current user can proxy-approve
+// A user can proxy-approve when they have a WAITING step with step_order > the current PENDING step
+// in the same application+stage (i.e. they are a downstream approver in the chain).
+router.get('/pending/proxy', async (req: Request, res: Response): Promise<void> => {
+  const { id: userId } = req.user!;
+  const limit  = parsePageLimit(req.query.limit, APPROVAL_PAGE_SIZE, 100);
+  const cursor = decodeCursor(req.query.cursor);
+  try {
+    const result = await query(
+      `SELECT
+         a.id, a.application_number, a.status, a.created_at,
+         a.form_data, a.settlement_data, a.template_id,
+         t.title_ja AS template_name, t.title AS template_title_en,
+         t.pattern_id,
+         u.full_name   AS applicant_name,
+         u.avatar_url  AS applicant_avatar,
+         COALESCE(d.name, '—') AS department_name,
+         ps.id          AS current_step_id,
+         (SELECT COUNT(*) FROM approval_steps
+          WHERE application_id = a.id AND stage = ps.stage
+            AND step_order / 100 = ps.step_order / 100
+            AND step_order <= ps.step_order)::int AS current_step,
+         ps.stage       AS current_stage,
+         ps.label       AS current_step_label,
+         ps.action_type AS current_step_action,
+         approver.full_name  AS current_approver_name,
+         approver.avatar_url AS current_approver_avatar,
+         (SELECT COUNT(*) FROM approval_steps
+          WHERE application_id = a.id AND stage = ps.stage
+            AND step_order / 100 = ps.step_order / 100)::int AS total_steps,
+         COUNT(*) OVER() AS total_count
+       FROM applications a
+       JOIN form_templates t ON a.template_id = t.id
+       LEFT JOIN users u ON a.applicant_id = u.id
+       LEFT JOIN departments d ON d.id = u.department_id
+       JOIN approval_steps ps ON ps.application_id = a.id AND ps.status = 'PENDING'
+       LEFT JOIN users approver ON ps.approver_id = approver.id
+       WHERE a.status IN ('PENDING_APPROVAL','PENDING_SETTLEMENT')
+         AND a.archived_at IS NULL
+         AND EXISTS (
+           SELECT 1 FROM approval_steps ms
+           WHERE ms.application_id = a.id
+             AND ms.stage       = ps.stage
+             AND ms.status      = 'WAITING'
+             AND ms.approver_id = $1
+             AND ms.step_order  > ps.step_order
+         )
+         AND (
+           $2::timestamptz IS NULL
+           OR (a.created_at, a.id) < ($2::timestamptz, $3::uuid)
+         )
+       ORDER BY a.created_at DESC, a.id DESC
+       LIMIT $4`,
+      [userId, cursor?.created_at ?? null, cursor?.id ?? null, limit + 1],
+    );
+
+    const rows  = result.rows;
+    const total = Number(rows[0]?.total_count ?? 0);
+    const hasMore = rows.length > limit;
+    if (hasMore) rows.pop();
+
+    const templateIds = [...new Set(rows.map((r: any) => r.template_id as string))];
+    const schemaMap   = new Map<string, { schema_definition: any; settlement_schema: any }>();
+    if (templateIds.length > 0) {
+      const sr = await query(
+        `SELECT template_id, schema_definition, settlement_schema
+         FROM form_template_versions
+         WHERE is_active = TRUE AND template_id = ANY($1::uuid[])`,
+        [templateIds],
+      );
+      for (const s of sr.rows) schemaMap.set(s.template_id as string, s);
+    }
+
+    const items = rows.map((r: any) => {
+      const schemas    = schemaMap.get(r.template_id);
+      const row_preview = extractRowPreview(schemas?.schema_definition, r.form_data, schemas?.settlement_schema, r.settlement_data);
+      const { form_data: _fd, settlement_data: _sd, template_id: _tid, total_count: _, ...rest } = r;
+      return { ...rest, row_preview };
+    });
+
+    res.json({ items, hasMore, total, nextCursor: hasMore ? encodeCursor(items[items.length - 1]) : null });
+  } catch (err) {
+    console.error('[approvals] proxy pending failed:', err);
+    res.status(500).json({ error: '代理承認待ち一覧の取得に失敗しました' });
+  }
+});
+
+// ── Shared approve logic — used by single /:id/approve, bulk /bulk-approve, and /:id/proxy-approve ──
 async function processSingleApprove(
   appId: string,
   userId: string,
   isAdmin: boolean,
   comment: string | undefined,
+  proxyUserId?: string, // When set: skip assignee check, record proxy_approved_by
 ): Promise<Record<string, unknown>> {
   let recipients: string[] = [];
   const result = await withTransaction(async (client: pg.PoolClient) => {
@@ -177,33 +278,54 @@ async function processSingleApprove(
       id: string; step_order: number; approver_id: string | null; stage: string;
     };
 
-    if (!isAdmin && currentStep.approver_id && currentStep.approver_id !== userId) {
-      throw Object.assign(
-        new Error('この承認ステップはあなたに割り当てられていません。別の承認者が担当しています。'),
-        { status: 403 },
-      );
-    }
-
-    if (!isAdmin && !currentStep.approver_id) {
-      const prevActorRes = await client.query(
-        `SELECT acted_by FROM approval_steps
-         WHERE application_id = $1 AND stage = 'RINGI' AND status = 'APPROVED'
-         ORDER BY step_order DESC LIMIT 1`,
-        [appId],
-      );
-      if (prevActorRes.rows.length > 0 && prevActorRes.rows[0].acted_by === userId) {
+    if (proxyUserId) {
+      // Proxy path: verify actor has a WAITING step with higher step_order in same app+stage
+      if (!isAdmin) {
+        const myStepRes = await client.query(
+          `SELECT id FROM approval_steps
+           WHERE application_id = $1 AND stage = $2 AND status = 'WAITING'
+             AND approver_id = $3 AND step_order > $4
+           LIMIT 1`,
+          [appId, currentStep.stage, proxyUserId, currentStep.step_order],
+        );
+        if (myStepRes.rows.length === 0) {
+          throw Object.assign(
+            new Error('この申請を代理承認する権限がありません'),
+            { status: 403 },
+          );
+        }
+      }
+    } else {
+      // Regular path: must be assigned approver or role-gated
+      if (!isAdmin && currentStep.approver_id && currentStep.approver_id !== userId) {
         throw Object.assign(
-          new Error('直前のステップを承認した方は、次のステップを承認できません。別の承認者が必要です。'),
+          new Error('この承認ステップはあなたに割り当てられていません。別の承認者が担当しています。'),
           { status: 403 },
         );
+      }
+
+      if (!isAdmin && !currentStep.approver_id) {
+        const prevActorRes = await client.query(
+          `SELECT acted_by FROM approval_steps
+           WHERE application_id = $1 AND stage = 'RINGI' AND status = 'APPROVED'
+           ORDER BY step_order DESC LIMIT 1`,
+          [appId],
+        );
+        if (prevActorRes.rows.length > 0 && prevActorRes.rows[0].acted_by === userId) {
+          throw Object.assign(
+            new Error('直前のステップを承認した方は、次のステップを承認できません。別の承認者が必要です。'),
+            { status: 403 },
+          );
+        }
       }
     }
 
     await client.query(
       `UPDATE approval_steps
-       SET status = 'APPROVED', comment = $2, acted_at = CURRENT_TIMESTAMP, acted_by = $3
+       SET status = 'APPROVED', comment = $2, acted_at = CURRENT_TIMESTAMP,
+           acted_by = $3, proxy_approved_by = $4
        WHERE id = $1`,
-      [currentStep.id, comment ?? null, userId],
+      [currentStep.id, comment ?? null, userId, proxyUserId ?? null],
     );
 
     const nextStepRes = await client.query(
@@ -349,6 +471,43 @@ router.post('/bulk-approve', async (req: Request, res: Response): Promise<void> 
   }
 });
 
+// POST /approvals/bulk-proxy-approve — proxy-approve multiple applications at once
+// Body: { applicationIds: string[], comment?: string }
+router.post('/bulk-proxy-approve', async (req: Request, res: Response): Promise<void> => {
+  const { applicationIds, comment } = (req.body ?? {}) as { applicationIds?: unknown; comment?: string };
+  const { id: userId } = req.user!;
+  const isAdmin = isAdminUser(req.user);
+
+  if (!Array.isArray(applicationIds) || applicationIds.length === 0) {
+    res.status(400).json({ error: 'applicationIds (array) required' });
+    return;
+  }
+  if (applicationIds.length > 50) {
+    res.status(400).json({ error: 'Max 50 applications per bulk request' });
+    return;
+  }
+
+  try {
+    const results = await Promise.allSettled(
+      (applicationIds as string[]).map((id) =>
+        processSingleApprove(String(id), userId, isAdmin, comment, userId),
+      ),
+    );
+
+    const succeeded: string[] = [];
+    const failed: { applicationId: string; reason: string }[] = [];
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled') succeeded.push((applicationIds as string[])[i]);
+      else failed.push({ applicationId: (applicationIds as string[])[i], reason: (r.reason as { message?: string })?.message ?? 'Unknown error' });
+    });
+
+    res.json({ succeeded: succeeded.length, failed });
+  } catch (err) {
+    console.error('[approvals] bulk-proxy-approve failed:', err);
+    res.status(500).json({ error: '一括代理承認に失敗しました' });
+  }
+});
+
 // POST /approvals/:id/approve
 router.post('/:id/approve', async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
@@ -378,6 +537,32 @@ router.post('/:id/approve', async (req: Request, res: Response): Promise<void> =
     if (e.status) { res.status(e.status).json({ error: e.message }); return; }
     console.error('[approvals] approve failed:', err);
     res.status(500).json({ error: '承認処理に失敗しました' });
+  }
+});
+
+// POST /approvals/:id/proxy-approve
+// Actor must be an assigned downstream approver (WAITING step at higher step_order).
+// Approves the current PENDING step on behalf of its assigned approver, then
+// advances the workflow — actor's own WAITING step becomes PENDING as usual.
+router.post('/:id/proxy-approve', async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
+  const { comment } = (req.body ?? {}) as { comment?: string };
+  const { id: userId } = req.user!;
+  const isAdmin = isAdminUser(req.user);
+  try {
+    const result = await processSingleApprove(String(id), userId, isAdmin, comment, userId);
+    const status = (result as { status?: string }).status;
+    const isFinal = status === 'APPROVED' || status === 'COMPLETED' || status === 'SETTLEMENT_APPROVED';
+    res.json({
+      message: isFinal ? '代理承認（最終）しました' : '代理承認しました — 次のステップに送付しました',
+      application: result,
+      final: isFinal,
+    });
+  } catch (err: unknown) {
+    const e = err as { status?: number; message?: string };
+    if (e.status) { res.status(e.status).json({ error: e.message }); return; }
+    console.error('[approvals] proxy-approve failed:', err);
+    res.status(500).json({ error: '代理承認処理に失敗しました' });
   }
 });
 
