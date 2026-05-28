@@ -1988,7 +1988,7 @@ export default function Admin() {
     <Layout title={t('title_admin')}>
       {toast && <Toast {...toast} onDismiss={dismiss} />}
 
-      <div className="max-w-5xl xl:max-w-7xl 2xl:max-w-[1400px] mx-auto space-y-6">
+      <div className="max-w-[1800px] mx-auto space-y-6">
         {/* Pill tab bar — scrolls horizontally on narrow viewports if too wide to fit */}
         <div className="animate-fade-up overflow-x-auto -mx-4 md:mx-0 px-4 md:px-0">
           <div className="inline-flex items-center gap-1 bg-white/50 backdrop-blur-sm border border-white/70 rounded-2xl p-1.5 shadow-sm whitespace-nowrap">

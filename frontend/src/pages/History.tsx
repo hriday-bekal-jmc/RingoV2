@@ -193,7 +193,7 @@ export default function History() {
         );
       })()}
 
-      <div className="max-w-5xl xl:max-w-7xl 2xl:max-w-[1400px] mx-auto space-y-6">
+      <div className="max-w-[1800px] mx-auto space-y-6">
 
         {/* Header row */}
         <div className="animate-fade-up flex items-end justify-between">

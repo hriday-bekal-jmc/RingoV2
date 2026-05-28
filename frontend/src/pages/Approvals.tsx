@@ -846,7 +846,7 @@ export default function Approvals() {
     <Layout title={t('title_approvals')}>
       {toast && <Toast message={toast.message} type={toast.type} onDismiss={dismiss} />}
 
-      <div className="max-w-4xl xl:max-w-6xl 2xl:max-w-7xl mx-auto space-y-6">
+      <div className="max-w-[1800px] mx-auto space-y-6">
 
         {/* Header */}
         <div className="animate-fade-up flex items-start justify-between gap-4">

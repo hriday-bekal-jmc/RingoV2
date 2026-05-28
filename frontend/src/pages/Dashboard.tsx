@@ -299,7 +299,7 @@ export default function Dashboard() {
       {loading ? (
         <RingoLoader.Block />
       ) : (
-        <div className="max-w-6xl xl:max-w-7xl 2xl:max-w-[1400px] mx-auto space-y-8">
+        <div className="max-w-[1800px] mx-auto space-y-8">
 
           {/* Header row: greeting + admin toggle */}
           <div className="flex items-start justify-between gap-4 animate-fade-up">
@@ -502,10 +502,10 @@ export default function Dashboard() {
               </div>
 
               {/* Two-column layout */}
-              <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-5 2xl:grid-cols-3 gap-6">
 
                 {/* Template grid */}
-                <div className="lg:col-span-3 space-y-3">
+                <div className="lg:col-span-3 2xl:col-span-2 space-y-3">
                   <h3 className="section-title">{t('dash_forms_title')}</h3>
                   <div className="grid grid-cols-2 gap-3 stagger">
                     {(templates ?? []).map((tmpl) => {
@@ -544,7 +544,7 @@ export default function Dashboard() {
                 </div>
 
                 {/* Sidebar column */}
-                <div className="lg:col-span-2 space-y-4">
+                <div className="lg:col-span-2 2xl:col-span-1 space-y-4">
 
                   {/* Recent applications */}
                   <div>
