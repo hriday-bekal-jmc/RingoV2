@@ -113,6 +113,8 @@ interface FormField {
   sum_field?: string;
   /** number: display unit appended after value (e.g. '人', 'km') */
   unit?: string;
+  /** number: designates this field as the headline amount for accounting/settlements page */
+  amount_field?: boolean;
 }
 
 interface FormSchema {
@@ -1228,7 +1230,7 @@ function FieldEditor({
             </div>
           )}
 
-          {/* Show in row */}
+          {/* Show in row + Amount field designation */}
           <div className="flex items-center gap-4 flex-wrap">
             <label className="flex items-center gap-1.5 text-xs font-semibold text-warmgray-600 cursor-pointer select-none">
               <input
@@ -1239,6 +1241,17 @@ function FieldEditor({
               />
               {lang === 'en' ? 'Show in list row' : '一覧行に表示'}
             </label>
+            {field.type === 'number' && (
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 cursor-pointer select-none" title={lang === 'en' ? 'Marks this field as the headline amount shown in accounting/settlements' : '精算管理・会計ページの金額として使用するフィールドを指定'}>
+                <input
+                  type="checkbox"
+                  checked={field.amount_field ?? false}
+                  onChange={(e) => onUpdate({ amount_field: e.target.checked || undefined })}
+                  className="w-4 h-4 accent-emerald-600"
+                />
+                {lang === 'en' ? 'Use as accounting amount' : '精算金額フィールド'}
+              </label>
+            )}
           </div>
 
           {/* route_entry settings: copy-return + per-route mode */}

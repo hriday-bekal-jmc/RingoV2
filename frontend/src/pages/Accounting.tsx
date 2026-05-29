@@ -654,6 +654,7 @@ export default function Accounting() {
                     <th>{t('accounting_col_template')}</th>
                     <th className="text-right">{t('accounting_col_expected')}</th>
                     <th className="text-right">{t('accounting_col_actual')}</th>
+                    <th className="text-right">差額</th>
                     <th>{t('accounting_col_transfer')}</th>
                     <th>{t('accounting_col_proof')}</th>
                     <th>{t('accounting_col_status')}</th>
@@ -718,6 +719,7 @@ export default function Accounting() {
                     <th>{t('accounting_col_template')}</th>
                     <th className="text-right">{t('accounting_col_expected')}</th>
                     <th className="text-right">{t('accounting_col_actual')}</th>
+                    <th className="text-right">差額</th>
                     <th>{t('accounting_col_transfer')}</th>
                     <th>{t('accounting_col_proof')}</th>
                     <th>{t('accounting_col_status')}</th>
@@ -776,14 +778,21 @@ export default function Accounting() {
                         </td>
 
                         <td data-label={t('accounting_col_actual')} className="md:text-right">
-                          <div className="md:text-right">
-                            <span className="text-sm font-bold text-warmgray-800">{fmt(s.actual_amount)}</span>
-                            {s.actual_amount > 0 && delta !== 0 && (
-                              <p className={`text-[10px] font-semibold mt-0.5 ${delta > 0 ? 'text-ringo-500' : 'text-emerald-600'}`}>
-                                {delta > 0 ? '+' : ''}{fmt(delta)}
-                              </p>
-                            )}
-                          </div>
+                          <span className="text-sm font-bold text-warmgray-800">{fmt(s.actual_amount)}</span>
+                        </td>
+
+                        <td data-label="差額" className="md:text-right">
+                          {s.expected_amount > 0 || s.actual_amount > 0 ? (
+                            <span className={`text-sm font-bold tabular-nums ${
+                              delta === 0 ? 'text-warmgray-400'
+                              : delta > 0 ? 'text-ringo-500'
+                              : 'text-emerald-600'
+                            }`}>
+                              {delta === 0 ? '±0' : `${delta > 0 ? '+' : ''}${fmt(delta)}`}
+                            </span>
+                          ) : (
+                            <span className="text-warmgray-300 text-xs">—</span>
+                          )}
                         </td>
 
                         <td data-label={t('accounting_col_transfer')}>

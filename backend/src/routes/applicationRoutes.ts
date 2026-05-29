@@ -30,16 +30,21 @@ router.use(mutationLimiter);
 
 type ApprovalStage = 'RINGI' | 'SETTLEMENT';
 
-// Resolve the headline amount for a settlement-only (pattern_id=2) application.
-// Used to populate settlements.expected_amount so accounting page sees the total.
+// Resolve the headline amount for a form submission.
+// Used to populate settlements.expected_amount / actual_amount so the accounting page sees the total.
 //
 // Detection order (first hit wins):
-//   1. Explicit `grand_total` (transportation form convention)
-//   2. Any schema field with `computed: true` (sum_target receiver)
-//   3. Any schema field with `sum_target` defined (rolled-up source totals)
-//   4. First number-type field in schema
-// Returns 0 when nothing matches (rare — admin-built form w/o numbers).
-interface AmountField { name: string; type: string; computed?: boolean; sum_target?: string }
+//   1. Explicit `amount_field: true` on any number field (admin-designated in form builder)
+//   2. Last `computed: true` number field that has a `formula` (most-derived formula result)
+//   3. Explicit `grand_total` key in formData (transportation form convention)
+//   4. Last `computed: true` number field with `sum_target` (aggregated total)
+//   5. Last `computed: true` number field (any)
+//   6. First plain number field
+//   7. 0 (no numeric fields found)
+interface AmountField {
+  name: string; type: string;
+  computed?: boolean; sum_target?: string; formula?: string; amount_field?: boolean;
+}
 function detectSettlementAmount(
   schema:   { fields?: AmountField[] } | null | undefined,
   formData: Record<string, unknown>,
@@ -48,16 +53,23 @@ function detectSettlementAmount(
     const n = typeof v === 'number' ? v : parseFloat(String(v ?? 0));
     return isFinite(n) ? n : 0;
   };
+  const fields = (schema?.fields ?? []).filter((f) => f.type === 'number');
+  // 1. Explicit designation
+  const explicit = fields.filter((f) => f.amount_field);
+  if (explicit.length > 0) return num(formData[explicit[explicit.length - 1].name]);
+  // 2. Formula-based computed (last = most derived)
+  const formulaComputed = fields.filter((f) => f.computed && f.formula);
+  if (formulaComputed.length > 0) return num(formData[formulaComputed[formulaComputed.length - 1].name]);
+  // 3. grand_total convention
   if (formData.grand_total != null) return num(formData.grand_total);
-  const fields = schema?.fields ?? [];
-  const computed = fields.find((f) => f.computed && f.type === 'number');
-  if (computed) return num(formData[computed.name]);
-  const firstWithSumTarget = fields.find((f) => !!f.sum_target);
-  if (firstWithSumTarget && firstWithSumTarget.sum_target) {
-    return num(formData[firstWithSumTarget.sum_target]);
-  }
-  const firstNumber = fields.find((f) => f.type === 'number');
-  if (firstNumber) return num(formData[firstNumber.name]);
+  // 4. Sum-target computed (last)
+  const sumComputed = fields.filter((f) => f.computed && f.sum_target);
+  if (sumComputed.length > 0) return num(formData[sumComputed[sumComputed.length - 1].name]);
+  // 5. Any computed (last)
+  const anyComputed = fields.filter((f) => f.computed);
+  if (anyComputed.length > 0) return num(formData[anyComputed[anyComputed.length - 1].name]);
+  // 6. First number field
+  if (fields.length > 0) return num(formData[fields[0].name]);
   return 0;
 }
 

@@ -40,7 +40,7 @@ VALUES (
         {"name":"mileage","label":"走行距離（km）","label_en":"Mileage","type":"number","required":false,"unit":"km","validation":{"min":0},"conditional_on":{"field":"has_expressway","equals":"yes"}},
         {"name":"routes","label":"交通費明細","label_en":"Train / Bus Route Table","type":"route_entry","required":false,"show_mode":true,"options":[{"value":"shinkansen","label_ja":"新幹線"},{"value":"airplane","label_ja":"飛行機"},{"value":"train","label_ja":"在来線・地下鉄"},{"value":"bus","label_ja":"バス"},{"value":"taxi","label_ja":"タクシー"},{"value":"other","label_ja":"その他"}],"conditional_on":{"field":"transport_mode","equals":["shinkansen","airplane","train","bus","taxi"]}},
         {"name":"transport_total","label":"交通費合計（円）","label_en":"Total Transportation Expenses","type":"number","computed":true,"sum_target":"routes","sum_field":"fare","unit":"円"},
-        {"name":"expected_amount","label":"申請合計（円）","label_en":"Total Application Amount","type":"number","computed":true,"formula":"transport_total+accommodation_fee_estimate+backpay_estimate","unit":"円","show_in_row":true}
+        {"name":"expected_amount","label":"申請合計（円）","label_en":"Total Application Amount","type":"number","computed":true,"formula":"transport_total+accommodation_fee_estimate+backpay_estimate","unit":"円","show_in_row":true,"amount_field":true}
       ]
     }'::jsonb,
     -- Settlement Schema (After trip)
@@ -67,7 +67,7 @@ VALUES (
         ]},
         {"name":"receipt_total","label":"領収書合計","label_en":"Receipt Total","type":"number","computed":true,"unit":"円"},
         {"name":"remarks","label":"備考","label_en":"Remarks","type":"textarea","required":false},
-        {"name":"settlement_total","label":"精算合計（円）","label_en":"Grand Total","type":"number","computed":true,"formula":"backpay_amount+transport_total+accommodation_fee+daily_allowance_total+expressway_toll+other_expenses","unit":"円","show_in_row":true},
+        {"name":"settlement_total","label":"精算合計（円）","label_en":"Grand Total","type":"number","computed":true,"formula":"backpay_amount+transport_total+accommodation_fee+daily_allowance_total+expressway_toll+other_expenses","unit":"円","show_in_row":true,"amount_field":true},
         {"name":"transfer_date","label":"振込予定日","label_en":"Scheduled Transfer Date","type":"date","required":false}
       ]
     }'::jsonb
@@ -76,34 +76,33 @@ VALUES (
 -- 3. Create a Dummy Department to attach the default route to
 INSERT INTO departments (id, name, code)
 VALUES ('d1eebc99-9c0b-4ef8-bb6d-6bb9bd380d22', '営業部 (Sales)', 'SALES')
-ON CONFLICT (code) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
--- 4. Define the Predetermined Route for this Template & Dept (修正済)
+-- 4. Define the Predetermined Route for this Template & Dept
 INSERT INTO approval_routes (id, template_id, department_id, name, stage, is_default)
 VALUES (
-    'c1eebc99-9c0b-4ef8-bb6d-6bb9bd380c33', 
-    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 
-    'd1eebc99-9c0b-4ef8-bb6d-6bb9bd380d22', 
-    '出張基本ルート (Business Trip Default Route)', 
-    'RINGI', 
+    'c1eebc99-9c0b-4ef8-bb6d-6bb9bd380c33',
+    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+    'd1eebc99-9c0b-4ef8-bb6d-6bb9bd380d22',
+    '出張基本ルート (Business Trip Default Route)',
+    'RINGI',
     true
 ) ON CONFLICT DO NOTHING;
 
--- 5. Insert the EXACT steps from your flowchart image (修正済)
--- Ringi Stage (稟議と申請)
+-- 5. Route steps
 INSERT INTO approval_route_steps (route_id, step_order, label, approver_role) VALUES
 ('c1eebc99-9c0b-4ef8-bb6d-6bb9bd380c33', 1, '承認者1 (Approver 1)', 'MANAGER'),
-('c1eebc99-9c0b-4ef8-bb6d-6bb9bd380c33', 2, '承認者2 (Approver 2)', 'GM');
+('c1eebc99-9c0b-4ef8-bb6d-6bb9bd380c33', 2, '承認者2 (Approver 2)', 'GM')
+ON CONFLICT DO NOTHING;
 
-
--- Settlement Stage (精算書作成以降) (修正済)
+-- Settlement Stage
 INSERT INTO approval_routes (id, template_id, department_id, name, stage, is_default)
 VALUES (
-    'c2eebc99-9c0b-4ef8-bb6d-6bb9bd380c44', 
-    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 
-    'd1eebc99-9c0b-4ef8-bb6d-6bb9bd380d22', 
-    '出張精算ルート (Settlement Default Route)', 
-    'SETTLEMENT', 
+    'c2eebc99-9c0b-4ef8-bb6d-6bb9bd380c44',
+    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+    'd1eebc99-9c0b-4ef8-bb6d-6bb9bd380d22',
+    '出張精算ルート (Settlement Default Route)',
+    'SETTLEMENT',
     true
 ) ON CONFLICT DO NOTHING;
 
@@ -112,4 +111,5 @@ INSERT INTO approval_route_steps (route_id, step_order, label, approver_role, ac
 ('c2eebc99-9c0b-4ef8-bb6d-6bb9bd380c44', 2, '承認者2 / 部門承認 (Dept Approval)', 'DEPT_HEAD', 'APPROVE'),
 ('c2eebc99-9c0b-4ef8-bb6d-6bb9bd380c44', 3, '総務承認 (Soumu Approval)', 'SOUMU', 'APPROVE'),
 ('c2eebc99-9c0b-4ef8-bb6d-6bb9bd380c44', 4, '専務→社長 (President Confirm)', 'PRESIDENT', 'CONFIRM'),
-('c2eebc99-9c0b-4ef8-bb6d-6bb9bd380c44', 5, '総務精算処理 (Accounting Final)', 'ACCOUNTING', 'APPROVE');
+('c2eebc99-9c0b-4ef8-bb6d-6bb9bd380c44', 5, '総務精算処理 (Accounting Final)', 'ACCOUNTING', 'APPROVE')
+ON CONFLICT DO NOTHING;

@@ -10,7 +10,7 @@ import TransportationDetail from '../components/forms/TransportationDetail';
 import type { TransportFormData } from '../components/forms/TransportationForm';
 import Toast, { useToast } from '../components/common/Toast';
 import { useLang } from '../context/LanguageContext';
-import { fieldLabel, optionLabel } from '../i18n';
+import { fieldLabel } from '../i18n';
 import { FieldValueContent, isLongField } from '../components/forms/FieldValueDisplay';
 import PatternBadge from '../components/common/PatternBadge';
 import CustomSelect from '../components/forms/CustomSelect';
@@ -71,11 +71,6 @@ const STATUS_BADGE: Record<string, string> = {
   SETTLEMENT_APPROVED: 'badge-teal',
 };
 
-// ── File value detection ──────────────────────────────────────────────────────
-function isFileValue(v: unknown): boolean {
-  if (typeof v !== 'string' || !v) return false;
-  return v.split(',').some((s) => s.trim().startsWith('/api/files/') || s.trim().startsWith('/uploads/'));
-}
 
 // ── View Mode: 申請データを綺麗に表示するコンポーネント ──
 function FormDataViewer({ app }: { app: ApplicationDetail }) {
@@ -111,84 +106,28 @@ function SettlementDataViewer({ app, t }: { app: ApplicationDetail; t: (k: any) 
   const fields = app.settlement_schema?.fields ?? [];
   const data = app.settlement_data ?? {};
 
-  const fmt = (name: string, val: unknown): string => {
-    if (val == null || val === '') return '';
-    // Amount fields
-    if (typeof val === 'number' || name.includes('amount')) {
-      const n = Number(val);
-      return isNaN(n) ? String(val) : `¥${n.toLocaleString('ja-JP')}`;
-    }
-    // File URLs — show as links (modern: /api/files/<id>, legacy: /uploads/<file>)
-    if (typeof val === 'string' && (val.includes('/uploads/') || val.includes('/api/files/'))) return val;
-    // Resolve select/checkbox option value → label
-    const f = fields.find((x: any) => x.name === name);
-    if (f) {
-      const label = optionLabel(f, val, lang);
-      if (label) return label;
-    }
-    return String(val);
-  };
-
   return (
     <div className="space-y-4">
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
-        {fields
-          .filter((f) => f.type !== 'file' && !isFileValue(data[f.name]))
-          .map((f) => {
-            const val = data[f.name];
-            const displayVal = fmt(f.name, val);
-            const isLong = f.type === 'repeat_group' || f.type === 'textarea';
-            return (
-              <div key={f.name} className={isLong ? 'col-span-full' : ''}>
-                <dt className="text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{fieldLabel(f, lang)}</dt>
-                <dd className={`text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3.5 py-2.5 rounded-xl break-words min-h-[42px] ${
-                  f.computed ? 'border-teal-200/60 bg-teal-50/40 text-teal-800 font-bold' : ''
-                }`}>
-                  {f.type === 'repeat_group' ? (
-                    <RepeatGroupDisplay field={f} value={val} />
-                  ) : (
-                    displayVal || <span className="text-warmgray-300">—</span>
-                  )}
-                </dd>
-              </div>
-            );
-          })}
-      </dl>
-
-      {/* Receipt files */}
-      {fields
-        .filter((f) => f.type === 'file' || isFileValue(data[f.name]))
-        .map((f) => {
+        {fields.map((f) => {
           const val = data[f.name];
-          if (!val) return null;
-          const urls = String(val).split(',').filter(Boolean);
+          const long = isLongField(f, val);
           return (
-            <div key={f.name}>
-              <dt className="text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-2">{fieldLabel(f, lang)}</dt>
-              <ul className="space-y-1.5">
-                {urls.map((url, i) => {
-                  const full = url.startsWith('http') ? url : url;
-                  const filename = url.split('/').pop() ?? `file_${i + 1}`;
-                  return (
-                    <li key={i} className="flex items-center gap-2 bg-white/60 border border-white/80 rounded-lg px-3 py-2">
-                      <svg className="w-4 h-4 text-warmgray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 002.112 2.13" />
-                      </svg>
-                      <a
-                        href={full}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex-1 text-xs text-ringo-600 hover:text-ringo-700 truncate font-medium"
-                      >
-                        {t('attach_label')} {i + 1}: {decodeURIComponent(filename.replace(/^\d+_/, ''))}
-                      </a>
-                    </li>
-                  );
-                })}
-              </ul>
+            <div key={f.name} className={long ? 'col-span-full' : ''}>
+              <dt className="text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{fieldLabel(f, lang)}</dt>
+              <dd className={`text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3.5 py-2.5 rounded-xl break-words min-h-[42px] ${
+                f.computed ? 'border-teal-200/60 bg-teal-50/40 text-teal-800 font-bold' : ''
+              }`}>
+                <FieldValueContent
+                  field={f}
+                  value={val}
+                  renderRepeat={(field, value) => <RepeatGroupDisplay field={field} value={value} />}
+                />
+              </dd>
             </div>
           );
         })}
+      </dl>
 
       {/* Accounting result — transfer date / proof / note */}
       {(app.transfer_date || app.transfer_proof_url || app.accounting_note) && (

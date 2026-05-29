@@ -33,7 +33,7 @@ SET
       {"name":"mileage","label":"走行距離（km）","label_en":"Mileage","type":"number","required":false,"unit":"km","validation":{"min":0},"conditional_on":{"field":"has_expressway","equals":"yes"}},
       {"name":"routes","label":"交通費明細","label_en":"Train / Bus Route Table","type":"route_entry","required":false,"show_mode":true,"options":[{"value":"shinkansen","label_ja":"新幹線"},{"value":"airplane","label_ja":"飛行機"},{"value":"train","label_ja":"在来線・地下鉄"},{"value":"bus","label_ja":"バス"},{"value":"taxi","label_ja":"タクシー"},{"value":"other","label_ja":"その他"}],"conditional_on":{"field":"transport_mode","equals":["shinkansen","airplane","train","bus","taxi"]}},
       {"name":"transport_total","label":"交通費合計（円）","label_en":"Total Transportation Expenses","type":"number","computed":true,"sum_target":"routes","sum_field":"fare","unit":"円"},
-      {"name":"expected_amount","label":"申請合計（円）","label_en":"Total Application Amount","type":"number","computed":true,"formula":"transport_total+accommodation_fee_estimate+backpay_estimate","unit":"円","show_in_row":true}
+      {"name":"expected_amount","label":"申請合計（円）","label_en":"Total Application Amount","type":"number","computed":true,"formula":"transport_total+accommodation_fee_estimate+backpay_estimate","unit":"円","show_in_row":true,"amount_field":true}
     ]
   }'::jsonb,
 
@@ -60,7 +60,7 @@ SET
       ]},
       {"name":"receipt_total","label":"領収書合計","label_en":"Receipt Total","type":"number","computed":true,"unit":"円"},
       {"name":"remarks","label":"備考","label_en":"Remarks","type":"textarea","required":false},
-      {"name":"settlement_total","label":"精算合計（円）","label_en":"Grand Total","type":"number","computed":true,"formula":"backpay_amount+transport_total+accommodation_fee+daily_allowance_total+expressway_toll+other_expenses","unit":"円","show_in_row":true},
+      {"name":"settlement_total","label":"精算合計（円）","label_en":"Grand Total","type":"number","computed":true,"formula":"backpay_amount+transport_total+accommodation_fee+daily_allowance_total+expressway_toll+other_expenses","unit":"円","show_in_row":true,"amount_field":true},
       {"name":"transfer_date","label":"振込予定日","label_en":"Scheduled Transfer Date","type":"date","required":false}
     ]
   }'::jsonb

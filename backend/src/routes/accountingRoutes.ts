@@ -97,6 +97,10 @@ router.get('/settlements', async (req: Request, res: Response): Promise<void> =>
          a.status        AS app_status,
          a.settlement_submitted_at,
          a.completed_at,
+         a.form_data,
+         a.settlement_data,
+         ft.schema_definition,
+         ft.settlement_schema,
          ft.title_ja     AS template_name,
          u.full_name     AS applicant_name,
          d.name          AS department_name,
@@ -134,11 +138,39 @@ router.get('/settlements', async (req: Request, res: Response): Promise<void> =>
     const rows    = result.rows;
     const hasMore = rows.length > limit;
     if (hasMore) rows.pop();
-    const items = rows.map((r: any) => ({
-      ...r,
-      can_close:   r.app_status === 'SETTLEMENT_APPROVED',
-      can_approve: false,   // legacy — no longer used in UI
-    }));
+
+    // Recompute amounts from live form_data + current schema so stale stored
+    // values (from pre-amount_field submissions) are never shown.
+    const pickAmount = (schema: { fields?: Array<{ name: string; type: string; computed?: boolean; formula?: string; sum_target?: string; amount_field?: boolean }> } | null, data: Record<string, unknown> | null): number => {
+      const toNum = (v: unknown) => { const n = typeof v === 'number' ? v : parseFloat(String(v ?? 0)); return isFinite(n) ? n : 0; };
+      if (!data) return 0;
+      const fields = (schema?.fields ?? []).filter((f) => f.type === 'number');
+      const explicit = fields.filter((f) => f.amount_field);
+      if (explicit.length) return toNum(data[explicit[explicit.length - 1].name]);
+      const formula  = fields.filter((f) => f.computed && f.formula);
+      if (formula.length)  return toNum(data[formula[formula.length - 1].name]);
+      if (data.grand_total != null) return toNum(data.grand_total);
+      const summed   = fields.filter((f) => f.computed && f.sum_target);
+      if (summed.length)   return toNum(data[summed[summed.length - 1].name]);
+      const computed = fields.filter((f) => f.computed);
+      if (computed.length) return toNum(data[computed[computed.length - 1].name]);
+      if (fields.length)   return toNum(data[fields[0].name]);
+      return 0;
+    };
+
+    const items = rows.map((r: any) => {
+      const expected_amount = pickAmount(r.schema_definition, r.form_data);
+      const actual_amount   = pickAmount(r.settlement_schema, r.settlement_data);
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { form_data: _fd, settlement_data: _sd, schema_definition: _sc, settlement_schema: _ss, ...rest } = r;
+      return {
+        ...rest,
+        expected_amount,
+        actual_amount,
+        can_close:   r.app_status === 'SETTLEMENT_APPROVED',
+        can_approve: false,
+      };
+    });
     res.json({
       items,
       hasMore,

@@ -320,13 +320,22 @@ async function processSingleApprove(
       }
     }
 
-    await client.query(
-      `UPDATE approval_steps
-       SET status = 'APPROVED', comment = $2, acted_at = CURRENT_TIMESTAMP,
-           acted_by = $3, proxy_approved_by = $4
-       WHERE id = $1`,
-      [currentStep.id, comment ?? null, userId, proxyUserId ?? null],
-    );
+    if (proxyUserId) {
+      await client.query(
+        `UPDATE approval_steps
+         SET status = 'APPROVED', comment = $2, acted_at = CURRENT_TIMESTAMP,
+             acted_by = $3, proxy_approved_by = $4
+         WHERE id = $1`,
+        [currentStep.id, comment ?? null, userId, proxyUserId],
+      );
+    } else {
+      await client.query(
+        `UPDATE approval_steps
+         SET status = 'APPROVED', comment = $2, acted_at = CURRENT_TIMESTAMP, acted_by = $3
+         WHERE id = $1`,
+        [currentStep.id, comment ?? null, userId],
+      );
+    }
 
     const nextStepRes = await client.query(
       `SELECT id, step_order FROM approval_steps

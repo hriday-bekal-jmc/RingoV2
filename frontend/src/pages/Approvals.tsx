@@ -126,13 +126,38 @@ function FormDataViewer({ formData, schema, tFn }: {
     return (
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
         {Object.entries(formData).map(([k, v]) => {
-          const strVal = String(v ?? '');
-          const isLong = strVal.length > 40;
+          if (v == null || v === '') return null;
+          // Attempt JSON parse — catches user_picker arrays stored as JSON strings
+          let display: unknown = v;
+          if (typeof v === 'string') {
+            const trimmed = v.trim();
+            if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+              try { display = JSON.parse(trimmed); } catch { /* keep as string */ }
+            }
+          }
+          const isArray = Array.isArray(display);
+          // If it's an array of objects with a "name" field → user list
+          const isUserList = isArray && (display as any[]).every((x: any) => x && typeof x === 'object' && 'name' in x);
+          const strVal = isUserList ? '' : String(v ?? '');
+          const isLong = isUserList || strVal.length > 40;
           return (
             <div key={k} className={isLong ? 'col-span-full' : ''}>
               <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-0.5">{k}</dt>
               <dd className="text-sm text-warmgray-800 break-words">
-                {isFileValue(v) ? renderFileLinks(v, tFn('attach_label')) : (strVal || '—')}
+                {isFileValue(v) ? renderFileLinks(v, tFn('attach_label'))
+                  : isUserList ? (
+                    <div className="flex flex-wrap gap-1.5 mt-0.5">
+                      {(display as any[]).map((u: any, i: number) => (
+                        <span key={i} className="inline-flex items-center gap-1.5 bg-violet-50 border border-violet-200/60 rounded-full px-2.5 py-0.5 text-xs font-medium text-violet-800">
+                          {u.avatar_url
+                            ? <img src={u.avatar_url} alt={u.name} className="w-4 h-4 rounded-full object-cover" />
+                            : <span className="w-4 h-4 rounded-full bg-violet-200 text-violet-700 font-bold text-[9px] flex items-center justify-center">{String(u.name).slice(0,2).toUpperCase()}</span>
+                          }
+                          {u.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (strVal || '—')}
               </dd>
             </div>
           );
@@ -905,36 +930,28 @@ export default function Approvals() {
             <h2 className="text-2xl font-bold text-warmgray-800 mt-1">{t('title_approvals')}</h2>
             <p className="text-sm text-warmgray-400 mt-1">{t('approvals_subtitle')}</p>
           </div>
+          {/* Right: Mine | Select | Approval | Proxy */}
           <div className="flex items-center gap-2 shrink-0 mt-1">
-            {(proxyTotalCount > 0 || totalCount > 0) && !selectionMode && (
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => { setProxyView(false); setSelectedProxyApp(null); exitSelectionMode(); }}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all duration-150 ${
-                    !proxyView
-                      ? 'bg-ringo-500 text-white border-ringo-500 shadow-sm'
-                      : 'bg-white/60 text-warmgray-500 border-white/80 hover:bg-white/90'
-                  }`}
-                >
-                  {lang === 'en' ? 'Approval' : '承認'}
-                  {totalCount > 0 && <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${!proxyView ? 'bg-white/30' : 'bg-ringo-100 text-ringo-600'}`}>{totalCount}</span>}
-                </button>
-                <button
-                  onClick={() => { setProxyView(true); setSelectedApp(null); exitSelectionMode(); }}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all duration-150 ${
-                    proxyView
-                      ? 'bg-violet-600 text-white border-violet-600 shadow-sm'
-                      : 'bg-white/60 text-warmgray-500 border-white/80 hover:bg-white/90'
-                  }`}
-                >
-                  {lang === 'en' ? 'Proxy' : '代理承認'}
-                  {proxyTotalCount > 0 && <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${proxyView ? 'bg-white/30' : 'bg-violet-100 text-violet-600'}`}>{proxyTotalCount}</span>}
-                </button>
-              </div>
+            {/* Admin system-wide toggle */}
+            {isAdmin && (
+              <button
+                onClick={toggleSystemView}
+                title={systemView ? (lang === 'en' ? 'Switch to my approvals' : '自分の承認に戻す') : (lang === 'en' ? 'View all system approvals' : 'システム全体を表示')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all duration-150 ${
+                  systemView
+                    ? 'bg-warmgray-800 text-white border-warmgray-700 shadow-sm'
+                    : 'bg-white/60 text-warmgray-500 border-white/80 hover:bg-white/90 hover:text-warmgray-800'
+                }`}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+                </svg>
+                {systemView ? (lang === 'en' ? 'System' : 'システム') : (lang === 'en' ? 'Mine' : '自分')}
+              </button>
             )}
-            {/* Bulk-select toggle — shown when active list has items */}
-            {(proxyView ? proxyApplications : applications).length > 0 && !systemView && (
-              selectionMode ? (
+            {/* Bulk-select toggle — always occupies space, invisible when no items */}
+            <div className={(proxyView ? proxyApplications : applications).length > 0 ? 'block' : 'hidden'}>
+              {selectionMode ? (
                 <button
                   onClick={exitSelectionMode}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all duration-150 bg-ringo-500 text-white border-ringo-500 shadow-sm"
@@ -954,25 +971,33 @@ export default function Approvals() {
                   </svg>
                   {lang === 'en' ? 'Select' : '選択'}
                 </button>
-              )
-            )}
-            {/* Admin-only system-wide toggle */}
-            {isAdmin && (
+              )}
+            </div>
+            {/* Approval / Proxy tabs */}
+            <div className="flex items-center gap-1">
               <button
-                onClick={toggleSystemView}
-                title={systemView ? (lang === 'en' ? 'Switch to my approvals' : '自分の承認に戻す') : (lang === 'en' ? 'View all system approvals' : 'システム全体を表示')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all duration-150 ${
-                  systemView
-                    ? 'bg-warmgray-800 text-white border-warmgray-700 shadow-sm'
-                    : 'bg-white/60 text-warmgray-500 border-white/80 hover:bg-white/90 hover:text-warmgray-800'
+                onClick={() => { setProxyView(false); setSelectedProxyApp(null); exitSelectionMode(); }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all duration-150 ${
+                  !proxyView
+                    ? 'bg-ringo-500 text-white border-ringo-500 shadow-sm'
+                    : 'bg-white/60 text-warmgray-500 border-white/80 hover:bg-white/90'
                 }`}
               >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
-                </svg>
-                {systemView ? (lang === 'en' ? 'System' : 'システム') : (lang === 'en' ? 'Mine' : '自分')}
+                {lang === 'en' ? 'Approval' : '承認'}
+                {totalCount > 0 && <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${!proxyView ? 'bg-white/30' : 'bg-ringo-100 text-ringo-600'}`}>{totalCount}</span>}
               </button>
-            )}
+              <button
+                onClick={() => { setProxyView(true); setSelectedApp(null); exitSelectionMode(); }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all duration-150 ${
+                  proxyView
+                    ? 'bg-violet-600 text-white border-violet-600 shadow-sm'
+                    : 'bg-white/60 text-warmgray-500 border-white/80 hover:bg-white/90'
+                }`}
+              >
+                {lang === 'en' ? 'Proxy' : '代理承認'}
+                {proxyTotalCount > 0 && <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${proxyView ? 'bg-white/30' : 'bg-violet-100 text-violet-600'}`}>{proxyTotalCount}</span>}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -990,10 +1015,11 @@ export default function Approvals() {
           </div>
         )}
 
+        {/* Regular approvals — hidden when proxy tab active */}
         {/* Loading */}
-        {isLoading && (
+        {!proxyView && isLoading && (
           <div className="card !p-0 md:overflow-hidden">
-            <table className="table-base table-responsive">
+            <table className="table-base table-responsive table-fixed w-full">
               <thead>
                 <tr>
                   <th>{t('approvals_col_app')}</th>
@@ -1030,14 +1056,14 @@ export default function Approvals() {
         )}
 
         {/* Error */}
-        {isError && (
+        {!proxyView && isError && (
           <div className="card text-ringo-600 text-sm text-center py-8">
             {t('approvals_error_msg')}
           </div>
         )}
 
         {/* Empty */}
-        {!isLoading && applications.length === 0 && (
+        {!proxyView && !isLoading && applications.length === 0 && (
           <div className="card flex flex-col items-center justify-center py-20 text-warmgray-400">
             <span className="text-4xl mb-3">✅</span>
             <p className="text-sm font-medium">{t('approvals_no_items')}</p>
@@ -1046,14 +1072,14 @@ export default function Approvals() {
         )}
 
         {/* Table */}
-        {applications.length > 0 && (
+        {!proxyView && applications.length > 0 && (
           <div className={`card !p-0 md:overflow-hidden animate-fade-up transition-opacity duration-200 ${isFetching && !isFetchingNextPage ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
-            <table className="table-base table-responsive">
+            <table className="table-base table-responsive table-fixed w-full">
               <thead>
                 <tr>
                   <th>{t('approvals_col_app')}</th>
-                  <th>{t('approvals_col_step')}</th>
-                  <th>{t('approvals_col_date')}</th>
+                  <th className="w-48">{t('approvals_col_step')}</th>
+                  <th className="w-24">{t('approvals_col_date')}</th>
                   <th className="hidden md:table-cell text-right w-32">{lang === 'en' ? 'Amount' : '金額'}</th>
                 </tr>
               </thead>
@@ -1165,18 +1191,10 @@ export default function Approvals() {
             )}
           </div>
         )}
-      </div>
 
-      {/* Proxy approval list */}
-      {proxyView && (
+        {/* Proxy approval list */}
+        {proxyView && (
         <div className="space-y-4 animate-fade-up">
-          <div className="flex items-center gap-3 px-1">
-            <div className="w-2 h-2 rounded-full bg-violet-500" />
-            <p className="text-sm font-bold text-warmgray-700">
-              {lang === 'en' ? 'Proxy Approvals — you can approve on behalf of the current approver' : '代理承認 — 現在の承認者に代わって承認できる申請'}
-            </p>
-          </div>
-
           {isProxyLoading && <div className="card py-10 flex justify-center"><RingoLoader.Inline /></div>}
 
           {!isProxyLoading && proxyApplications.length === 0 && (
@@ -1187,13 +1205,13 @@ export default function Approvals() {
           )}
 
           {proxyApplications.length > 0 && (
-            <div className="card !p-0 md:overflow-hidden border-violet-200/60">
-              <table className="table-base table-responsive">
+            <div className="card !p-0 md:overflow-hidden">
+              <table className="table-base table-responsive table-fixed w-full">
                 <thead>
                   <tr>
                     <th>{t('approvals_col_app')}</th>
-                    <th>{lang === 'en' ? 'Waiting for' : '現在の承認者'}</th>
-                    <th>{t('approvals_col_date')}</th>
+                    <th className="w-48">{t('approvals_col_step')}</th>
+                    <th className="w-24">{t('approvals_col_date')}</th>
                     <th className="hidden md:table-cell text-right w-32">{lang === 'en' ? 'Amount' : '金額'}</th>
                   </tr>
                 </thead>
@@ -1201,21 +1219,21 @@ export default function Approvals() {
                   {proxyApplications.map((app, i) => (
                     <tr
                       key={app.id}
-                      className={`cursor-pointer hover:bg-violet-50/40 transition-colors duration-100 group animate-fade-up ${selectedIds.has(app.id) ? '!bg-violet-50/80' : ''}`}
+                      className={`cursor-pointer hover:bg-white/50 transition-colors duration-100 group animate-fade-up ${selectedIds.has(app.id) ? '!bg-ringo-50/80' : ''}`}
                       style={{ animationDelay: `${Math.min(i, 14) * 30}ms` }}
                       onClick={() => selectionMode ? toggleSelect(app.id) : setSelectedProxyApp(app)}
                     >
-                      <td data-label={t('approvals_col_app')} className={selectedIds.has(app.id) ? 'border-l-[3px] border-violet-500' : 'border-l-[3px] border-violet-300'}>
-                        <div className="flex items-center gap-3 min-w-0">
+                      <td data-label={t('approvals_col_app')} className={selectedIds.has(app.id) ? 'border-l-[3px] border-ringo-400' : ''}>
+                        <div className="flex items-center gap-3 md:justify-start justify-end min-w-0">
                           {selectionMode ? (
                             <div className="w-8 h-8 flex items-center justify-center shrink-0">
-                              <input type="checkbox" checked={selectedIds.has(app.id)} readOnly className="w-5 h-5 accent-violet-600 pointer-events-none rounded" />
+                              <input type="checkbox" checked={selectedIds.has(app.id)} readOnly className="w-5 h-5 accent-ringo-500 pointer-events-none rounded" />
                             </div>
                           ) : (
                             <UserAvatar name={app.applicant_name ?? '?'} avatarUrl={app.applicant_avatar} size={8} />
                           )}
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
+                          <div className="min-w-0 md:text-left text-right">
+                            <div className="flex items-center gap-2 md:justify-start justify-end">
                               <p className="text-sm font-semibold text-warmgray-800 truncate">{app.template_name}</p>
                               {app.current_stage === 'SETTLEMENT' && (
                                 <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700">{t('approvals_settlement_badge')}</span>
@@ -1226,7 +1244,8 @@ export default function Approvals() {
                                 {lang === 'en' ? app.row_preview.text.label_en : app.row_preview.text.label}: {app.row_preview.text.value}
                               </p>
                             )}
-                            <p className="text-[11px] text-warmgray-400 mt-0.5">{app.applicant_name}
+                            <p className="text-[11px] text-warmgray-400 mt-0.5 truncate">
+                              {app.applicant_name}
                               {app.department_name && app.department_name !== '—' && (
                                 <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-surface-100/80 text-warmgray-500 border border-surface-200/60">{app.department_name}</span>
                               )}
@@ -1234,25 +1253,20 @@ export default function Approvals() {
                           </div>
                         </div>
                       </td>
-                      <td data-label={lang === 'en' ? 'Waiting for' : '現在の承認者'}>
-                        <div>
-                          <div className="flex items-center gap-1.5">
+                      <td data-label={t('approvals_col_step')}>
+                        <div className="md:text-left text-right">
+                          <div className="flex items-center gap-1.5 md:justify-start justify-end">
                             {Array.from({ length: Number(app.total_steps) }).map((_, idx) => {
                               const n = idx + 1;
                               const cur = Number(app.current_step);
                               return (
-                                <span key={idx} className={`w-2 h-2 rounded-full ${n < cur ? 'bg-emerald-400' : n === cur ? 'bg-amber-400 ring-2 ring-amber-200' : 'bg-violet-300'}`} />
+                                <span key={idx} className={`w-2 h-2 rounded-full ${n < cur ? 'bg-emerald-400' : n === cur ? 'bg-amber-400 ring-2 ring-amber-200' : 'bg-violet-200'}`} />
                               );
                             })}
                             <span className="text-[10px] text-warmgray-400 ml-1">{app.current_step}/{app.total_steps}</span>
                           </div>
                           {app.current_approver_name && (
-                            <p className="text-[10px] text-warmgray-400 mt-1 truncate md:max-w-[120px]">
-                              {lang === 'en' ? 'Approver: ' : '承認者: '}{app.current_approver_name}
-                            </p>
-                          )}
-                          {app.current_step_label && (
-                            <p className="text-[10px] text-warmgray-400 mt-0.5 truncate md:max-w-[120px]">{app.current_step_label}</p>
+                            <p className="text-[10px] text-warmgray-400 mt-1 truncate md:max-w-[120px]">{app.current_approver_name}</p>
                           )}
                         </div>
                       </td>
@@ -1263,9 +1277,11 @@ export default function Approvals() {
                         {app.row_preview?.numbers && app.row_preview.numbers.length > 0 && (
                           <div className="flex flex-col items-end gap-0.5">
                             {app.row_preview.numbers.map((n, ni) => (
-                              <span key={ni} className="text-xs font-bold tabular-nums text-warmgray-700">
-                                {n.value !== null ? n.value.toLocaleString() : '—'}
-                              </span>
+                              <div key={ni} className="flex items-baseline gap-1">
+                                <span className="text-xs font-bold tabular-nums text-warmgray-700">
+                                  {n.value !== null ? n.value.toLocaleString() : '—'}
+                                </span>
+                              </div>
                             ))}
                           </div>
                         )}
@@ -1282,7 +1298,8 @@ export default function Approvals() {
             </div>
           )}
         </div>
-      )}
+        )}
+      </div>
 
       {/* Detail modal — regular */}
       {selectedApp && (

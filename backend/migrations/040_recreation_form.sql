@@ -75,14 +75,15 @@ SELECT
         "show_in_row": true
       },
       {
-        "name":        "subsidy_amount",
-        "label":       "補助申請額（上限）",
-        "label_en":    "Max Subsidy",
-        "type":        "number",
-        "computed":    true,
-        "formula":     "participant_count * 2000",
-        "unit":        "円",
-        "show_in_row": true
+        "name":         "subsidy_amount",
+        "label":        "補助申請額（上限）",
+        "label_en":     "Max Subsidy",
+        "type":         "number",
+        "computed":     true,
+        "formula":      "participant_count * 2000",
+        "unit":         "円",
+        "show_in_row":  true,
+        "amount_field": true
       }
     ]
   }'::jsonb,
@@ -154,14 +155,15 @@ SELECT
         "unit":       "円"
       },
       {
-        "name":        "final_subsidy",
-        "label":       "補助申請額",
-        "label_en":    "Final Subsidy",
-        "type":        "number",
-        "computed":    true,
-        "formula":     "Math.min(actual_count * 2000, receipt_total)",
-        "unit":        "円",
-        "show_in_row": true
+        "name":         "final_subsidy",
+        "label":        "補助申請額",
+        "label_en":     "Final Subsidy",
+        "type":         "number",
+        "computed":     true,
+        "formula":      "Math.min(actual_count * 2000, receipt_total)",
+        "unit":         "円",
+        "show_in_row":  true,
+        "amount_field": true
       },
       {
         "name":     "recreation_date",
