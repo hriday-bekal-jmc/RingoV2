@@ -689,17 +689,27 @@ export default function NotificationTemplatesTab({
                     <p className="text-[11px] text-warmgray-400 truncate mt-0.5">{draft.subject}</p>
                   )}
                 </div>
-                {/* Active toggle */}
+                {/* Active toggle — saves immediately, no expand required */}
                 <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
                   <span className="text-[11px] text-warmgray-400">
                     {draft?.is_active ? (lang === 'ja' ? '有効' : 'Active') : (lang === 'ja' ? '無効' : 'Disabled')}
                   </span>
                   <button
                     type="button"
-                    onClick={() => setField(eventType, 'is_active', !draft?.is_active)}
+                    disabled={saveMutation.isPending}
+                    onClick={async () => {
+                      const next = !draft?.is_active;
+                      setField(eventType, 'is_active', next);
+                      await apiClient.patch(`/admin/notification-templates/${encodeURIComponent(eventType)}`, {
+                        subject:   draft?.subject,
+                        body_html: draft?.body_html,
+                        is_active: next,
+                      });
+                      qc.invalidateQueries({ queryKey: ['admin', 'notification-templates'] });
+                    }}
                     className={`relative w-9 h-5 rounded-full transition-colors focus:outline-none ${
                       draft?.is_active ? 'bg-ringo-500' : 'bg-warmgray-200'
-                    }`}
+                    } ${saveMutation.isPending ? 'opacity-50' : ''}`}
                   >
                     <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${draft?.is_active ? 'translate-x-4' : ''}`} />
                   </button>
