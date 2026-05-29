@@ -59,11 +59,17 @@ interface FormField {
     min?:       number;
     max?:       number;
     maxlength?: number;
-    /** Time fields: HH:mm earliest/latest allowed, step in minutes */
     min_time?:  string;
     max_time?:  string;
     step?:      number;
+    /** date: must be ≥ the named sibling field value */
+    date_after_or_equal?: string;
+    /** number: must be ≤ the named sibling field value */
+    max_from_field?: string;
   };
+  /** number computed: days between two date fields */
+  date_diff_from?: string;
+  date_diff_to?:   string;
   conditional_on?: {
     field:  string;
     equals: string | number | boolean;
@@ -965,7 +971,7 @@ function FormBuilder({
                         index={i}
                         total={currentFields.length}
                         siblingNames={currentFields.filter((_, j) => j !== i).map(x => x.name)}
-                        // Numeric fields in same schema that could receive sum totals
+                        siblingFields={currentFields.filter((_, j) => j !== i)}
                         computedFieldNames={currentFields.filter(x => x.computed && x.type === 'number').map(x => x.name)}
                         isCustomRenderer={isCustomRenderer}
                         onUpdate={(p) => updateField(i, p)}
@@ -1024,7 +1030,7 @@ function FormBuilder({
 // Single field editor card
 // ─────────────────────────────────────────────────────────────────────────────
 function FieldEditor({
-  field, index, total, siblingNames, computedFieldNames, otherSchemaFields,
+  field, index, total, siblingNames, siblingFields, computedFieldNames, otherSchemaFields,
   isCustomRenderer,
   onUpdate, onCreateRepeatGroupTotal, onRemove, onMove,
 }: {
@@ -1032,10 +1038,9 @@ function FieldEditor({
   index: number;
   total: number;
   siblingNames: string[];
+  siblingFields?: FormField[];
   computedFieldNames: string[];
-  /** Fields from the OTHER schema (ringi↔settlement). Used for row_compare_with dropdown. */
   otherSchemaFields?: FormField[];
-  /** True when editing a custom-renderer form (e.g. transportation). Enables entry_field toggle. */
   isCustomRenderer?: boolean;
   onUpdate: (patch: Partial<FormField>) => void;
   onCreateRepeatGroupTotal: (childIndex: number) => void;
@@ -1646,23 +1651,86 @@ function FieldEditor({
             </div>
           )}
           {isNumber && (
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                type="number"
-                value={field.validation?.min ?? ''}
-                onChange={(e) => onUpdate({ validation: { ...field.validation, min: e.target.value ? Number(e.target.value) : undefined } })}
-                className="input text-xs"
-                placeholder="min"
-              />
-              <input
-                type="number"
-                value={field.validation?.max ?? ''}
-                onChange={(e) => onUpdate({ validation: { ...field.validation, max: e.target.value ? Number(e.target.value) : undefined } })}
-                className="input text-xs"
-                placeholder="max"
-              />
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="number"
+                  value={field.validation?.min ?? ''}
+                  onChange={(e) => onUpdate({ validation: { ...field.validation, min: e.target.value ? Number(e.target.value) : undefined } })}
+                  className="input text-xs"
+                  placeholder="min"
+                />
+                <input
+                  type="number"
+                  value={field.validation?.max ?? ''}
+                  onChange={(e) => onUpdate({ validation: { ...field.validation, max: e.target.value ? Number(e.target.value) : undefined } })}
+                  className="input text-xs"
+                  placeholder="max"
+                />
+              </div>
+              {/* Max limited by another field */}
+              {(() => {
+                const numFields = (siblingFields ?? []).filter(f => f.type === 'number' || f.type === 'date_diff_from');
+                if (numFields.length === 0) return null;
+                return (
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-warmgray-500 font-semibold">{lang === 'en' ? 'Maximum limited by field:' : '上限を別フィールドから取得:'}</p>
+                    <select
+                      value={field.validation?.max_from_field ?? ''}
+                      onChange={(e) => onUpdate({ validation: { ...field.validation, max_from_field: e.target.value || undefined } })}
+                      className="select text-xs w-full"
+                    >
+                      <option value="">{lang === 'en' ? '— none —' : '— 設定しない —'}</option>
+                      {numFields.map(f => (
+                        <option key={f.name} value={f.name}>{f.label} ({f.name})</option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })()}
+              {/* Date diff (trip/event duration) */}
+              {field.computed && (
+                <div className="space-y-1">
+                  <p className="text-[10px] text-warmgray-500 font-semibold">{lang === 'en' ? 'Compute days between dates:' : '日数を自動計算（開始日〜終了日）:'}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(['date_diff_from', 'date_diff_to'] as const).map((prop) => {
+                      const dateFields = (siblingFields ?? []).filter(f => f.type === 'date');
+                      return (
+                        <select
+                          key={prop}
+                          value={(field[prop] as string | undefined) ?? ''}
+                          onChange={(e) => onUpdate({ [prop]: e.target.value || undefined })}
+                          className="select text-xs"
+                        >
+                          <option value="">{prop === 'date_diff_from' ? (lang === 'en' ? '— start date —' : '— 開始日 —') : (lang === 'en' ? '— end date —' : '— 終了日 —')}</option>
+                          {dateFields.map(f => <option key={f.name} value={f.name}>{f.label} ({f.name})</option>)}
+                        </select>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
+
+          {/* Date ordering rule */}
+          {field.type === 'date' && (() => {
+            const dateFields = (siblingFields ?? []).filter(f => f.type === 'date');
+            if (dateFields.length === 0) return null;
+            return (
+              <div className="space-y-1">
+                <p className="text-[10px] text-warmgray-500 font-semibold">{lang === 'en' ? 'This date must be on or after:' : 'この日付は以下の日付以降でなければならない:'}</p>
+                <select
+                  value={field.validation?.date_after_or_equal ?? ''}
+                  onChange={(e) => onUpdate({ validation: { ...field.validation, date_after_or_equal: e.target.value || undefined } })}
+                  className="select text-xs w-full"
+                >
+                  <option value="">{lang === 'en' ? '— none —' : '— 設定しない —'}</option>
+                  {dateFields.map(f => <option key={f.name} value={f.name}>{f.label} ({f.name})</option>)}
+                </select>
+              </div>
+            );
+          })()}
 
           {/* Time-specific: min/max boundary + minute step */}
           {isTime && (

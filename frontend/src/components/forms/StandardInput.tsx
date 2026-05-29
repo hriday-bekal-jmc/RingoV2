@@ -43,8 +43,11 @@ interface FormField {
   col_span?: 'half' | 'full';
   show_mode?:         boolean;  // route_entry: show mode selector per row
   show_copy_return?:  boolean;  // route_entry: show copy-return button (default true)
+  show_date?:         boolean;  // route_entry: show travel date per row
   target_date_field?:   string;
   target_amount_field?: string;
+  date_diff_from?: string;
+  date_diff_to?:   string;
   extract_fields?:      Array<{ target: string; hint: string }>;
   file_category?:       string;
   options?: string[] | { value: string; label?: string; label_ja?: string; label_en?: string }[];
@@ -577,6 +580,19 @@ function ComputedNumberDisplay({
   useEffect(() => {
     if (!setValue) return;
 
+    // Date diff: (to - from) + 1 days  e.g. trip_duration
+    if (field.date_diff_from && field.date_diff_to) {
+      const from = allValues[field.date_diff_from];
+      const to   = allValues[field.date_diff_to];
+      if (typeof from === 'string' && typeof to === 'string' && from && to) {
+        const diff = Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1);
+        setValue(field.name as never, diff as never, { shouldDirty: false });
+      } else {
+        setValue(field.name as never, 0 as never, { shouldDirty: false });
+      }
+      return;
+    }
+
     // Formula takes priority
     if (field.formula && deps.length > 0) {
       const numValues: Record<string, number> = {};
@@ -602,7 +618,7 @@ function ComputedNumberDisplay({
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(deps.map((d) => allValues[d])), allValues[field.sum_target ?? '']]);
+  }, [JSON.stringify(deps.map((d) => allValues[d])), allValues[field.sum_target ?? ''], allValues[field.date_diff_from ?? ''], allValues[field.date_diff_to ?? '']]);
 
   const current = watch ? Number(watch(field.name)) || 0 : 0;
   const { lang } = useLang();
@@ -678,6 +694,7 @@ interface RouteRow {
   from_station: string;
   to_station: string;
   fare: number;
+  travel_date?: string;
 }
 
 function RouteEntryInput({
@@ -702,6 +719,7 @@ function RouteEntryInput({
         from_station: r.from_station ?? '',
         to_station:   r.to_station ?? '',
         fare:         Number(r.fare) || 0,
+        travel_date:  r.travel_date,
       }));
     }
     return [{ id: crypto.randomUUID(), from_station: '', to_station: '', fare: 0 }];
@@ -746,6 +764,15 @@ function RouteEntryInput({
     <div className="space-y-2 rounded-xl border border-ringo-100 bg-ringo-50/40 p-3">
       {routes.map((r, i) => (
         <div key={r.id} className="flex flex-col gap-1.5">
+          {/* Date row */}
+          {field.show_date && (
+            <div className="sm:w-56">
+              <CalendarPicker
+                value={r.travel_date ?? ''}
+                onChange={(val) => update(i, { travel_date: val || undefined })}
+              />
+            </div>
+          )}
           {/* Mode row */}
           {field.show_mode && (
             <div className="flex items-center gap-2">
@@ -1170,6 +1197,25 @@ function RepeatCell({
           </div>
         );
       })()}
+
+      {field.type === 'allowance_days' && (
+        <div className="flex gap-1.5">
+          {([{v:0,ja:'0日',en:'0 days'},{v:0.5,ja:'半日',en:'Half'},{v:1,ja:'1日',en:'1 day'}] as {v:0|0.5|1;ja:string;en:string}[]).map(({v,ja,en}) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => onChange(v)}
+              className={`flex-1 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                Number(value) === v
+                  ? 'bg-ringo-600 text-white border-ringo-600 shadow-sm'
+                  : 'bg-white border-warmgray-200 text-warmgray-700 hover:border-ringo-300 hover:bg-ringo-50'
+              }`}
+            >
+              {lang === 'en' ? en : ja}
+            </button>
+          ))}
+        </div>
+      )}
 
       {field.type === 'file' && (
         <RepeatFileInput

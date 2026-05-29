@@ -61,7 +61,7 @@ SELECT
         "type":        "text",
         "required":    true,
         "placeholder": "例）0005",
-        "validation":  { "pattern": "^\\d{4}$", "patternMessage": "半角数字4桁で入力してください" }
+        "validation":  { "regex": "^\\d{4}$" }
       },
       {
         "name":        "branch_name",
@@ -78,7 +78,7 @@ SELECT
         "type":        "text",
         "required":    true,
         "placeholder": "例）123",
-        "validation":  { "pattern": "^\\d{3}$", "patternMessage": "半角数字3桁で入力してください" }
+        "validation":  { "regex": "^\\d{3}$" }
       },
       {
         "name":     "account_type",
@@ -98,7 +98,7 @@ SELECT
         "type":        "text",
         "required":    true,
         "placeholder": "例）1234567",
-        "validation":  { "pattern": "^\\d{7}$", "patternMessage": "半角数字7桁で入力してください" }
+        "validation":  { "regex": "^\\d{7}$" }
       },
       {
         "name":        "account_holder_kana",

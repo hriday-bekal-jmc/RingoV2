@@ -308,7 +308,7 @@ function SettlementReturnEditor({ app, onSuccess }: { app: ApplicationDetail; on
 
   const settlementDefaults = isDirectSettlement
     ? (app.form_data as unknown as Partial<TransportFormData>)
-    : (app.settlement_data ?? {});
+    : ({ _daily_rate: app.applicant_daily_rate ?? 3000, ...(app.settlement_data ?? {}) } as Record<string, unknown>);
 
   return (
     <div className="space-y-5 animate-fade-up">
@@ -335,7 +335,7 @@ function SettlementReturnEditor({ app, onSuccess }: { app: ApplicationDetail; on
       ) : (
         <DynamicForm
           template={template}
-          defaultValues={app.settlement_data ?? {}}
+          defaultValues={{ _daily_rate: app.applicant_daily_rate ?? 3000, ...(app.settlement_data ?? {}) }}
           isSettlementPhase={true}
           onSubmit={handleSubmit}
           disabled={resubmitSettlement.isPending}

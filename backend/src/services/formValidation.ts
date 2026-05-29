@@ -19,8 +19,11 @@ export interface FormField {
   type: string;
   required?: boolean;
   computed?: boolean;
+  hidden?: boolean;
   formula?: string;
   sum_target?: string;
+  date_diff_from?: string;
+  date_diff_to?: string;
   fields?: FormField[];
   min_rows?: number;
   max_rows?: number;
@@ -29,13 +32,16 @@ export interface FormField {
     min?: number;
     max?: number;
     maxlength?: number;
-    /** Time fields: HH:mm boundary strings, step in minutes (informational, not re-validated here) */
     min_time?: string;
     max_time?: string;
+    /** date field: value must be ≥ the named sibling field */
+    date_after_or_equal?: string;
+    /** number field: value must be ≤ value of the named sibling field */
+    max_from_field?: string;
   };
   conditional_on?: {
     field: string;
-    equals: string | number | boolean;
+    equals: string | number | boolean | Array<string | number | boolean>;
   };
 }
 
@@ -78,7 +84,11 @@ function conditionMatches(
 ): boolean {
   if (!field.conditional_on) return true;
   const got = localData[field.conditional_on.field] ?? rootData[field.conditional_on.field];
-  return got != null && String(got) === String(field.conditional_on.equals);
+  if (got == null) return false;
+  const eq = field.conditional_on.equals;
+  const eqArr = Array.isArray(eq) ? eq.map(String) : [String(eq)];
+  const gotArr = Array.isArray(got) ? got.map(String) : [String(got)];
+  return gotArr.some((v) => eqArr.includes(v));
 }
 
 /**
@@ -124,7 +134,7 @@ export function applyComputedFormData(schema: FormSchema | null | undefined, dat
 
     const rows = data[field.name] as unknown[];
     for (const child of field.fields ?? []) {
-      if (child.type !== 'number' || !child.sum_target) continue;
+      if (!['number', 'select', 'allowance_days'].includes(child.type) || !child.sum_target) continue;
       for (const row of rows) {
         if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
         const rowData = row as Record<string, unknown>;
@@ -189,7 +199,7 @@ function validateFieldList(
     if (validation.regex) {
       try {
         if (!new RE2(validation.regex).test(stringValue)) {
-          errors.push({ field: path, message: `${field.label ?? field.name} format is invalid` });
+          errors.push({ field: path, message: `${field.label ?? field.name} の形式が正しくありません` });
         }
       } catch {
         console.warn(`[formValidation] invalid regex on field ${path}: ${validation.regex}`);
@@ -209,6 +219,20 @@ function validateFieldList(
         if (validation.max != null && num > validation.max) {
           errors.push({ field: path, message: `${field.label ?? field.name} must be at most ${validation.max}` });
         }
+        // max_from_field: value must be ≤ another field's value (e.g. days_total ≤ trip_duration)
+        if (validation.max_from_field) {
+          const cap = Number(rootData[validation.max_from_field] ?? localData[validation.max_from_field]);
+          if (Number.isFinite(cap) && cap > 0 && num > cap) {
+            errors.push({ field: path, message: `${field.label ?? field.name} (${num}) が出張日数 (${cap}日) を超えています` });
+          }
+        }
+      }
+    }
+
+    if (field.type === 'date' && validation.date_after_or_equal) {
+      const ref = String(rootData[validation.date_after_or_equal] ?? localData[validation.date_after_or_equal] ?? '');
+      if (ref && String(value) < ref) {
+        errors.push({ field: path, message: `${field.label ?? field.name} は ${ref} 以降の日付を入力してください` });
       }
     }
 

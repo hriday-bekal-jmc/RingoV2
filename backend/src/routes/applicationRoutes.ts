@@ -649,7 +649,13 @@ router.post('/:id/start-settlement', validateBody(startSettlementSchema), async 
         throw Object.assign(new Error('このテンプレートは精算に対応していません'), { status: 422 });
       }
       const settlementSchema = tmplRes.rows[0]?.settlement_schema;
-      const normalizedSettlementData = applyComputedFormData(settlementSchema, settlement_data);
+      // Inject applicant's daily allowance rate so formula fields (daily_allowance_days_total * _daily_rate) resolve correctly
+      const rateRes = await client.query(
+        'SELECT daily_allowance_rate FROM users WHERE id = $1',
+        [applicant_id],
+      );
+      const dailyRate = rateRes.rows[0]?.daily_allowance_rate ?? 3000;
+      const normalizedSettlementData = applyComputedFormData(settlementSchema, { _daily_rate: dailyRate, ...settlement_data });
       if (settlementSchema) {
         const errors = validateFormData(settlementSchema, normalizedSettlementData);
         if (errors.length > 0) {

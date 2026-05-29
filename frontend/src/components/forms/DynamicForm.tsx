@@ -34,6 +34,8 @@ interface FormField {
     equals: string | number | boolean | Array<string | number | boolean>;
   };
   col_span?: 'half' | 'full';
+  hidden?: boolean;   // hides from form UI (still participates in formulas / sum)
+  show_date?: boolean; // route_entry: show travel date per row
 }
 
 interface Template {
@@ -177,7 +179,7 @@ export default function DynamicForm({
 
       if (field.type === 'repeat_group') {
         (field.fields ?? []).forEach((child) => {
-          if (child.type === 'number' && child.sum_target && computedTargets.has(child.sum_target)) {
+          if ((child.type === 'number' || child.type === 'allowance_days' || child.type === 'select') && child.sum_target && computedTargets.has(child.sum_target)) {
             sources.push({
               watchName: field.name,
               targetName: child.sum_target,
@@ -254,7 +256,7 @@ export default function DynamicForm({
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
-        {activeFields.map((field) => (
+        {activeFields.filter((f) => !f.hidden).map((field) => (
           <div key={field.name} className={isFullWidth(field) ? 'md:col-span-2' : ''}>
             {field.type === 'header' ? (
               <div className="flex items-center gap-3 py-1">

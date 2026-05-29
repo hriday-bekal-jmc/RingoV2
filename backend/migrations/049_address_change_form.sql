@@ -42,7 +42,7 @@ SELECT
         "type":        "text",
         "required":    true,
         "placeholder": "例）123-4567",
-        "validation":  { "pattern": "^\\d{3}-?\\d{4}$", "patternMessage": "郵便番号の形式で入力してください（例：123-4567）" }
+        "validation":  { "regex": "^\\d{3}-?\\d{4}$" }
       },
       {
         "name":        "new_address",
