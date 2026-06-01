@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useScrollEnd } from '../hooks/useScrollEnd';
+import { useDelayedLoading } from '../hooks/useDelayedLoading';
 import { Link } from 'react-router-dom';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
@@ -243,7 +244,7 @@ function CloseButton({
       <div className="group relative inline-block">
         <button
           disabled
-          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-surface-100/60 text-warmgray-400 border border-surface-200/60 cursor-not-allowed flex items-center gap-1.5"
+          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-surface-100/60 text-warmgray-400 border border-surface-200/60 cursor-not-allowed flex items-center gap-1.5 whitespace-nowrap"
         >
           <svg className="w-3 h-3 text-warmgray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
@@ -279,7 +280,7 @@ function CloseButton({
     <button
       onClick={() => mutation.mutate()}
       disabled={mutation.isPending}
-      className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-teal-500 text-white hover:bg-teal-600 active:scale-[0.98] shadow-sm transition-all duration-150 disabled:opacity-60 flex items-center gap-1.5"
+      className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-teal-500 text-white hover:bg-teal-600 active:scale-[0.98] shadow-sm transition-all duration-150 disabled:opacity-60 flex items-center gap-1.5 whitespace-nowrap"
     >
       {mutation.isPending ? (
         <>
@@ -364,6 +365,8 @@ export default function Accounting() {
     // Keep old data visible while new date/filter fetch runs — no full spinner flash
     placeholderData: keepPreviousData,
   });
+
+  const showLoader = useDelayedLoading(isLoading);
 
   const allItems = data?.pages.flatMap(p => p.items) ?? [];
   // Client-side filter — no re-fetch on tab switch
@@ -642,24 +645,20 @@ export default function Accounting() {
         )}
 
         {/* Table */}
-        {isLoading ? (
+        {showLoader ? (
           <div className="card !p-0 md:overflow-hidden">
             <div className="md:overflow-x-auto">
-              <table className="table-base table-responsive">
+              <table className="table-base w-full">
                 <thead>
                   <tr>
-                    <th className="w-10"><Sk.Box w="w-4" h="h-4" className="rounded" /></th>
+                    <th className="w-8"><Sk.Box w="w-4" h="h-4" className="rounded" /></th>
                     <th>{t('accounting_col_app')}</th>
                     <th>{t('accounting_col_applicant')}</th>
-                    <th>{t('accounting_col_template')}</th>
-                    <th className="text-right">{t('accounting_col_expected')}</th>
-                    <th className="text-right">{t('accounting_col_actual')}</th>
-                    <th className="text-right">差額</th>
-                    <th>{t('accounting_col_transfer')}</th>
-                    <th>{t('accounting_col_proof')}</th>
+                    <th className="text-right">金額</th>
+                    <th>振込情報</th>
                     <th>{t('accounting_col_status')}</th>
                     <th>精算処理</th>
-                    <th>{t('col_detail')}</th>
+                    <th className="w-10">{t('col_detail')}</th>
                   </tr>
                 </thead>
                 <tbody className="md:divide-y md:divide-white/20">
@@ -670,22 +669,30 @@ export default function Accounting() {
                         <div className="space-y-1.5">
                           <Sk.Line w={i % 3 === 0 ? 'w-24' : i % 3 === 1 ? 'w-20' : 'w-28'} h="h-3" />
                           <Sk.Line w="w-16" h="h-2.5" />
+                          <Sk.Line w="w-12" h="h-2" />
                         </div>
                       </td>
                       <td>
                         <div className="space-y-1.5">
-                          <Sk.Line w={i % 2 === 0 ? 'w-28' : 'w-24'} h="h-3.5" />
-                          <Sk.Line w="w-20" h="h-2.5" />
+                          <Sk.Line w="w-20" h="h-3" />
+                          <Sk.Line w="w-16" h="h-2.5" />
                         </div>
                       </td>
-                      <td><Sk.Line w={i % 2 === 0 ? 'w-32' : 'w-40'} h="h-3" /></td>
-                      <td><Sk.Line w="w-20" h="h-3" className="ml-auto" /></td>
-                      <td><Sk.Line w="w-20" h="h-3" className="ml-auto" /></td>
-                      <td><Sk.Line w="w-24" h="h-3" /></td>
-                      <td><Sk.Circle size="sm" /></td>
-                      <td><Sk.Badge w="w-20" /></td>
+                      <td>
+                        <div className="flex flex-col items-end gap-1">
+                          <Sk.Line w="w-16" h="h-2.5" />
+                          <Sk.Line w="w-20" h="h-3.5" />
+                        </div>
+                      </td>
+                      <td>
+                        <div className="space-y-1.5">
+                          <Sk.Line w="w-20" h="h-3" />
+                          <Sk.Line w="w-24" h="h-3" />
+                        </div>
+                      </td>
                       <td><Sk.Badge w="w-16" /></td>
-                      <td><Sk.Line w="w-8" h="h-3" /></td>
+                      <td><Sk.Badge w="w-16" /></td>
+                      <td><Sk.Line w="w-6" h="h-3" /></td>
                     </tr>
                   ))}
                 </tbody>
@@ -698,35 +705,30 @@ export default function Accounting() {
             <p className="text-sm font-medium">{t('accounting_no_items')}</p>
           </div>
         ) : (
-          <div className={`card !p-0 md:overflow-hidden animate-fade-up transition-opacity duration-200 ${isFetching && !isFetchingNextPage ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
-            <div className="md:overflow-x-auto">
-              <table className="table-base table-responsive">
-                <thead>
-                  <tr>
-                    <th className="w-10">
-                      <input
-                        type="checkbox"
-                        checked={selectAllServer || (selected.size === filtered.length && filtered.length > 0)}
-                        ref={(el) => {
-                          if (el) el.indeterminate = !selectAllServer && selected.size > 0 && selected.size < filtered.length;
-                        }}
-                        onChange={toggleAll}
-                        className="rounded"
-                      />
-                    </th>
-                    <th>{t('accounting_col_app')}</th>
-                    <th>{t('accounting_col_applicant')}</th>
-                    <th>{t('accounting_col_template')}</th>
-                    <th className="text-right">{t('accounting_col_expected')}</th>
-                    <th className="text-right">{t('accounting_col_actual')}</th>
-                    <th className="text-right">差額</th>
-                    <th>{t('accounting_col_transfer')}</th>
-                    <th>{t('accounting_col_proof')}</th>
-                    <th>{t('accounting_col_status')}</th>
-                    <th>精算処理</th>
-                    <th>{t('col_detail')}</th>
-                  </tr>
-                </thead>
+          <div className={`card !p-0 overflow-hidden animate-fade-up transition-opacity duration-200 ${isFetching && !isFetchingNextPage ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
+            <table className="table-base w-full">
+              <thead>
+                <tr>
+                  <th className="w-8">
+                    <input
+                      type="checkbox"
+                      checked={selectAllServer || (selected.size === filtered.length && filtered.length > 0)}
+                      ref={(el) => {
+                        if (el) el.indeterminate = !selectAllServer && selected.size > 0 && selected.size < filtered.length;
+                      }}
+                      onChange={toggleAll}
+                      className="rounded"
+                    />
+                  </th>
+                  <th>{t('accounting_col_app')}</th>
+                  <th>{t('accounting_col_applicant')}</th>
+                  <th className="text-right">金額</th>
+                  <th>振込情報</th>
+                  <th>{t('accounting_col_status')}</th>
+                  <th>精算処理</th>
+                  <th className="w-10">{t('col_detail')}</th>
+                </tr>
+              </thead>
                 <tbody className="md:divide-y md:divide-white/20">
                   {filtered.map((s) => {
                     const statusCls = APP_STATUS_CLS[s.app_status] ?? 'badge-draft';
@@ -751,11 +753,12 @@ export default function Accounting() {
                         <td data-label={t('accounting_col_app')}>
                           <Link
                             to={`/applications/${s.application_id}`}
-                            className="text-xs font-mono text-ringo-500 hover:text-ringo-600 font-semibold"
+                            className="text-xs font-mono text-ringo-500 hover:text-ringo-600 font-semibold whitespace-nowrap"
                           >
                             {s.application_number ?? '—'}
                           </Link>
-                          <p className="text-[10px] text-warmgray-400 mt-0.5">
+                          <p className="text-[10px] text-warmgray-500 truncate mt-0.5">{s.template_name}</p>
+                          <p className="text-[10px] text-warmgray-400">
                             {s.settlement_submitted_at
                               ? new Date(s.settlement_submitted_at).toLocaleDateString(dateLocale)
                               : new Date(s.created_at).toLocaleDateString(dateLocale)}
@@ -763,53 +766,38 @@ export default function Accounting() {
                         </td>
 
                         <td data-label={t('accounting_col_applicant')}>
-                          <div className="md:text-left text-right">
-                            <p className="text-sm font-medium text-warmgray-800">{s.applicant_name}</p>
-                            <p className="text-[11px] text-warmgray-400">{s.department_name}</p>
+                          <p className="text-xs font-medium text-warmgray-800 truncate">{s.applicant_name}</p>
+                          <p className="text-[10px] text-warmgray-400 truncate">{s.department_name}</p>
+                        </td>
+
+                        {/* Amounts — stacked: est / actual / delta */}
+                        <td data-label="金額" className="text-right">
+                          <div className="flex flex-col items-end gap-0.5">
+                            <span className="text-[10px] tabular-nums text-warmgray-400 whitespace-nowrap">概算 {fmt(s.expected_amount)}</span>
+                            <span className="text-sm font-bold tabular-nums text-warmgray-800 whitespace-nowrap">{fmt(s.actual_amount)}</span>
+                            {(s.expected_amount > 0 || s.actual_amount > 0) && delta !== 0 && (
+                              <span className={`text-[10px] font-semibold tabular-nums whitespace-nowrap ${delta > 0 ? 'text-ringo-500' : 'text-emerald-600'}`}>
+                                {delta > 0 ? '+' : ''}{fmt(delta)}
+                              </span>
+                            )}
                           </div>
                         </td>
 
-                        <td data-label={t('accounting_col_template')}>
-                          <p className="text-xs text-warmgray-600 font-medium">{s.template_name}</p>
-                        </td>
-
-                        <td data-label={t('accounting_col_expected')} className="md:text-right">
-                          <span className="text-sm text-warmgray-500">{fmt(s.expected_amount)}</span>
-                        </td>
-
-                        <td data-label={t('accounting_col_actual')} className="md:text-right">
-                          <span className="text-sm font-bold text-warmgray-800">{fmt(s.actual_amount)}</span>
-                        </td>
-
-                        <td data-label="差額" className="md:text-right">
-                          {s.expected_amount > 0 || s.actual_amount > 0 ? (
-                            <span className={`text-sm font-bold tabular-nums ${
-                              delta === 0 ? 'text-warmgray-400'
-                              : delta > 0 ? 'text-ringo-500'
-                              : 'text-emerald-600'
-                            }`}>
-                              {delta === 0 ? '±0' : `${delta > 0 ? '+' : ''}${fmt(delta)}`}
-                            </span>
-                          ) : (
-                            <span className="text-warmgray-300 text-xs">—</span>
-                          )}
-                        </td>
-
-                        <td data-label={t('accounting_col_transfer')}>
-                          <DateEditor
-                            settlementId={s.settlement_id}
-                            currentDate={s.transfer_date}
-                            currentNote={s.accounting_note}
-                            t={t}
-                          />
-                        </td>
-
-                        <td data-label={t('accounting_col_proof')}>
-                          <ProofUploader
-                            settlementId={s.settlement_id}
-                            proofUrl={s.transfer_proof_url}
-                            t={t}
-                          />
+                        {/* Transfer info — date + proof stacked */}
+                        <td data-label="振込情報">
+                          <div className="space-y-1.5">
+                            <DateEditor
+                              settlementId={s.settlement_id}
+                              currentDate={s.transfer_date}
+                              currentNote={s.accounting_note}
+                              t={t}
+                            />
+                            <ProofUploader
+                              settlementId={s.settlement_id}
+                              proofUrl={s.transfer_proof_url}
+                              t={t}
+                            />
+                          </div>
                         </td>
 
                         <td data-label={t('accounting_col_status')}>
@@ -855,8 +843,7 @@ export default function Accounting() {
                     );
                   })}
                 </tbody>
-              </table>
-            </div>
+            </table>
 
             {/* Sentinel — invisible; observer fires early via rootMargin */}
             <div ref={sentinelRef} className="h-px" />

@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { useQuery, useInfiniteQuery, keepPreviousData } from '@tanstack/react-query';
 import { Link } from 'react-router-dom'; // used inside DetailPanel
 import { useScrollEnd } from '../hooks/useScrollEnd';
+import { useDelayedLoading } from '../hooks/useDelayedLoading';
 import Layout from '../components/common/Layout';
 import apiClient from '../services/apiClient';
 import { useLang } from '../context/LanguageContext';
@@ -94,6 +95,8 @@ function DetailPanel({ applicationId, onClose, lang }: { applicationId: string; 
     staleTime: 60_000,
   });
 
+  const showLoader = useDelayedLoading(isLoading);
+
   const STEP_STATUS: Record<string, { label: string; cls: string }> = {
     APPROVED: { label: lang === 'en' ? 'Approved' : '承認',     cls: 'text-emerald-600' },
     REJECTED: { label: lang === 'en' ? 'Rejected' : '却下',     cls: 'text-red-500' },
@@ -148,7 +151,7 @@ function DetailPanel({ applicationId, onClose, lang }: { applicationId: string; 
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto [overflow-x:clip] [scrollbar-gutter:stable] px-4 md:px-7 py-4 md:py-5 space-y-6">
-          {isLoading && (
+          {showLoader && (
             <div className="space-y-3">
               {[...Array(6)].map((_, i) => <div key={i} className="h-12 rounded-xl bg-white/40 animate-pulse" />)}
             </div>
@@ -355,6 +358,8 @@ export default function ApprovalHistory() {
     placeholderData: keepPreviousData,
   });
 
+  const showLoader = useDelayedLoading(isLoading);
+
   const items = data?.pages.flatMap(p => p.items) ?? [];
 
   const sentinelRef = useScrollEnd(
@@ -504,7 +509,7 @@ export default function ApprovalHistory() {
             </div>
           )}
 
-          {isLoading ? (
+          {showLoader ? (
             <>
               {/* Mobile skeleton */}
               <div className="md:hidden space-y-3">

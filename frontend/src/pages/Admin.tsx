@@ -2,6 +2,7 @@
 import { createPortal } from 'react-dom';
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useScrollEnd } from '../hooks/useScrollEnd';
+import { useDelayedLoading } from '../hooks/useDelayedLoading';
 import { useScrollLock } from '../hooks/useScrollLock';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
@@ -287,6 +288,8 @@ function UsersTab({ showToast, onGoToRoutes }: {
     gcTime:    10 * 60_000,
   });
 
+  const showLoader = useDelayedLoading(isLoading);
+
   const { data: departments = [] } = useQuery<Department[]>({
     queryKey: ['admin', 'departments'],
     queryFn:  async () => (await apiClient.get('/admin/departments')).data,
@@ -467,7 +470,7 @@ function UsersTab({ showToast, onGoToRoutes }: {
         document.body,
       )}
 
-      {isLoading ? (
+      {showLoader ? (
         <RingoLoader.Block label="読み込み中..." />
       ) : (
         <div className="card !p-0 md:overflow-hidden">
@@ -739,6 +742,8 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
     staleTime: 5 * 60_000,
   });
 
+  const showLoader = useDelayedLoading(isLoading);
+
   // Shared cache w/ UsersTab — same key = single fetch across tabs
   const { data: users = [] } = useQuery<User[]>({
     queryKey: ['admin', 'users'],
@@ -803,7 +808,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
     return true;
   });
 
-  if (isLoading) return <RingoLoader.Block label="読み込み中..." />;
+  if (showLoader) return <RingoLoader.Block label="読み込み中..." />;
 
   return (
     <div className="space-y-4">
@@ -1187,6 +1192,8 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
     placeholderData: keepPreviousData,
   });
 
+  const showLoader = useDelayedLoading(isLoading);
+
   const apps = data?.pages.flatMap(p => p.items) ?? [];
 
   const sentinelRef = useScrollEnd(
@@ -1306,7 +1313,7 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
         )}
       </div>
 
-      {isLoading ? (
+      {showLoader ? (
         <div className="card !p-0 md:overflow-hidden">
           <table className="table-base table-responsive">
             <thead>
@@ -1521,6 +1528,8 @@ function PermissionsTab({ showToast }: { showToast: (msg: string, type?: 'succes
     staleTime: 0,
   });
 
+  const showLoader = useDelayedLoading(isLoading);
+
   const [draft, setDraft] = useState<Record<string, PermRowDraft>>({});
   const [dirty, setDirty] = useState<Record<string, boolean>>({});
 
@@ -1567,7 +1576,7 @@ function PermissionsTab({ showToast }: { showToast: (msg: string, type?: 'succes
 
   const PERM_ROLES = Object.keys(ROLE_MAP) as Role[];
 
-  if (isLoading) {
+  if (showLoader) {
     return <RingoLoader.Block />;
   }
 
@@ -1829,6 +1838,8 @@ function AllowanceTab({ showToast }: { showToast: (msg: string, type?: 'success'
     staleTime: 5 * 60_000,
   });
 
+  const showLoader = useDelayedLoading(isLoading);
+
   const patchRate = useMutation({
     mutationFn: async ({ role, daily_rate_yen }: { role: string; daily_rate_yen: number }) =>
       apiClient.patch(`/allowance-rates/${encodeURIComponent(role)}`, { daily_rate_yen }),
@@ -1871,7 +1882,7 @@ function AllowanceTab({ showToast }: { showToast: (msg: string, type?: 'success'
     PRESIDENT:         lang === 'ja' ? '社長'              : 'President',
   };
 
-  if (isLoading) return <div className="card flex justify-center py-12"><RingoLoader.Block /></div>;
+  if (showLoader) return <div className="card flex justify-center py-12"><RingoLoader.Block /></div>;
 
   return (
     <div className="card space-y-5">

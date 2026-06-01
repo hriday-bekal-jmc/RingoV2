@@ -11,6 +11,7 @@ import { TEMPLATE_LABELS, templateLabel } from '../config/templateLabels';
 import apiClient from '../services/apiClient';
 import RingoLoader from '../components/common/RingoLoader';
 import { useScrollEnd } from '../hooks/useScrollEnd';
+import { useDelayedLoading } from '../hooks/useDelayedLoading';
 
 // Template tiles are now data-driven — fetched from `/templates` so any admin
 // addition appears automatically. Falls back to hardcoded TEMPLATE_LABELS
@@ -119,6 +120,8 @@ function PendingApprovalsDrawer({
     staleTime: 30_000,
   });
 
+  const showLoader = useDelayedLoading(isLoading);
+
   const sentinelRef = useScrollEnd(
     () => fetchNextPage(),
     !!hasNextPage && !isFetchingNextPage,
@@ -159,7 +162,7 @@ function PendingApprovalsDrawer({
 
         {/* Scrollable list */}
         <div className="flex-1 overflow-y-auto overscroll-contain">
-          {isLoading ? (
+          {showLoader ? (
             <RingoLoader.Block />
           ) : items.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-warmgray-400">

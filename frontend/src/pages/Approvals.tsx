@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useScrollEnd } from '../hooks/useScrollEnd';
+import { useDelayedLoading } from '../hooks/useDelayedLoading';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import Toast, { useToast } from '../components/common/Toast';
@@ -780,6 +781,8 @@ export default function Approvals() {
     placeholderData: keepPreviousData,
   });
 
+  const showLoader = useDelayedLoading(isLoading);
+
   const applications = data?.pages.flatMap(p => p.items) ?? [];
   const totalCount = data?.pages[0]?.total ?? applications.length;
 
@@ -800,6 +803,9 @@ export default function Approvals() {
     staleTime: 30_000,
     placeholderData: keepPreviousData,
   });
+
+  const showProxyLoader = useDelayedLoading(isProxyLoading);
+
   const proxyApplications = proxyData?.pages.flatMap(p => p.items) ?? [];
   const proxyTotalCount = proxyData?.pages[0]?.total ?? proxyApplications.length;
 
@@ -1021,7 +1027,7 @@ export default function Approvals() {
 
         {/* Regular approvals — hidden when proxy tab active */}
         {/* Loading */}
-        {!proxyView && isLoading && (
+        {!proxyView && showLoader && (
           <div className="card !p-0 md:overflow-hidden">
             <table className="table-base table-responsive table-fixed w-full">
               <thead>
@@ -1199,7 +1205,7 @@ export default function Approvals() {
         {/* Proxy approval list */}
         {proxyView && (
         <div className="space-y-4 animate-fade-up">
-          {isProxyLoading && <div className="card py-10 flex justify-center"><RingoLoader.Inline /></div>}
+          {showProxyLoader && <div className="card py-10 flex justify-center"><RingoLoader.Inline /></div>}
 
           {!isProxyLoading && proxyApplications.length === 0 && (
             <div className="card flex flex-col items-center justify-center py-16 text-warmgray-400">

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { useScrollEnd } from '../hooks/useScrollEnd';
+import { useDelayedLoading } from '../hooks/useDelayedLoading';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import ConfirmDialog from '../components/common/ConfirmDialog';
@@ -113,6 +114,8 @@ export default function History() {
     gcTime:    60_000,
     placeholderData: keepPreviousData,
   });
+
+  const showLoader = useDelayedLoading(isLoading);
 
   const applications = data?.pages.flatMap(p => p.items) ?? [];
   // Client-side filter — no re-fetch on tab switch
@@ -237,7 +240,7 @@ export default function History() {
         </div>
 
         {/* List */}
-        {isLoading ? (
+        {showLoader ? (
           <div className="card !p-0 overflow-hidden">
             <ul className="divide-y divide-white/30">
               {[...Array(9)].map((_, i) => {
