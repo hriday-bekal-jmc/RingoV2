@@ -626,29 +626,15 @@ function ComputedNumberDisplay({
   const current = watch ? (Number(watch(field.name)) || 0) : 0;
   const { lang } = useLang();
 
-  // _daily_rate = 0 means this role has no allowance configured in admin
-  const isRateField = field.name === '_daily_rate';
-  const noRate = isRateField && current === 0;
-
   return (
-    <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${
-      noRate ? 'bg-amber-50/60 border-amber-200/60' : 'bg-teal-50/60 border-teal-200/60'
-    }`}>
+    <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-teal-50/60 border border-teal-200/60">
       <input type="hidden" {...register(field.name, { valueAsNumber: true })} />
-      {noRate ? (
-        <span className="text-sm font-semibold text-amber-600">
-          {lang === 'en' ? '⚠ No allowance rate set for this role' : '⚠ この役職には日当レートが設定されていません'}
-        </span>
-      ) : (
-        <>
-          <span className={`text-xl font-bold ${noRate ? 'text-amber-600' : 'text-teal-700'}`}>
-            {field.unit
-              ? `${current.toLocaleString('ja-JP')} ${field.unit}`
-              : `¥${current.toLocaleString('ja-JP')}`}
-          </span>
-          <span className="text-xs text-teal-500 font-medium">{lang === 'en' ? '(auto)' : '（自動計算）'}</span>
-        </>
-      )}
+      <span className="text-xl font-bold text-teal-700">
+        {field.unit
+          ? `${current.toLocaleString('ja-JP')} ${field.unit}`
+          : `¥${current.toLocaleString('ja-JP')}`}
+      </span>
+      <span className="text-xs text-teal-500 font-medium">{lang === 'en' ? '(auto)' : '（自動計算）'}</span>
     </div>
   );
 }
@@ -814,7 +800,7 @@ function RouteEntryInput({
               type="text"
               value={r.from_station}
               onChange={(e) => update(i, { from_station: e.target.value })}
-              placeholder={lang === 'ja' ? '乗車駅' : 'From station'}
+              placeholder={lang === 'ja' ? '出発地' : 'From'}
               className="input flex-1 min-w-0 text-sm"
             />
             <button
@@ -831,7 +817,7 @@ function RouteEntryInput({
               type="text"
               value={r.to_station}
               onChange={(e) => update(i, { to_station: e.target.value })}
-              placeholder={lang === 'ja' ? '降車駅' : 'To station'}
+              placeholder={lang === 'ja' ? '到着地' : 'To'}
               className="input flex-1 min-w-0 text-sm"
             />
             <div className="relative shrink-0 w-20">

@@ -82,20 +82,27 @@ router.post('/users', validateBody(createUserSchema), async (req: Request, res: 
   const { full_name, email, role, is_admin, department_id, password, is_active } = req.body as CreateUserBody;
   try {
     const hash = password ? await argon2.hash(password) : null;
+    // Fetch daily rate separately so a missing allowance_rates row never blocks user creation
+    const rateRow = await query(
+      `SELECT daily_rate_yen FROM allowance_rates WHERE role = $1 LIMIT 1`,
+      [role],
+    );
+    const dailyRate: number | null = rateRow.rows[0]?.daily_rate_yen ?? null;
+
     await query(
       `INSERT INTO users (full_name, email, role, is_admin, department_id, password_hash, is_active,
                           daily_allowance_rate)
-       VALUES ($1, $2, $3, $4, $5, $6, $7,
-               (SELECT daily_rate_yen FROM allowance_rates WHERE role = $3 LIMIT 1))`,
-      [full_name, email.toLowerCase().trim(), role, is_admin ?? false, department_id ?? null, hash, is_active ?? true],
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [full_name, email.toLowerCase().trim(), role, is_admin ?? false, department_id ?? null, hash, is_active ?? true, dailyRate],
     );
     void invalidateAdminReferenceCache('routes');
     res.status(201).json({ message: 'ユーザーを作成しました' });
   } catch (err: unknown) {
-    const e = err as { code?: string };
+    const e = err as { code?: string; message?: string };
     if (e.code === '23505') { res.status(409).json({ error: 'このメールアドレスは既に使用されています' }); return; }
+    if (e.code === '23514') { res.status(400).json({ error: `無効なロール: ${role}` }); return; }
     console.error('[admin] user create failed:', err);
-    res.status(500).json({ error: 'ユーザーの作成に失敗しました' });
+    res.status(500).json({ error: `ユーザーの作成に失敗しました: ${e.message ?? '不明なエラー'}` });
   }
 });
 

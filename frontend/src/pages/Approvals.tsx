@@ -831,6 +831,8 @@ export default function Approvals() {
   function toggleSystemView() {
     setSystemView(v => !v);
     setSelectedApp(null);
+    setProxyView(false);
+    setSelectedProxyApp(null);
     exitSelectionMode();
   }
 
@@ -986,17 +988,19 @@ export default function Approvals() {
                 {lang === 'en' ? 'Approval' : '承認'}
                 {totalCount > 0 && <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${!proxyView ? 'bg-white/30' : 'bg-ringo-100 text-ringo-600'}`}>{totalCount}</span>}
               </button>
-              <button
-                onClick={() => { setProxyView(true); setSelectedApp(null); exitSelectionMode(); }}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all duration-150 ${
-                  proxyView
-                    ? 'bg-violet-600 text-white border-violet-600 shadow-sm'
-                    : 'bg-white/60 text-warmgray-500 border-white/80 hover:bg-white/90'
-                }`}
-              >
-                {lang === 'en' ? 'Proxy' : '代理承認'}
-                {proxyTotalCount > 0 && <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${proxyView ? 'bg-white/30' : 'bg-violet-100 text-violet-600'}`}>{proxyTotalCount}</span>}
-              </button>
+              {!systemView && (
+                <button
+                  onClick={() => { setProxyView(true); setSelectedApp(null); exitSelectionMode(); }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all duration-150 ${
+                    proxyView
+                      ? 'bg-violet-600 text-white border-violet-600 shadow-sm'
+                      : 'bg-white/60 text-warmgray-500 border-white/80 hover:bg-white/90'
+                  }`}
+                >
+                  {lang === 'en' ? 'Proxy' : '代理承認'}
+                  {proxyTotalCount > 0 && <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${proxyView ? 'bg-white/30' : 'bg-violet-100 text-violet-600'}`}>{proxyTotalCount}</span>}
+                </button>
+              )}
             </div>
           </div>
         </div>
