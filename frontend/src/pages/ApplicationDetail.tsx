@@ -10,6 +10,7 @@ import TransportationDetail from '../components/forms/TransportationDetail';
 import type { TransportFormData } from '../components/forms/TransportationForm';
 import Toast, { useToast } from '../components/common/Toast';
 import { useLang } from '../context/LanguageContext';
+import { useAuth } from '../context/AuthContext';
 import { fieldLabel } from '../i18n';
 import { FieldValueContent, isLongField } from '../components/forms/FieldValueDisplay';
 import PatternBadge from '../components/common/PatternBadge';
@@ -257,6 +258,9 @@ function SettlementReturnEditor({ app, onSuccess }: { app: ApplicationDetail; on
   const queryClient = useQueryClient();
   const { toast, show, dismiss } = useToast();
   const { t } = useLang();
+  // Same as TransportationForm: read rate from auth context (current logged-in user),
+  // not from app.applicant_daily_rate (which may be stale/null from cached DB column).
+  const { user: authUser } = useAuth();
   const [selectedRouteId, setSelectedRouteId] = useState<string>('');
 
   const { data: routePreview, isLoading: routeLoading } = useQuery({
@@ -308,7 +312,14 @@ function SettlementReturnEditor({ app, onSuccess }: { app: ApplicationDetail; on
 
   const settlementDefaults = isDirectSettlement
     ? (app.form_data as unknown as Partial<TransportFormData>)
-    : ({ _daily_rate: app.applicant_daily_rate ?? 3000, ...(app.settlement_data ?? {}) } as Record<string, unknown>);
+    : (app.settlement_data ?? {}) as Record<string, unknown>;
+
+  // Injected externally so DynamicForm always has the fresh role-based rate
+  // even when settlement_data is empty (first-time start) or stale.
+  // Use auth context rate (same as TransportationForm) — available immediately at render,
+  // no API timing issues. Falls back to app.applicant_daily_rate then 3000.
+  const settlementExternalValues = isDirectSettlement ? undefined
+    : { _daily_rate: authUser?.daily_allowance_rate ?? app.applicant_daily_rate ?? 3000 };
 
   return (
     <div className="space-y-5 animate-fade-up">
@@ -335,7 +346,8 @@ function SettlementReturnEditor({ app, onSuccess }: { app: ApplicationDetail; on
       ) : (
         <DynamicForm
           template={template}
-          defaultValues={{ _daily_rate: app.applicant_daily_rate ?? 3000, ...(app.settlement_data ?? {}) }}
+          defaultValues={settlementDefaults}
+          externalValues={settlementExternalValues}
           isSettlementPhase={true}
           onSubmit={handleSubmit}
           disabled={resubmitSettlement.isPending}

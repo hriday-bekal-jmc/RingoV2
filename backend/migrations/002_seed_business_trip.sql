@@ -76,7 +76,7 @@ VALUES (
           {"name":"day_type","label":"日当区分","label_en":"Allowance","type":"select","required":false,"options":[{"value":"0","label_ja":"0（なし）","label_en":"0 (none)"},{"value":"0.5","label_ja":"0.5（半日）","label_en":"0.5 (half)"},{"value":"1","label_ja":"1（全日）","label_en":"1 (full)"}],"sum_target":"daily_allowance_days_total"}
         ]},
         {"name":"daily_allowance_days_total","label":"日当合計日数","label_en":"Total Per Diem Days","type":"number","computed":true,"unit":"日","validation":{"max_from_field":"trip_duration"}},
-        {"name":"_daily_rate","label":"日当単価","label_en":"Daily Rate","type":"number","hidden":true,"default_value":3000},
+        {"name":"_daily_rate","label":"日当単価（管理者設定・役職別）","label_en":"Daily Rate (Admin / Role-based)","type":"number","computed":true,"unit":"円","helper_text":"管理者の日当レートページで設定された役職別単価が自動適用されます"},
         {"name":"daily_allowance_total","label":"日当合計（円）","label_en":"Total Per Diem","type":"number","computed":true,"formula":"daily_allowance_days_total*_daily_rate","unit":"円"},
         {"name":"other_expenses_list","label":"その他費用明細","label_en":"Other Expenses","type":"repeat_group","required":false,"min_rows":0,"add_label":"費用を追加","add_label_en":"Add Expense","fields":[
           {"name":"description","label":"内容","label_en":"Description","type":"text","required":true},

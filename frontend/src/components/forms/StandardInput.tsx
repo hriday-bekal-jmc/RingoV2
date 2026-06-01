@@ -580,6 +580,9 @@ function ComputedNumberDisplay({
   useEffect(() => {
     if (!setValue) return;
 
+    // Injected value (e.g. _daily_rate set by backend via defaultValues) — no auto-compute, just display
+    if (!field.formula && !field.sum_target && !field.date_diff_from) return;
+
     // Date diff: (to - from) + 1 days  e.g. trip_duration
     if (field.date_diff_from && field.date_diff_to) {
       const from = allValues[field.date_diff_from];
@@ -620,21 +623,32 @@ function ComputedNumberDisplay({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(deps.map((d) => allValues[d])), allValues[field.sum_target ?? ''], allValues[field.date_diff_from ?? ''], allValues[field.date_diff_to ?? '']]);
 
-  const current = watch ? Number(watch(field.name)) || 0 : 0;
+  const current = watch ? (Number(watch(field.name)) || 0) : 0;
   const { lang } = useLang();
 
+  // _daily_rate = 0 means this role has no allowance configured in admin
+  const isRateField = field.name === '_daily_rate';
+  const noRate = isRateField && current === 0;
+
   return (
-    <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-teal-50/60 border border-teal-200/60">
-      {/* Computed fields are auto-set by formula/user_picker — their driver inputs
-          handle required validation. Registering without required avoids spurious
-          "0 is falsy" errors when count/amount is legitimately zero mid-lifecycle. */}
+    <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${
+      noRate ? 'bg-amber-50/60 border-amber-200/60' : 'bg-teal-50/60 border-teal-200/60'
+    }`}>
       <input type="hidden" {...register(field.name, { valueAsNumber: true })} />
-      <span className="text-xl font-bold text-teal-700">
-        {field.unit
-          ? `${current.toLocaleString('ja-JP')} ${field.unit}`
-          : `¥${current.toLocaleString('ja-JP')}`}
-      </span>
-      <span className="text-xs text-teal-500 font-medium">{lang === 'en' ? '(auto)' : '（自動計算）'}</span>
+      {noRate ? (
+        <span className="text-sm font-semibold text-amber-600">
+          {lang === 'en' ? '⚠ No allowance rate set for this role' : '⚠ この役職には日当レートが設定されていません'}
+        </span>
+      ) : (
+        <>
+          <span className={`text-xl font-bold ${noRate ? 'text-amber-600' : 'text-teal-700'}`}>
+            {field.unit
+              ? `${current.toLocaleString('ja-JP')} ${field.unit}`
+              : `¥${current.toLocaleString('ja-JP')}`}
+          </span>
+          <span className="text-xs text-teal-500 font-medium">{lang === 'en' ? '(auto)' : '（自動計算）'}</span>
+        </>
+      )}
     </div>
   );
 }

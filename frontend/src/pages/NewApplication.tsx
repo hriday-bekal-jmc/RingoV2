@@ -8,6 +8,7 @@ import TransportationForm from '../components/forms/TransportationForm';
 import { useLang } from '../context/LanguageContext';
 import CustomSelect from '../components/forms/CustomSelect';
 import RouteTimeline from '../components/common/RouteTimeline';
+import Toast, { useToast } from '../components/common/Toast';
 
 interface RouteStep {
   step_order: number;
@@ -38,6 +39,7 @@ export default function NewApplication() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { t, lang } = useLang();
+  const { toast, show: showToast, dismiss } = useToast();
   const [selectedRouteId, setSelectedRouteId] = useState<string>('');
 
   const { data: template, isLoading: templateLoading, isError: templateError } = useQuery({
@@ -87,9 +89,8 @@ export default function NewApplication() {
       queryClient.invalidateQueries({ queryKey: ['dashboard', 'summary'] });
       navigate('/history?submitted=1');
     } catch (error: any) {
-      // Surface to user via alert (replaced with toast in P2 polish).
-      // Don't log to console.error — esbuild keeps it in prod, leaks user data.
-      alert(`${t('toast_submit_error')}: ${error.message}`);
+      const msg = error?.response?.data?.error ?? error?.message ?? t('toast_submit_error');
+      showToast(`${t('toast_submit_error')}: ${msg}`, 'error');
     }
   };
 
@@ -99,12 +100,14 @@ export default function NewApplication() {
       queryClient.invalidateQueries({ queryKey: ['myApplications'] });
       navigate('/history?drafted=1');
     } catch (error: any) {
-      alert(`${t('toast_draft_updated')}: ${error.message}`);
+      const msg = error?.response?.data?.error ?? error?.message ?? t('error_load');
+      showToast(msg, 'error');
     }
   };
 
   return (
     <Layout title={t('title_new_app')}>
+      {toast && <Toast message={toast.message} type={toast.type} onDismiss={dismiss} />}
       <div className="max-w-3xl mx-auto space-y-5">
         {/* Mobile back */}
         <button

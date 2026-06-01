@@ -649,12 +649,16 @@ router.post('/:id/start-settlement', validateBody(startSettlementSchema), async 
         throw Object.assign(new Error('このテンプレートは精算に対応していません'), { status: 422 });
       }
       const settlementSchema = tmplRes.rows[0]?.settlement_schema;
-      // Inject applicant's daily allowance rate so formula fields (daily_allowance_days_total * _daily_rate) resolve correctly
+      // Read applicant's daily rate fresh from allowance_rates (not the cached users column)
+      // so any admin changes to rates are reflected immediately without waiting for re-login.
       const rateRes = await client.query(
-        'SELECT daily_allowance_rate FROM users WHERE id = $1',
+        `SELECT COALESCE(ar.daily_rate_yen, u.daily_allowance_rate, 3000)::int AS daily_rate
+         FROM users u
+         LEFT JOIN allowance_rates ar ON ar.role = u.role
+         WHERE u.id = $1`,
         [applicant_id],
       );
-      const dailyRate = rateRes.rows[0]?.daily_allowance_rate ?? 3000;
+      const dailyRate: number = rateRes.rows[0]?.daily_rate ?? 3000;
       const normalizedSettlementData = applyComputedFormData(settlementSchema, { _daily_rate: dailyRate, ...settlement_data });
       if (settlementSchema) {
         const errors = validateFormData(settlementSchema, normalizedSettlementData);
@@ -1277,7 +1281,7 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
               t.component_type,
               u.full_name AS applicant_name,
               u.avatar_url AS applicant_avatar,
-              u.daily_allowance_rate AS applicant_daily_rate,
+              COALESCE(ar.daily_rate_yen, u.daily_allowance_rate, 3000)::int AS applicant_daily_rate,
               s.transfer_date, s.transfer_proof_url, s.accounting_note,
               s.expected_amount, s.actual_amount AS settled_actual_amount,
               s.processed_at AS settlement_processed_at,
@@ -1286,6 +1290,7 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
        JOIN form_templates t ON a.template_id = t.id
        LEFT JOIN form_template_versions v ON v.id = a.template_version_id
        LEFT JOIN users u ON a.applicant_id = u.id
+       LEFT JOIN allowance_rates ar ON ar.role = u.role
        LEFT JOIN settlements s ON s.application_id = a.id
        WHERE a.id = $1`,
       [req.params.id],

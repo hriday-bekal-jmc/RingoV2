@@ -6,6 +6,7 @@ import Layout from '../components/common/Layout';
 import RingoLoader from '../components/common/RingoLoader';
 import DynamicForm from '../components/forms/DynamicForm';
 import { useLang } from '../context/LanguageContext';
+import { useAuth } from '../context/AuthContext';
 import CustomSelect from '../components/forms/CustomSelect';
 import RouteTimeline from '../components/common/RouteTimeline';
 import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
@@ -194,6 +195,7 @@ export default function Settlement() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { t } = useLang();
+  const { user: authUser } = useAuth();
 
   const [selectedRouteId, setSelectedRouteId] = useState<string>('');
 
@@ -370,6 +372,7 @@ export default function Settlement() {
             <DynamicForm
               template={pseudoTemplate as any}
               isSettlementPhase={true}
+              externalValues={{ _daily_rate: authUser?.daily_allowance_rate ?? 3000 }}
               onSubmit={async (data) => {
                 const settlementData = (data?.form_data ?? data) as Record<string, unknown>;
                 await mutation.mutateAsync(settlementData);

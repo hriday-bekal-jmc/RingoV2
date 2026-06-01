@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useForm, useWatch, type Control, type UseFormSetValue } from 'react-hook-form';
 import StandardInput from './StandardInput';
 import { useLang } from '../../context/LanguageContext';
+import { evalFormula, formulaDeps } from '../../utils/formulaEval';
 
 interface FormField {
   name: string;
@@ -34,8 +35,10 @@ interface FormField {
     equals: string | number | boolean | Array<string | number | boolean>;
   };
   col_span?: 'half' | 'full';
-  hidden?: boolean;   // hides from form UI (still participates in formulas / sum)
-  show_date?: boolean; // route_entry: show travel date per row
+  hidden?: boolean;
+  show_date?: boolean;
+  date_diff_from?: string;
+  date_diff_to?: string;
 }
 
 interface Template {
@@ -107,6 +110,8 @@ interface DynamicFormProps {
   disabled?: boolean;
   defaultValues?: Record<string, unknown>;
   submitLabel?: string;
+  /** Values injected from outside (e.g. _daily_rate from applicant role) — always synced, even after mount */
+  externalValues?: Record<string, unknown>;
 }
 
 export default function DynamicForm({
@@ -117,6 +122,7 @@ export default function DynamicForm({
   disabled = false,
   defaultValues,
   submitLabel,
+  externalValues,
 }: DynamicFormProps) {
   const { t } = useLang();
   const [isDrafting, setIsDrafting] = useState(false);
@@ -142,6 +148,35 @@ export default function DynamicForm({
     mode: 'onSubmit',
     reValidateMode: 'onSubmit',
   });
+
+  // Sync externalValues (e.g. _daily_rate from applicant's role) whenever they change,
+  // then immediately recompute any formula fields whose deps include those injected keys.
+  // This avoids waiting for ComputedNumberDisplay's own useEffect chain to cascade.
+  useEffect(() => {
+    if (!externalValues) return;
+
+    // Step 1: inject the external values into form state
+    Object.entries(externalValues).forEach(([key, val]) => {
+      if (val != null) setValue(key as never, val as never, { shouldDirty: false });
+    });
+
+    // Step 2: immediately recompute formula fields that depend on any external key
+    const externalKeys = new Set(Object.keys(externalValues));
+    const currentValues = { ...getValues(), ...externalValues };
+    allFields.forEach((f) => {
+      if (!f.formula) return;
+      const deps = formulaDeps(f.formula);
+      if (!deps.some((d) => externalKeys.has(d))) return;
+      const numVals: Record<string, number> = {};
+      deps.forEach((d) => {
+        const v = currentValues[d];
+        numVals[d] = typeof v === 'number' ? v : parseFloat(String(v ?? '0')) || 0;
+      });
+      const result = evalFormula(f.formula, numVals as Record<string, unknown>);
+      setValue(f.name as never, result as never, { shouldDirty: false });
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(externalValues)]);
 
   const conditionalSources = useMemo(
     () => Array.from(new Set(allFields.map((f) => f.conditional_on?.field).filter(Boolean))) as string[],
