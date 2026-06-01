@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, useWatch, type Control, type UseFormSetValue } from 'react-hook-form';
 import StandardInput from './StandardInput';
 import { useLang } from '../../context/LanguageContext';
@@ -126,6 +126,7 @@ export default function DynamicForm({
 }: DynamicFormProps) {
   const { t } = useLang();
   const [isDrafting, setIsDrafting] = useState(false);
+  const submittingRef = useRef(false); // prevent double-submit on rapid click
 
   const activeSchema = isSettlementPhase ? template.settlement_schema : template.schema_definition;
   const allFields: FormField[] = useMemo(() => activeSchema?.fields ?? [], [activeSchema]);
@@ -244,11 +245,17 @@ export default function DynamicForm({
   }, [activeFields]);
 
   const handleFormSubmit = async (data: Record<string, unknown>) => {
-    await onSubmit({
-      template_id: template.id,
-      stage: isSettlementPhase ? 'SETTLEMENT' : 'RINGI',
-      form_data: data,
-    });
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    try {
+      await onSubmit({
+        template_id: template.id,
+        stage: isSettlementPhase ? 'SETTLEMENT' : 'RINGI',
+        form_data: data,
+      });
+    } finally {
+      submittingRef.current = false;
+    }
   };
 
   const handleDraftClick = async () => {

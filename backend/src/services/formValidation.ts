@@ -23,7 +23,7 @@ export interface FormField {
   formula?: string;
   sum_target?: string;
   date_diff_from?: string;
-  date_diff_to?: string;
+  date_diff_to?:   string;
   fields?: FormField[];
   min_rows?: number;
   max_rows?: number;
@@ -36,9 +36,15 @@ export interface FormField {
     max_time?: string;
     /** date field: value must be ≥ the named sibling field */
     date_after_or_equal?: string;
+    /** date field: value must be ≤ the named sibling field */
+    date_before_or_equal?: string;
     /** number field: value must be ≤ value of the named sibling field */
     max_from_field?: string;
+    /** number field (nights): must equal date diff between two sibling fields in same row */
+    validate_nights_from?: { check_in: string; check_out: string };
   };
+  /** repeat_group: field name whose values must be unique across all rows */
+  unique_rows_by?: string;
   conditional_on?: {
     field: string;
     equals: string | number | boolean | Array<string | number | boolean>;
@@ -148,6 +154,18 @@ export function applyComputedFormData(schema: FormSchema | null | undefined, dat
     next[target] = total;
   });
 
+  // Compute date-diff fields server-side (e.g. trip_duration from departure/return dates)
+  for (const field of schema.fields) {
+    if (field.type === 'number' && field.date_diff_from && field.date_diff_to) {
+      const from = String(next[field.date_diff_from] ?? '');
+      const to   = String(next[field.date_diff_to]   ?? '');
+      if (from && to) {
+        const diff = Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1);
+        next[field.name] = diff;
+      }
+    }
+  }
+
   // Recalculate formula fields server-side — client value is untrusted.
   for (const field of formulaFields) {
     if (!field.formula) continue;
@@ -236,6 +254,43 @@ function validateFieldList(
       }
     }
 
+    if (field.type === 'date' && validation.date_before_or_equal) {
+      const ref = String(rootData[validation.date_before_or_equal] ?? localData[validation.date_before_or_equal] ?? '');
+      if (ref && String(value) > ref) {
+        errors.push({ field: path, message: `${field.label ?? field.name} は ${ref} 以前の日付を入力してください` });
+      }
+    }
+
+    if (field.type === 'number' && validation.validate_nights_from) {
+      const { check_in, check_out } = validation.validate_nights_from;
+      const cin  = String(localData[check_in]  ?? '');
+      const cout = String(localData[check_out] ?? '');
+      if (cin && cout && Date.parse(cout) > Date.parse(cin)) {
+        const expected = Math.round((Date.parse(cout) - Date.parse(cin)) / 86400000);
+        const actual   = Number(value);
+        if (Number.isFinite(actual) && actual !== expected) {
+          errors.push({ field: path, message: `${field.label ?? field.name} はチェックイン・アウト日付の差（${expected}泊）と一致しません` });
+        }
+      }
+    }
+
+    // route_entry: validate each row's travel_date is within the trip date range
+    if (field.type === 'route_entry') {
+      const rows = Array.isArray(value) ? (value as Record<string, unknown>[]) : [];
+      const depDate = String(rootData['departure_date'] ?? localData['departure_date'] ?? '');
+      const retDate = String(rootData['return_date']    ?? localData['return_date']    ?? '');
+      rows.forEach((row, i) => {
+        const td = String(row['travel_date'] ?? '');
+        if (!td) return;
+        if (depDate && td < depDate) {
+          errors.push({ field: `${path}[${i + 1}].travel_date`, message: `交通費明細の日付（${td}）は出発日（${depDate}）以降にしてください` });
+        }
+        if (retDate && td > retDate) {
+          errors.push({ field: `${path}[${i + 1}].travel_date`, message: `交通費明細の日付（${td}）は帰着日（${retDate}）以前にしてください` });
+        }
+      });
+    }
+
     if (field.type === 'time') {
       // HH:mm format — browsers always emit this format, but validate defensively
       if (!/^\d{2}:\d{2}$/.test(stringValue)) {
@@ -262,7 +317,9 @@ function validateRepeatGroup(
 ): void {
   const childFields = field.fields ?? [];
   const maxRows = boundedInt(field.max_rows, DEFAULT_REPEAT_MAX_ROWS, 1, DEFAULT_REPEAT_MAX_ROWS);
-  const minRows = boundedInt(field.min_rows, field.required ? 1 : 0, 0, maxRows);
+  // required:true with explicit min_rows:0 — force at least 1 row so required is meaningful
+  const rawMin = boundedInt(field.min_rows, field.required ? 1 : 0, 0, maxRows);
+  const minRows = field.required && rawMin === 0 ? 1 : rawMin;
 
   if (value == null || value === '') {
     if (minRows > 0) {
@@ -294,6 +351,22 @@ function validateRepeatGroup(
   if (minRows > 0 && rows.length < minRows) {
     errors.push({ field: path, message: `${field.label ?? field.name} requires at least ${minRows} row(s)` });
     return;
+  }
+
+  // Check uniqueness across rows if specified
+  if (field.unique_rows_by) {
+    const seen = new Map<string, number>();
+    const uKey = field.unique_rows_by;
+    objectRows.forEach((row, i) => {
+      const v = row[uKey];
+      if (v == null || v === '') return;
+      const k = String(v);
+      if (seen.has(k)) {
+        errors.push({ field: `${path}[${i + 1}].${uKey}`, message: `${field.label ?? field.name} に重複した値があります（${k}）— 同じ日付は1回のみ入力できます` });
+      } else {
+        seen.set(k, i);
+      }
+    });
   }
 
   objectRows.forEach((row, rowIndex) => {

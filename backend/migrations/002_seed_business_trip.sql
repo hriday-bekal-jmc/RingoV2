@@ -33,7 +33,7 @@ VALUES (
           {"name":"accommodation_name","label":"宿泊施設名","label_en":"Hotel / Facility","type":"text","required":false},
           {"name":"check_in_date","label":"チェックイン","label_en":"Check-in","type":"date","required":false},
           {"name":"check_out_date","label":"チェックアウト","label_en":"Check-out","type":"date","required":false,"validation":{"date_after_or_equal":"check_in_date"}},
-          {"name":"nights","label":"泊数","label_en":"Nights","type":"number","unit":"泊","validation":{"min":0}},
+          {"name":"nights","label":"泊数","label_en":"Nights","type":"number","unit":"泊","validation":{"min":0,"validate_nights_from":{"check_in":"check_in_date","check_out":"check_out_date"}}},
           {"name":"fee_estimate","label":"概算費用（円）","label_en":"Estimated Fee","type":"number","unit":"円","validation":{"min":0},"sum_target":"accommodation_fee_estimate"}
         ]},
         {"name":"accommodation_fee_estimate","label":"宿泊費概算合計（円）","label_en":"Total Estimated Accommodation","type":"number","computed":true,"unit":"円","conditional_on":{"field":"has_accommodation","equals":"yes"}},
@@ -63,7 +63,7 @@ VALUES (
           {"name":"accommodation_name","label":"宿泊施設名","label_en":"Hotel / Facility","type":"text","required":false},
           {"name":"check_in_date","label":"チェックイン","label_en":"Check-in","type":"date","required":false},
           {"name":"check_out_date","label":"チェックアウト","label_en":"Check-out","type":"date","required":false,"validation":{"date_after_or_equal":"check_in_date"}},
-          {"name":"nights","label":"泊数","label_en":"Nights","type":"number","unit":"泊","validation":{"min":0}},
+          {"name":"nights","label":"泊数","label_en":"Nights","type":"number","unit":"泊","validation":{"min":0,"validate_nights_from":{"check_in":"check_in_date","check_out":"check_out_date"}}},
           {"name":"amount","label":"金額（円）","label_en":"Amount","type":"number","unit":"円","validation":{"min":0},"sum_target":"accommodation_total"}
         ]},
         {"name":"accommodation_total","label":"宿泊費合計（円）","label_en":"Total Accommodation","type":"number","computed":true,"unit":"円"},
@@ -71,8 +71,8 @@ VALUES (
         {"name":"expressway_toll","label":"高速料金立替（円）","label_en":"Highway Toll","type":"number","required":false,"unit":"円","validation":{"min":0},"conditional_on":{"field":"transport_mode","equals":["car","rental"]}},
         {"name":"routes","label":"実費交通費明細","label_en":"Actual Route Table","type":"route_entry","required":false,"show_mode":true,"show_date":true,"options":[{"value":"shinkansen","label_ja":"新幹線"},{"value":"airplane","label_ja":"飛行機"},{"value":"train","label_ja":"在来線・地下鉄"},{"value":"bus","label_ja":"バス"},{"value":"taxi","label_ja":"タクシー"},{"value":"car","label_ja":"営業車"},{"value":"rental","label_ja":"レンタルカー"},{"value":"other","label_ja":"その他"}],"conditional_on":{"field":"transport_mode","equals":["shinkansen","airplane","train","bus","taxi","car","rental"]}},
         {"name":"transport_total","label":"交通費合計（円）","label_en":"Total Transportation","type":"number","computed":true,"sum_target":"routes","sum_field":"fare","unit":"円"},
-        {"name":"daily_allowances","label":"日当明細","label_en":"Per Diem Entries","type":"repeat_group","required":false,"min_rows":0,"add_label":"日を追加","add_label_en":"Add Day","helper_text":"出発日〜帰着日の各日を追加し日当区分を選択してください","fields":[
-          {"name":"travel_date","label":"日付","label_en":"Date","type":"date","required":false},
+        {"name":"daily_allowances","label":"日当明細","label_en":"Per Diem Entries","type":"repeat_group","required":false,"min_rows":0,"add_label":"日を追加","add_label_en":"Add Day","helper_text":"出発日〜帰着日の各日を追加し日当区分を選択してください","unique_rows_by":"travel_date","fields":[
+          {"name":"travel_date","label":"日付","label_en":"Date","type":"date","required":false,"validation":{"date_after_or_equal":"departure_date","date_before_or_equal":"return_date"}},
           {"name":"day_type","label":"日当区分","label_en":"Allowance","type":"select","required":false,"options":[{"value":"0","label_ja":"0（なし）","label_en":"0 (none)"},{"value":"0.5","label_ja":"0.5（半日）","label_en":"0.5 (half)"},{"value":"1","label_ja":"1（全日）","label_en":"1 (full)"}],"sum_target":"daily_allowance_days_total"}
         ]},
         {"name":"daily_allowance_days_total","label":"日当合計日数","label_en":"Total Per Diem Days","type":"number","computed":true,"unit":"日","validation":{"max_from_field":"trip_duration"}},

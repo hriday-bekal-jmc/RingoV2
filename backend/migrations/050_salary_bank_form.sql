@@ -44,7 +44,8 @@ SELECT
         "label_en":    "Full Name (Kana)",
         "type":        "text",
         "required":    true,
-        "placeholder": "例）ヤマダ タロウ"
+        "placeholder": "例）ヤマダ タロウ",
+        "validation":  { "regex": "^[ァ-ヶーｦ-ﾟ\\s　]+$" }
       },
       {
         "name":        "bank_name",
@@ -106,7 +107,8 @@ SELECT
         "label_en":    "Account Holder Name",
         "type":        "text",
         "required":    true,
-        "placeholder": "フリガナ（カタカナ）で入力してください"
+        "placeholder": "フリガナ（カタカナ）で入力してください",
+        "validation":  { "regex": "^[ァ-ヶーｦ-ﾟ\\s　]+$" }
       },
       {
         "name":        "remarks",
