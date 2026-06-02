@@ -71,6 +71,21 @@ const schema = z.object({
   SMTP_PASS:   z.string().optional(),
   EMAIL_FROM:  z.string().optional(), // e.g. "RINGO <noreply@example.com>"
 
+  // ── S3 Backup ──
+  // All optional — backup is skipped when not configured.
+  // Bucket should be write-only for the EC2 IAM role (no DeleteObject).
+  BACKUP_S3_BUCKET:  z.string().optional(), // e.g. "ringo-backups"
+  BACKUP_S3_REGION:  z.string().default('ap-northeast-1'),
+  BACKUP_S3_PREFIX:  z.string().default('db'),  // key prefix inside bucket
+  // Retention: backups older than this many days are deleted (default 30)
+  BACKUP_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+  // Cron schedule — default 02:00 every day (server local time)
+  BACKUP_CRON: z.string().default('0 2 * * *'),
+  // Optional: encryption passphrase for AES-256 before upload (highly recommended)
+  BACKUP_ENCRYPTION_KEY: z.string().min(16).optional(),
+  // Optional: alert email on backup failure (uses SMTP config above)
+  BACKUP_ALERT_EMAIL: z.string().email().optional(),
+
   // ── Misc ──
   SUPER_ADMIN_EMAIL: z.string().email().optional(),
   SUPER_ADMIN_EMAILS: z.string().optional(),

@@ -55,7 +55,7 @@ const STATUS_CLS: Record<string, string> = {
   CANCELLED:          'badge-draft',
 };
 
-const ALL_STATUS_KEYS = ['ALL', 'DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PENDING_SETTLEMENT', 'REJECTED', 'RETURNED', 'COMPLETED'];
+const ALL_STATUS_KEYS = ['ALL', 'DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PENDING_SETTLEMENT', 'SETTLEMENT_APPROVED', 'REJECTED', 'RETURNED', 'COMPLETED'];
 
 export default function History() {
   const [searchParams] = useSearchParams();

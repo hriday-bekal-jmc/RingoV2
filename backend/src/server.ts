@@ -16,6 +16,7 @@ import { invalidateCachePattern } from './services/cache';
 
 import { scheduleOrphanCleanup } from './services/orphanCleanup';
 import { scheduleDriveAudit } from './services/driveAudit';
+import { scheduleBackup } from './workers/backupWorker';
 
 import authRoutes from './routes/authRoutes';
 import templateRoutes from './routes/templateRoutes';
@@ -145,6 +146,7 @@ async function start(): Promise<void> {
 
   scheduleOrphanCleanup();
   scheduleDriveAudit();
+  scheduleBackup();
 
   // Bust all admin reference caches on startup — ensures templates/routes/depts
   // reflect the latest migration output without waiting for TTL expiry.
