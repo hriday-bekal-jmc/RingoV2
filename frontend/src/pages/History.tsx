@@ -30,6 +30,8 @@ interface Application {
   has_settlement?: boolean;
   pattern_id?: number;
   created_at: string;
+  current_step?: number | null;
+  total_steps?: number;
   row_preview?: RowPreview | null;
 }
 
@@ -353,6 +355,16 @@ export default function History() {
                           {app.row_preview.text.value}
                         </p>
                       )}
+                      {(app.status === 'PENDING_APPROVAL' || app.status === 'PENDING_SETTLEMENT') && app.current_step != null && app.total_steps ? (
+                        <div className="flex items-center gap-1.5 mt-1">
+                          {Array.from({ length: app.total_steps }).map((_, idx) => {
+                            const n = idx + 1;
+                            const cur = app.current_step!;
+                            return <span key={idx} className={`w-2 h-2 rounded-full ${n < cur ? 'bg-emerald-400' : n === cur ? 'bg-ringo-500 ring-2 ring-ringo-200' : 'bg-surface-200'}`} />;
+                          })}
+                          <span className="text-[10px] text-warmgray-400 ml-1">{app.current_step}/{app.total_steps}</span>
+                        </div>
+                      ) : null}
                       <p className="text-[11px] text-warmgray-400 mt-0.5">
                         {app.application_number ? (
                           <span className="font-mono mr-2">{app.application_number}</span>

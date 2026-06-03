@@ -82,7 +82,8 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
          (SELECT COUNT(*) FROM approval_steps
           WHERE application_id = a.id AND stage = s.stage
             AND step_order / 100 = s.step_order / 100
-            AND step_order <= s.step_order)::int AS current_step,
+            AND step_order <= s.step_order
+            AND status != 'CANCELLED')::int AS current_step,
          s.stage AS current_stage,
          s.label AS current_step_label,
          s.action_type AS current_step_action,
@@ -90,7 +91,8 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
          approver.avatar_url AS current_approver_avatar,
          (SELECT COUNT(*) FROM approval_steps
           WHERE application_id = a.id AND stage = s.stage
-            AND step_order / 100 = s.step_order / 100)::int AS total_steps,
+            AND step_order / 100 = s.step_order / 100
+            AND status != 'CANCELLED')::int AS total_steps,
          COUNT(*) OVER() AS total_count
        FROM applications a
        JOIN form_templates t ON a.template_id = t.id
@@ -180,7 +182,8 @@ router.get('/pending/proxy', async (req: Request, res: Response): Promise<void> 
          (SELECT COUNT(*) FROM approval_steps
           WHERE application_id = a.id AND stage = ps.stage
             AND step_order / 100 = ps.step_order / 100
-            AND step_order <= ps.step_order)::int AS current_step,
+            AND step_order <= ps.step_order
+            AND status != 'CANCELLED')::int AS current_step,
          ps.stage       AS current_stage,
          ps.label       AS current_step_label,
          ps.action_type AS current_step_action,
@@ -188,7 +191,8 @@ router.get('/pending/proxy', async (req: Request, res: Response): Promise<void> 
          approver.avatar_url AS current_approver_avatar,
          (SELECT COUNT(*) FROM approval_steps
           WHERE application_id = a.id AND stage = ps.stage
-            AND step_order / 100 = ps.step_order / 100)::int AS total_steps,
+            AND step_order / 100 = ps.step_order / 100
+            AND status != 'CANCELLED')::int AS total_steps,
          COUNT(*) OVER() AS total_count
        FROM applications a
        JOIN form_templates t ON a.template_id = t.id

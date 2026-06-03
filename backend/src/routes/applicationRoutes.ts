@@ -1186,12 +1186,14 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
              AND stage = ps.stage
              AND step_order / 100 = ps.batch
              AND step_order <= ps.step_order
+             AND status != 'CANCELLED'
          ), 0) AS current_step,
          COALESCE((
            SELECT COUNT(*)::int FROM approval_steps
            WHERE application_id = a.id
              AND stage = ps.stage
              AND step_order / 100 = ps.batch
+             AND status != 'CANCELLED'
          ), 0) AS total_steps
        FROM applications a
        JOIN form_templates t ON a.template_id = t.id

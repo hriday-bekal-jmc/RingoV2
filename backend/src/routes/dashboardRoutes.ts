@@ -13,6 +13,7 @@
 
 import { Router, Request, Response } from 'express';
 import { query } from '../config/db';
+import { extractRowPreview } from '../services/rowPreview';
 import { redis } from '../config/redis';
 import { isAdminUser, requireAuth } from '../middlewares/authMiddleware';
 
@@ -106,23 +107,29 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
            t.title_ja AS template_name, t.title AS template_title_en, t.code AS template_code,
            t.settlement_schema IS NOT NULL AS has_settlement,
            t.pattern_id,
-           -- current_step = 1-indexed rank within the current batch (excludes skipped-at-start steps)
+           a.form_data, a.settlement_data,
+           COALESCE(v.schema_definition, t.schema_definition) AS schema_definition,
+           COALESCE(v.settlement_schema, t.settlement_schema) AS settlement_schema_def,
+           -- current_step = 1-indexed rank within the current batch (excludes skipped-at-start steps and cancelled)
            COALESCE((
              SELECT COUNT(*)::int FROM approval_steps
              WHERE application_id = a.id
                AND stage = ps.stage
                AND step_order / 100 = ps.batch
                AND step_order <= ps.step_order
+               AND status != 'CANCELLED'
            ), 0) AS current_step,
-           -- total_steps = count of steps in the current batch only (not across rounds)
+           -- total_steps = count of non-cancelled steps in the current batch only
            COALESCE((
              SELECT COUNT(*)::int FROM approval_steps
              WHERE application_id = a.id
                AND stage = ps.stage
                AND step_order / 100 = ps.batch
+               AND status != 'CANCELLED'
            ), 0) AS total_steps
          FROM applications a
          JOIN form_templates t ON a.template_id = t.id
+         LEFT JOIN form_template_versions v ON v.id = a.template_version_id
          -- resolve the current pending step once; drives both current_step + total_steps
          LEFT JOIN LATERAL (
            SELECT s.step_order, s.step_order / 100 AS batch,
@@ -186,11 +193,13 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
         created_at:         r.created_at,
         submitted_at:       r.submitted_at,
         template_name:      r.template_name,
+        template_title_en:  r.template_title_en,
         template_code:      r.template_code,
         has_settlement:     r.has_settlement,
         pattern_id:         Number(r.pattern_id),
         current_step:       r.current_step !== null ? Number(r.current_step) : null,
         total_steps:        Number(r.total_steps),
+        row_preview:        extractRowPreview(r.schema_definition, r.form_data, r.settlement_schema_def, r.settlement_data),
       })),
     };
 

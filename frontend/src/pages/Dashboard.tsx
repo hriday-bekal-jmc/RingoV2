@@ -281,8 +281,16 @@ function UnsettledDrawer({ onClose }: { onClose: () => void }) {
 }
 
 // ── Shared recent apps list ───────────────────────────────────────────────────
+interface RecentApp {
+  id: string; template_code?: string; template_name: string; template_title_en?: string | null;
+  status: string; created_at: string; application_number?: string | null;
+  has_settlement?: boolean; pattern_id?: number;
+  current_step?: number | null; total_steps?: number;
+  row_preview?: { text?: { label: string; label_en?: string | null; value: string } | null; numbers?: Array<{ value: number | null; compare_value?: number | null; is_different?: boolean }> } | null;
+}
+
 function RecentAppsList({ apps, lang, dateLocale, t }: {
-  apps: Array<{ id: string; template_code?: string; template_name: string; template_title_en?: string | null; status: string; created_at: string }>;
+  apps: RecentApp[];
   lang: 'en' | 'ja'; dateLocale: string; t: (k: any) => string;
 }) {
   const STATUS_CLS: Record<string, string> = {
@@ -290,32 +298,95 @@ function RecentAppsList({ apps, lang, dateLocale, t }: {
     REJECTED: 'badge-rejected', RETURNED: 'badge-returned',
     PENDING_SETTLEMENT: 'badge-mustard', SETTLEMENT_APPROVED: 'badge-teal', COMPLETED: 'badge-approved',
   };
-  const STATUS_LABEL_MAP = (s: string, t: (k: any) => string): string => ({
+  const STATUS_LABEL_MAP = (s: string): string => ({
     DRAFT: t('status_draft'), PENDING_APPROVAL: t('status_pending'), APPROVED: t('status_approved'),
     REJECTED: t('status_rejected'), RETURNED: t('status_returned'),
     PENDING_SETTLEMENT: t('status_pending_settle'), SETTLEMENT_APPROVED: t('status_settle_approved'),
     COMPLETED: t('status_completed'),
   }[s] ?? s);
 
+  const STATUS_DOT: Record<string, string> = {
+    DRAFT: 'bg-warmgray-400', PENDING_APPROVAL: 'bg-amber-400',
+    PENDING_SETTLEMENT: 'bg-teal-400', APPROVED: 'bg-emerald-400',
+    COMPLETED: 'bg-emerald-400', REJECTED: 'bg-red-400', RETURNED: 'bg-amber-500',
+  };
+
+  const phaseBadge = (app: RecentApp): { text: string; cls: string } | null => {
+    if (!app.has_settlement) return null;
+    if (app.status === 'PENDING_APPROVAL')  return { text: t('phase_ringi'),          cls: 'bg-ringo-50 text-ringo-600 border border-ringo-200/60' };
+    if (app.status === 'APPROVED')           return { text: t('phase_waiting_settle'), cls: 'bg-amber-50 text-amber-600 border border-amber-200/60' };
+    if (app.status === 'PENDING_SETTLEMENT') return { text: t('phase_settlement'),     cls: 'bg-teal-50 text-teal-600 border border-teal-200/60' };
+    return null;
+  };
+
   return (
     <div className="card !p-0 overflow-hidden">
       <ul className="divide-y divide-white/30">
-        {apps.slice(0, 5).map((app, i) => (
-          <li key={app.id} className="animate-fade-up" style={{ animationDelay: `${i * 40}ms` }}>
-            <Link to={`/applications/${app.id}`} className="flex items-center gap-3 px-5 py-3.5 hover:bg-white/40 transition-colors">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-sm font-semibold text-warmgray-800 truncate">
-                    {templateLabel(app.template_code, lang, app.template_name, app.template_title_en)}
-                  </p>
-                  <span className={STATUS_CLS[app.status] ?? 'badge-draft'}>{STATUS_LABEL_MAP(app.status, t)}</span>
+        {apps.slice(0, 5).map((app, i) => {
+          const phase = phaseBadge(app);
+          const isPending = app.status === 'PENDING_APPROVAL' || app.status === 'PENDING_SETTLEMENT';
+          return (
+            <li key={app.id} className="animate-fade-up" style={{ animationDelay: `${i * 40}ms` }}>
+              <Link to={`/applications/${app.id}`} className="flex items-center gap-3 px-5 py-3.5 hover:bg-white/40 transition-colors">
+                {/* Status dot — mirrors History.tsx */}
+                <div className={`w-2 h-2 rounded-full shrink-0 ${STATUS_DOT[app.status] ?? 'bg-warmgray-300'}`} />
+
+                <div className="flex-1 min-w-0">
+                  {/* Row 1: name + badges */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-semibold text-warmgray-800 truncate">
+                      {templateLabel(app.template_code, lang, app.template_name, app.template_title_en)}
+                    </p>
+                    <PatternBadge patternId={app.pattern_id} />
+                    <span className={STATUS_CLS[app.status] ?? 'badge-draft'}>{STATUS_LABEL_MAP(app.status)}</span>
+                    {phase && <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${phase.cls}`}>{phase.text}</span>}
+                  </div>
+                  {/* Row 2: show_in_row subject */}
+                  {app.row_preview?.text && (
+                    <p className="text-[11px] text-warmgray-600 mt-0.5 truncate font-medium">
+                      {lang === 'en' ? (app.row_preview.text.label_en ?? app.row_preview.text.label) : app.row_preview.text.label}
+                      {': '}{app.row_preview.text.value}
+                    </p>
+                  )}
+                  {/* Row 3: step dots for pending, else app number + date */}
+                  {isPending && app.current_step != null && app.total_steps ? (
+                    <div className="flex items-center gap-1.5 mt-1">
+                      {Array.from({ length: app.total_steps }).map((_, idx) => {
+                        const n = idx + 1; const cur = app.current_step!;
+                        return <span key={idx} className={`w-2 h-2 rounded-full ${n < cur ? 'bg-emerald-400' : n === cur ? 'bg-ringo-500 ring-2 ring-ringo-200' : 'bg-surface-200'}`} />;
+                      })}
+                      <span className="text-[10px] text-warmgray-400 ml-1">{app.current_step}/{app.total_steps}</span>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-warmgray-400 mt-0.5">
+                      {app.application_number && <span className="font-mono mr-2">{app.application_number}</span>}
+                      {new Date(app.created_at).toLocaleDateString(dateLocale, { year: 'numeric', month: 'long', day: 'numeric' })}
+                    </p>
+                  )}
                 </div>
-                <p className="text-[11px] text-warmgray-400 mt-0.5">{new Date(app.created_at).toLocaleDateString(dateLocale)}</p>
-              </div>
-              <svg className="w-3.5 h-3.5 text-warmgray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
-            </Link>
-          </li>
-        ))}
+
+                {/* Amounts */}
+                {app.row_preview?.numbers && app.row_preview.numbers.length > 0 && (
+                  <div className="hidden sm:flex flex-col items-end gap-0.5 shrink-0">
+                    {app.row_preview.numbers.map((n, ni) => (
+                      <div key={ni} className="flex items-baseline gap-1">
+                        {n.compare_value != null && (
+                          <span className={`text-[10px] tabular-nums ${n.is_different ? 'text-amber-500' : 'text-warmgray-400'}`}>
+                            {n.compare_value.toLocaleString()} →
+                          </span>
+                        )}
+                        <span className={`text-xs font-bold tabular-nums ${n.is_different ? 'text-amber-600' : 'text-warmgray-700'}`}>
+                          {n.value !== null ? n.value.toLocaleString() : '—'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <svg className="w-3.5 h-3.5 text-warmgray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
+              </Link>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
