@@ -194,3 +194,10 @@ WHERE ft.code = 'RECREATION'
   AND NOT EXISTS (
     SELECT 1 FROM form_template_versions WHERE template_id = ft.id
   );
+
+-- Sync active version so form builder matches
+UPDATE form_template_versions ftv
+SET schema_definition = ft.schema_definition,
+    settlement_schema = ft.settlement_schema
+FROM form_templates ft
+WHERE ft.code = 'RECREATION' AND ftv.template_id = ft.id AND ftv.is_active = TRUE;

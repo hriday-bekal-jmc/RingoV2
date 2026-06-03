@@ -53,14 +53,23 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-// GET /templates/:code — get full template schema by code
+// GET /templates/:code — get full template schema by code.
+// Schema comes from the active form_template_versions row (same source as
+// the form builder and application submit). Falls back to form_templates
+// base columns for templates that pre-date the versioning system.
 router.get('/:code', async (req: Request, res: Response): Promise<void> => {
   try {
     const code = req.params['code'] as string;
     const result = await query(
-      `SELECT id, code, title, title_ja, pattern_id, schema_definition, settlement_schema,
-              component_type, icon, gradient, description_ja, description_en
-       FROM form_templates WHERE code = $1 AND is_active = TRUE`,
+      `SELECT t.id, t.code, t.title, t.title_ja, t.pattern_id,
+              t.component_type, t.icon, t.gradient, t.description_ja, t.description_en,
+              COALESCE(v.schema_definition,   t.schema_definition)   AS schema_definition,
+              COALESCE(v.settlement_schema,   t.settlement_schema)   AS settlement_schema
+       FROM form_templates t
+       LEFT JOIN form_template_versions v
+         ON  v.template_id = t.id
+         AND v.is_active   = TRUE
+       WHERE t.code = $1 AND t.is_active = TRUE`,
       [code.toUpperCase()],
     );
     if (result.rows.length === 0) {

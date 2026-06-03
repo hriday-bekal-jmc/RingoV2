@@ -85,3 +85,13 @@ VALUES (
       settlement_schema  = EXCLUDED.settlement_schema,
       title              = EXCLUDED.title,
       title_ja           = EXCLUDED.title_ja;
+
+-- Patch active template version so new applications pick up the updated schema
+-- (form_template_versions is what the app reads at submit time)
+UPDATE form_template_versions ftv
+SET schema_definition  = ft.schema_definition,
+    settlement_schema  = ft.settlement_schema
+FROM form_templates ft
+WHERE ft.code         = 'EXPENSE_CLAIM'
+  AND ftv.template_id = ft.id
+  AND ftv.is_active   = TRUE;

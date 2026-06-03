@@ -58,3 +58,10 @@ SET settlement_schema = '{
     ]
 }'::jsonb
 WHERE code = 'EXPENSE_CLAIM';
+
+-- Sync active version so form builder matches
+UPDATE form_template_versions ftv
+SET schema_definition = ft.schema_definition,
+    settlement_schema = ft.settlement_schema
+FROM form_templates ft
+WHERE ft.code = 'EXPENSE_CLAIM' AND ftv.template_id = ft.id AND ftv.is_active = TRUE;

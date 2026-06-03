@@ -11,7 +11,7 @@ INSERT INTO form_templates (
   icon, gradient, description_ja, description_en,
   app_number_prefix, app_number_digits
 )
-SELECT
+VALUES (
   1,
   'SALARY_BANK',
   'Salary Bank Account Change',
@@ -39,13 +39,18 @@ SELECT
         ]
       },
       {
-        "name":        "employee_name_kana",
-        "label":       "氏名（フリガナ）",
-        "label_en":    "Full Name (Kana)",
-        "type":        "text",
-        "required":    true,
-        "placeholder": "例）ヤマダ タロウ",
-        "validation":  { "regex": "^[ァ-ヶーｦ-ﾟ\\s　]+$" }
+        "name":     "doc_title_new",
+        "label":    "給与振込口座届",
+        "label_en": "Salary Bank Account Registration",
+        "type":     "header",
+        "conditional_on": { "field": "change_type", "equals": "new" }
+      },
+      {
+        "name":     "doc_title_change",
+        "label":    "給与振込口座変更届",
+        "label_en": "Salary Bank Account Change",
+        "type":     "header",
+        "conditional_on": { "field": "change_type", "equals": "change" }
       },
       {
         "name":        "bank_name",
@@ -129,11 +134,11 @@ SELECT
   'Submit when registering a new or changing an existing salary deposit bank account.',
   'BNK',
   6
-WHERE NOT EXISTS (
-  SELECT 1 FROM form_templates WHERE code = 'SALARY_BANK'
-);
+)
+ON CONFLICT (code) DO UPDATE
+  SET schema_definition = EXCLUDED.schema_definition;
 
--- Initial active version
+-- Initial active version (fresh install only)
 INSERT INTO form_template_versions (template_id, version_number, schema_definition, settlement_schema, is_active, notes)
 SELECT ft.id, 1, ft.schema_definition, ft.settlement_schema, TRUE, 'Initial version'
 FROM form_templates ft
@@ -141,3 +146,11 @@ WHERE ft.code = 'SALARY_BANK'
   AND NOT EXISTS (
     SELECT 1 FROM form_template_versions WHERE template_id = ft.id
   );
+
+-- Patch active template version to match updated schema
+UPDATE form_template_versions ftv
+SET schema_definition = ft.schema_definition
+FROM form_templates ft
+WHERE ft.code       = 'SALARY_BANK'
+  AND ftv.template_id = ft.id
+  AND ftv.is_active   = TRUE;

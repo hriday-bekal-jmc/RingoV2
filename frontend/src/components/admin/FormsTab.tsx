@@ -21,6 +21,29 @@ import InlineConfirm from '../common/InlineConfirm';
 // Renderers (fieldLabel, t()) already fall back to JA when EN is missing, so
 // non-dev users toggling English see JA strings until the dev adds a real EN
 // translation via /dev/i18n. This lets the dev page detect "missing EN" cleanly.
+// Normalize options: plain strings ["交通費", ...] → {value, label_ja, label_en} objects.
+// Migrations often store options as plain strings; the builder always needs objects.
+function normalizeOptions(opts: unknown): FieldOption[] {
+  if (!Array.isArray(opts)) return [];
+  return opts.map((o) => {
+    if (typeof o === 'string') return { value: o, label_ja: o, label_en: o };
+    const obj = o as Record<string, string>;
+    return {
+      value:    obj.value    ?? obj.label_ja ?? obj.label ?? '',
+      label_ja: obj.label_ja ?? obj.label    ?? obj.value ?? '',
+      label_en: obj.label_en ?? obj.label_ja ?? obj.value ?? '',
+    };
+  });
+}
+
+function normalizeFields(fields: FormField[]): FormField[] {
+  return fields.map((f) => ({
+    ...f,
+    options: f.options ? normalizeOptions(f.options) : undefined,
+    fields:  f.fields  ? normalizeFields(f.fields)   : undefined,
+  }));
+}
+
 function mirrorFields(fields: FormField[]): FormField[] {
   return fields;
 }
@@ -445,8 +468,8 @@ function FormBuilder({
     setAppNumberPrefix(detail.template.app_number_prefix ?? 'RNG');
     setAppNumberDigits(detail.template.app_number_digits ?? 6);
     setAllowedDepts(detail.allowed_dept_ids ?? []);
-    setFields(activeVersion?.schema_definition?.fields ?? []);
-    setSettleFields(activeVersion?.settlement_schema?.fields ?? []);
+    setFields(normalizeFields(activeVersion?.schema_definition?.fields ?? []));
+    setSettleFields(normalizeFields(activeVersion?.settlement_schema?.fields ?? []));
     hydrated[1](true);
   }
 
@@ -2206,7 +2229,7 @@ function OptionsEditor({
                 ...(o.value ? {} : { value: genValue() }),
               })}
               className="input text-xs flex-1"
-              placeholder="日本語"
+              placeholder={lang === 'en' ? 'Option name' : 'オプション名'}
             />
             <button onClick={() => remove(i)} className="text-red-400 hover:text-red-600 text-sm px-1.5">✕</button>
           </div>

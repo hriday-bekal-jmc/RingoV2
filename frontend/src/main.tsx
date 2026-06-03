@@ -43,6 +43,14 @@ const queryClient = new QueryClient({
   },
 });
 
+// Prevent scroll wheel from changing number input values.
+// Browser default: focused number input + scroll = value change (silent, confusing).
+// Fix: blur the input on wheel so the page scrolls normally instead.
+document.addEventListener('wheel', () => {
+  const el = document.activeElement as HTMLInputElement | null;
+  if (el?.tagName === 'INPUT' && el.type === 'number') el.blur();
+}, { passive: true });
+
 // document.getElementById('root') の後ろの "!" は「絶対にnullではない」とTypeScriptに伝えるマークです
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
