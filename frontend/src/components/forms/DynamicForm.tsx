@@ -124,8 +124,9 @@ export default function DynamicForm({
   submitLabel,
   externalValues,
 }: DynamicFormProps) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [isDrafting, setIsDrafting] = useState(false);
+  const [validationMsg, setValidationMsg] = useState<string | null>(null);
   const submittingRef = useRef(false); // prevent double-submit on rapid click
 
   const activeSchema = isSettlementPhase ? template.settlement_schema : template.schema_definition;
@@ -247,6 +248,7 @@ export default function DynamicForm({
   const handleFormSubmit = async (data: Record<string, unknown>) => {
     if (submittingRef.current) return;
     submittingRef.current = true;
+    setValidationMsg(null);
     try {
       await onSubmit({
         template_id: template.id,
@@ -256,6 +258,17 @@ export default function DynamicForm({
     } finally {
       submittingRef.current = false;
     }
+  };
+
+  const handleInvalid = () => {
+    setValidationMsg(lang === 'en'
+      ? 'Please fix the highlighted fields before submitting.'
+      : '入力内容に不備があります。赤いフィールドを確認してください。'
+    );
+    // Scroll to first error field
+    setTimeout(() => {
+      document.querySelector('[data-field-error="true"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
   };
 
   const handleDraftClick = async () => {
@@ -289,13 +302,21 @@ export default function DynamicForm({
   };
 
   return (
-    <form onSubmit={handleSubmit(handleFormSubmit)} className="card space-y-6">
+    <form onSubmit={handleSubmit(handleFormSubmit, handleInvalid)} className="card space-y-6">
       <div className="border-b border-white/30 pb-5">
         <h2 className="text-xl font-bold text-warmgray-800">{template.title_ja}</h2>
         <p className="text-xs text-warmgray-400 mt-1 uppercase tracking-wide font-medium">
           {isSettlementPhase ? '精算フェーズ / Settlement' : '稟議フェーズ / Ringi'}
         </p>
       </div>
+
+      {validationMsg && (
+        <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-red-50/80 border border-red-200/70 text-red-700 text-sm animate-fade-up">
+          <svg className="w-4 h-4 mt-0.5 shrink-0 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+          <span>{validationMsg}</span>
+          <button type="button" onClick={() => setValidationMsg(null)} className="ml-auto text-red-400 hover:text-red-600 shrink-0">✕</button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
         {activeFields.filter((f) => !f.hidden).map((field) => (

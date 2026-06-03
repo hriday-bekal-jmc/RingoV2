@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import RingoLoader from '../components/common/RingoLoader';
+import Toast, { useToast } from '../components/common/Toast';
 import DynamicForm from '../components/forms/DynamicForm';
 import { useLang } from '../context/LanguageContext';
 import { useAuth } from '../context/AuthContext';
@@ -194,8 +195,9 @@ export default function Settlement() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const { user: authUser } = useAuth();
+  const { toast: settleToast, show: showToast, dismiss: dismissToast } = useToast();
 
   const [selectedRouteId, setSelectedRouteId] = useState<string>('');
 
@@ -236,6 +238,10 @@ export default function Settlement() {
       queryClient.invalidateQueries({ queryKey: ['myApplications'] });
       queryClient.invalidateQueries({ queryKey: ['application', id] });
       navigate('/history?settled=1');
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.error ?? err?.message ?? (lang === 'en' ? 'Submission failed' : '精算の提出に失敗しました');
+      showToast(msg, 'error');
     },
   });
 
@@ -280,6 +286,7 @@ export default function Settlement() {
 
   return (
     <Layout title={t('title_settlement')}>
+      {settleToast && <Toast {...settleToast} onDismiss={dismissToast} />}
       <div className="max-w-3xl mx-auto space-y-6">
 
         {/* Header */}

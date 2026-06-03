@@ -1158,7 +1158,7 @@ router.post('/', validateBody(adminSubmitSchema), async (req: Request, res: Resp
 });
 
 // GET /applications — applicant's own list  (paginated)
-// ?limit=25&offset=0&status=DRAFT   (status omit or 'ALL' = no filter)
+// ?limit=25&offset=0&status=DRAFT&q=osaka  (status omit or 'ALL' = no filter; q = free-text search)
 const APP_PAGE_SIZE = 25;
 router.get('/', async (req: Request, res: Response): Promise<void> => {
   const limit  = parsePageLimit(req.query.limit, APP_PAGE_SIZE, 100);
@@ -1166,6 +1166,10 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
   const status = ((req.query.status as string | undefined) ?? 'ALL').toUpperCase();
   const cursor = decodeCursor(req.query.cursor);
   const includeArchived = req.query.include_archived === 'true';
+  // Free-text search: application_number, form_data subject, template name
+  // Trimmed, lowercased, min 2 chars enforced client-side (skip empty/short server-side too)
+  const rawQ = ((req.query.q as string | undefined) ?? '').trim();
+  const searchQ = rawQ.length >= 2 ? rawQ : null;
 
   try {
     const result = await query(
@@ -1204,9 +1208,16 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
            $3::timestamptz IS NULL
            OR (a.created_at, a.id) < ($3::timestamptz, $4::uuid)
          )
+         AND (
+           $8::text IS NULL
+           OR a.application_number ILIKE '%' || $8 || '%'
+           OR (a.form_data->>'subject') ILIKE '%' || $8 || '%'
+           OR t.title_ja ILIKE '%' || $8 || '%'
+           OR t.title ILIKE '%' || $8 || '%'
+         )
        ORDER BY a.created_at DESC, a.id DESC
        LIMIT $5 OFFSET $6`,
-      [req.user!.id, status, cursor?.created_at ?? null, cursor?.id ?? null, limit + 1, cursor ? 0 : offset, includeArchived],
+      [req.user!.id, status, cursor?.created_at ?? null, cursor?.id ?? null, limit + 1, cursor ? 0 : offset, includeArchived, searchQ],
     );
     const rows    = result.rows;
     const hasMore = rows.length > limit;
@@ -1299,7 +1310,7 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
 
     const stepsRes = await query(
       `SELECT s.step_order, s.stage, s.status, s.label, s.action_type,
-              s.comment, s.acted_at, u.full_name AS approver_name
+              s.comment, s.acted_at, s.approver_id, u.full_name AS approver_name
        FROM approval_steps s
        LEFT JOIN users u ON s.approver_id = u.id
        WHERE s.application_id = $1
@@ -1307,7 +1318,21 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
       [req.params.id],
     );
 
-    res.json({ ...appRes.rows[0], steps: stepsRes.rows });
+    // can_approve = user has a PENDING step AND no earlier step in the same stage is still PENDING
+    const myPendingStep = stepsRes.rows.find(
+      (s) => s.approver_id === req.user!.id && s.status === 'PENDING',
+    );
+    // PENDING check: same stage, lower order, not cancelled. Null-safe: if stage is null
+    // (legacy pre-stage-migration rows) compare as null === null which is fine — all null-stage
+    // steps share the same implicit "ringi" group, so ordering still applies correctly.
+    const can_approve = !!myPendingStep && !stepsRes.rows.some(
+      (s) => s.stage === myPendingStep.stage &&
+             s.step_order < myPendingStep.step_order &&
+             s.status === 'PENDING' &&
+             s.status !== 'CANCELLED',
+    );
+
+    res.json({ ...appRes.rows[0], steps: stepsRes.rows, can_approve });
   } catch (err) {
     const e = err as { status?: number; message?: string };
     if (e.status) { res.status(e.status).json({ error: e.message }); return; }

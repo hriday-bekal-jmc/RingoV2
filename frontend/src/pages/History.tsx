@@ -76,7 +76,15 @@ export default function History() {
     CANCELLED:          t('status_cancelled'),
   };
 
-  const [statusFilter, setStatusFilter] = useState('ALL');
+  const initialFilter = searchParams.get('filter') ?? 'ALL';
+  const [statusFilter, setStatusFilter] = useState(
+    ALL_STATUS_KEYS.includes(initialFilter) ? initialFilter : 'ALL'
+  );
+  // Re-sync filter when URL changes (e.g. dashboard tile navigation)
+  useEffect(() => {
+    const f = searchParams.get('filter') ?? 'ALL';
+    setStatusFilter(ALL_STATUS_KEYS.includes(f) ? f : 'ALL');
+  }, [searchParams]);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Application | null>(null);
   const [confirmSubmit, setConfirmSubmit] = useState<Application | null>(null);

@@ -7,20 +7,20 @@
    styles, gradients, SVG fills, and box-shadows so the palette stays in one
    place. To re-tone the brand, update here + tailwind.config.js in sync. */
 :root {
-  --ringo-50:  #FBF1EF;
-  --ringo-100: #F4DAD4;
-  --ringo-200: #E8B0A4;
-  --ringo-300: #D67C6B;
-  --ringo-400: #BB4A3B;
-  --ringo-500: #9A2E22;
-  --ringo-600: #7A2D24;
-  --ringo-700: #5A2018;
+  --ringo-50:  #FFF1F0;
+  --ringo-100: #FFD9D7;
+  --ringo-200: #FFB3AF;
+  --ringo-300: #FF8C87;
+  --ringo-400: #FF6460;
+  --ringo-500: #FF4640;
+  --ringo-600: #E03028;
+  --ringo-700: #B82820;
   --ringo-800: #3A1812;
   --ringo-900: #2A1512;
-  /* Semantic gradient — used by Sidebar pill, primary CTAs */
-  --ringo-gradient: linear-gradient(135deg, #5A2018 0%, #9A2E22 60%, #BB4A3B 100%);
-  /* Sidebar bg gradient (Login hero tone) */
-  --ringo-sidebar:  linear-gradient(160deg, #3A1812 0%, #4A1E18 45%, #5A2018 100%);
+  /* Semantic gradient — updated to coral red */
+  --ringo-gradient: linear-gradient(135deg, #B82820 0%, #FF4640 60%, #FF6460 100%);
+  /* Sidebar bg gradient — dark coral red matching #FF4640 brand */
+  --ringo-sidebar:  linear-gradient(160deg, #2C1210 0%, #7A2220 45%, #B82820 100%);
 }
 
 @layer base {
@@ -31,11 +31,11 @@
   body {
     @apply text-warmgray-800 antialiased;
     font-family: 'Inter Tight', 'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic', system-ui, sans-serif;
-    background-color: #EFEBE3;
+    background-color: #FEFBFB;
     background-image:
-      radial-gradient(ellipse at 15% 40%, rgba(154,46,34,0.07) 0px, transparent 55%),
-      radial-gradient(ellipse at 85% 15%, rgba(201,162,39,0.06) 0px, transparent 55%),
-      radial-gradient(ellipse at 60% 85%, rgba(122,45,36,0.05) 0px, transparent 50%);
+      radial-gradient(ellipse at 15% 40%, rgba(255,70,64,0.06) 0px, transparent 55%),
+      radial-gradient(ellipse at 85% 15%, rgba(201,162,39,0.05) 0px, transparent 55%),
+      radial-gradient(ellipse at 60% 85%, rgba(224,48,40,0.04) 0px, transparent 50%);
     background-attachment: fixed;
     font-feature-settings: 'tnum', 'cv11', 'ss01';
     -webkit-font-smoothing: antialiased;
@@ -145,7 +145,7 @@
     background-position: right 10px center;
   }
   .select:focus {
-    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239A2E22' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23FF4640' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
   }
   /* Date input — consistent cross-browser look */
   .input-date {

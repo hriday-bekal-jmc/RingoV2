@@ -27,6 +27,7 @@ interface Step {
   stage: string;
   label: string;
   status: string;
+  approver_id: string | null;
   approver_name: string | null;
   comment: string | null;
   acted_at: string | null;
@@ -41,6 +42,7 @@ interface ApplicationDetail {
   applicant_avatar?: string | null;
   status: string;
   has_settlement: boolean;
+  can_approve: boolean;
   pattern_id?: number;
   form_data: Record<string, any>;
   settlement_data: Record<string, any> | null;
@@ -496,6 +498,40 @@ export default function ApplicationDetail() {
     refetchOnWindowFocus: true,
   });
 
+  // Approval actions (visible when current user is a pending approver)
+  const [approvalComment, setApprovalComment] = useState('');
+  const [approvalAction, setApprovalAction] = useState<'approve' | 'return' | 'reject' | null>(null);
+  const { toast: approvalToast, show: showToast, dismiss: dismissApprovalToast } = useToast();
+
+  const invalidateApp = () => queryClient.invalidateQueries({ queryKey: ['application', id] });
+
+  const approveMutation = useMutation({
+    mutationFn: async (comment: string) => (await apiClient.post(`/approvals/${id}/approve`, { comment })).data,
+    onSuccess: (data) => {
+      showToast(data.completed ? `🎉 ${t('status_completed')}` : data.final ? `✅ ${t('approvals_final_btn')}` : `✅ ${t('toast_approved')}`);
+      setApprovalAction(null); setApprovalComment(''); invalidateApp();
+    },
+    onError: (err: any) => showToast(`${t('toast_approve_fail')}: ${err.message}`, 'error'),
+  });
+  const returnMutation = useMutation({
+    mutationFn: async (comment: string) => (await apiClient.post(`/approvals/${id}/return`, { comment })).data,
+    onSuccess: () => { showToast(`↩ ${t('toast_returned')}`); setApprovalAction(null); setApprovalComment(''); invalidateApp(); },
+    onError: (err: any) => showToast(`${t('toast_return_fail')}: ${err.message}`, 'error'),
+  });
+  const rejectMutation = useMutation({
+    mutationFn: async (comment: string) => (await apiClient.post(`/approvals/${id}/reject`, { comment })).data,
+    onSuccess: () => { showToast(`✕ ${t('toast_rejected')}`); setApprovalAction(null); setApprovalComment(''); invalidateApp(); },
+    onError: (err: any) => showToast(`${t('toast_reject_fail')}: ${err.message}`, 'error'),
+  });
+  const isMutating = approveMutation.isPending || returnMutation.isPending || rejectMutation.isPending;
+
+  const handleApprovalSubmit = () => {
+    if (!approvalAction) return;
+    if (approvalAction === 'approve') approveMutation.mutate(approvalComment);
+    else if (approvalAction === 'return') returnMutation.mutate(approvalComment);
+    else rejectMutation.mutate(approvalComment);
+  };
+
   const STATUS_LABEL: Record<string, string> = {
     PENDING_APPROVAL: t('status_pending'),
     APPROVED:         t('status_approved'),
@@ -711,6 +747,7 @@ export default function ApplicationDetail() {
 
   return (
     <Layout title={t('title_history')}>
+      {approvalToast && <Toast {...approvalToast} onDismiss={dismissApprovalToast} />}
       <button
         onClick={() => navigate(-1)}
         className="md:hidden flex items-center gap-1.5 text-sm font-semibold text-warmgray-500 hover:text-warmgray-800 transition-colors mb-4"
@@ -764,6 +801,48 @@ export default function ApplicationDetail() {
               )}
             </div>
           </div>
+
+          {/* Approval action panel — shown when current user is pending approver */}
+          {app.can_approve && (
+            <div className="card border border-amber-200/70 bg-amber-50/40 space-y-4 animate-fade-up">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-amber-500 text-white flex items-center justify-center text-xs font-bold shrink-0">✓</span>
+                <p className="font-bold text-amber-900 text-sm">{lang === 'en' ? 'Your approval is required' : 'あなたの承認が必要です'}</p>
+              </div>
+              {approvalAction ? (
+                <div className="space-y-3">
+                  <p className="text-xs font-semibold text-warmgray-600">
+                    {approvalAction === 'approve' && (lang === 'en' ? 'Comment (optional)' : 'コメント（任意）')}
+                    {approvalAction === 'return'  && (lang === 'en' ? 'Return reason (required)' : '差し戻し理由（必須）')}
+                    {approvalAction === 'reject'  && (lang === 'en' ? 'Rejection reason (required)' : '却下理由（必須）')}
+                  </p>
+                  <textarea
+                    value={approvalComment}
+                    onChange={(e) => setApprovalComment(e.target.value)}
+                    rows={3}
+                    className="input w-full resize-none text-sm"
+                    placeholder={approvalAction === 'approve' ? (lang === 'en' ? 'Add a comment…' : 'コメントを入力…') : (lang === 'en' ? 'Please provide a reason…' : '理由を入力してください…')}
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleApprovalSubmit}
+                      disabled={isMutating || ((approvalAction === 'return' || approvalAction === 'reject') && !approvalComment.trim())}
+                      className={`btn text-white text-sm ${approvalAction === 'approve' ? 'bg-emerald-600 hover:bg-emerald-700' : approvalAction === 'return' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'} disabled:opacity-50`}
+                    >
+                      {isMutating ? '…' : approvalAction === 'approve' ? (lang === 'en' ? '✓ Approve' : '✓ 承認') : approvalAction === 'return' ? (lang === 'en' ? '↩ Return' : '↩ 差し戻し') : (lang === 'en' ? '✕ Reject' : '✕ 却下')}
+                    </button>
+                    <button onClick={() => { setApprovalAction(null); setApprovalComment(''); }} className="btn btn-ghost text-sm">{lang === 'en' ? 'Cancel' : 'キャンセル'}</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => setApprovalAction('approve')} className="btn bg-emerald-600 text-white hover:bg-emerald-700 text-sm">✓ {lang === 'en' ? 'Approve' : '承認'}</button>
+                  <button onClick={() => setApprovalAction('return')}  className="btn bg-amber-500  text-white hover:bg-amber-600  text-sm">↩ {lang === 'en' ? 'Return' : '差し戻し'}</button>
+                  <button onClick={() => setApprovalAction('reject')}  className="btn bg-red-600    text-white hover:bg-red-700    text-sm">✕ {lang === 'en' ? 'Reject' : '却下'}</button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Settlement prompt (APPROVED + not yet settled) */}
           {app.status === 'APPROVED' && app.settlement_schema && !hasSettlementData && (

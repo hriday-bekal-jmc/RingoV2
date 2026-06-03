@@ -4,20 +4,18 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Deep wine / oxblood red — primary brand color
-        // Tuned to match Login.tsx hero gradient (#2a1512 → #4a1e18 → #7a2d24)
-        // for a darker, more premium feel than the previous orange-terracotta.
+        // Coral red — primary brand color (#FF4640)
         ringo: {
-          50:  '#FBF1EF',
-          100: '#F4DAD4',
-          200: '#E8B0A4',
-          300: '#D67C6B',
-          400: '#BB4A3B',
-          500: '#9A2E22',   // primary — deep terracotta, low chroma
-          600: '#7A2D24',   // login gradient end
-          700: '#5A2018',
-          800: '#3A1812',   // oxblood — dark surfaces (sidebar)
-          900: '#2A1512',   // login gradient start
+          50:  '#FFF1F0',
+          100: '#FFD9D7',
+          200: '#FFB3AF',
+          300: '#FF8C87',
+          400: '#FF6460',
+          500: '#FF4640',   // primary
+          600: '#E03028',
+          700: '#B82820',
+          800: '#3A1812',   // sidebar dark surface (unchanged for contrast)
+          900: '#2A1512',   // darkest — login gradient
         },
         // Warm mustard — accent color
         mustard: {
@@ -43,12 +41,12 @@ export default {
           800: '#28211A',
           900: '#1A140F',
         },
-        // Cream tones
+        // Cream tones — base bg is #FEFBFB
         cream: {
-          50:  '#FFFAF4',
-          100: '#FBF6EE',
-          200: '#F4EFE5',
-          300: '#EDE5D5',
+          50:  '#FEFBFB',
+          100: '#FBF6F6',
+          200: '#F5EDED',
+          300: '#EDE3E3',
         },
         // Neutral surfaces (cool/white)
         surface: {
@@ -86,7 +84,7 @@ export default {
         sm:           '0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)',
         card:         '0 1px 4px rgba(60,40,20,0.07), 0 0 0 1px rgba(60,40,20,0.05)',
         'card-hover': '0 4px 16px rgba(60,40,20,0.11), 0 0 0 1px rgba(60,40,20,0.07)',
-        focus:        '0 0 0 3px rgba(154,46,34,0.20)',
+        focus:        '0 0 0 3px rgba(255,70,64,0.20)',
       },
       borderRadius: {
         xl:   '0.75rem',

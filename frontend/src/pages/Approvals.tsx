@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useScrollEnd } from '../hooks/useScrollEnd';
 import { useDelayedLoading } from '../hooks/useDelayedLoading';
@@ -745,9 +746,15 @@ function DetailModal({ app, onClose, onAction, isMutating, proxyMode = false }: 
 export default function Approvals() {
   const queryClient = useQueryClient();
   const { toast, show: showToast, dismiss } = useToast();
+  const [searchParams] = useSearchParams();
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
   const [systemView, setSystemView] = useState(false);
-  const [proxyView, setProxyView] = useState(false);
+  const [proxyView, setProxyView] = useState(searchParams.get('proxy') === '1');
+
+  // Sync proxy tab when URL param changes
+  useEffect(() => {
+    if (searchParams.get('proxy') === '1') setProxyView(true);
+  }, [searchParams]);
   const [selectedProxyApp, setSelectedProxyApp] = useState<Application | null>(null);
   // ── Selection / bulk-approve state ────────────────────────────────────────
   const [selectionMode, setSelectionMode] = useState(false);

@@ -12,6 +12,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import History from './pages/History';
 import NewApplication from './pages/NewApplication';
+import FormSelector from './pages/FormSelector';
 import ApplicationDetail from './pages/ApplicationDetail';
 import Approvals from './pages/Approvals';
 import Profile from './pages/Profile';
@@ -70,6 +71,15 @@ export default function App() {
 
         {/* 申請履歴 */}
         <Route path="/history" element={<RequireAuth><History /></RequireAuth>} />
+
+        {/* フォーム選択 */}
+        <Route path="/applications/new" element={
+          <RequireAuth>
+            <RequirePermission check={(p) => p.canSubmit}>
+              <FormSelector />
+            </RequirePermission>
+          </RequireAuth>
+        } />
 
         {/* 新規申請 */}
         <Route path="/applications/new/:templateCode" element={

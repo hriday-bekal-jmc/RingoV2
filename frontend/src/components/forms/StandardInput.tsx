@@ -60,6 +60,7 @@ interface FormField {
     min_time?: string;
     max_time?: string;
     step?: number;
+    validate_nights_from?: { check_in: string; check_out: string };
   };
 }
 
@@ -904,7 +905,26 @@ function RepeatGroupInput({
   }, [field.name, setValue, storedRows]);
 
   const updateCell = (rowIndex: number, childName: string, value: unknown) => {
-    setRows((prev) => prev.map((row, i) => i === rowIndex ? { ...row, [childName]: value } : row));
+    setRows((prev) => {
+      const next = prev.map((row, i) => i === rowIndex ? { ...row, [childName]: value } : row);
+      // Auto-calc nights when check-in or check-out date changes
+      const nightsField = childFields.find((f) => f.validation?.validate_nights_from);
+      if (nightsField) {
+        const { check_in: ciKey, check_out: coKey } = nightsField.validation!.validate_nights_from as { check_in: string; check_out: string };
+        if (childName === ciKey || childName === coKey) {
+          const row = next[rowIndex];
+          const ci = String(childName === ciKey ? value : (row[ciKey] ?? ''));
+          const co = String(childName === coKey ? value : (row[coKey] ?? ''));
+          if (ci && co) {
+            const diff = Math.round((new Date(co).getTime() - new Date(ci).getTime()) / 86_400_000);
+            if (diff >= 0) {
+              return next.map((r, i) => i === rowIndex ? { ...r, [nightsField.name]: diff } : r);
+            }
+          }
+        }
+      }
+      return next;
+    });
   };
 
   const addRow = () => {
