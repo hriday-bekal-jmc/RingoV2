@@ -82,7 +82,7 @@ function ActionTile({
     transition-all duration-200 group
     ${disabled
       ? 'bg-warmgray-50/60 border-warmgray-100/60 cursor-default opacity-50'
-      : 'bg-white/60 border-white/70 hover:bg-white hover:shadow-card hover:border-ringo-200/50 hover:-translate-y-0.5 cursor-pointer'
+      : 'bg-white/90 border-warmgray-100/80 shadow-sm hover:shadow-md hover:bg-white hover:border-ringo-200/60 hover:-translate-y-1 cursor-pointer'
     }`;
 
   const inner = (
@@ -92,7 +92,7 @@ function ActionTile({
           {count > 99 ? '99+' : count}
         </span>
       )}
-      <span className={`w-9 h-9 rounded-xl bg-gradient-to-br ${bg} flex items-center justify-center text-base shadow-sm group-hover:scale-110 transition-transform duration-200 shrink-0`}>
+      <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${bg} flex items-center justify-center text-lg shadow-md group-hover:scale-110 group-hover:shadow-lg transition-all duration-200 shrink-0`}>
         {icon}
       </span>
       <span className="text-[11px] font-semibold text-warmgray-600 group-hover:text-ringo-600 transition-colors leading-tight w-full">{label}</span>
@@ -625,14 +625,13 @@ export default function Dashboard() {
                   </button>
                 </div>
                 <Section icon="📊" title={lang === 'en' ? 'Monitor' : '監視'}>
-                  <ActionTile label={lang === 'en' ? 'All Pending' : '全体承認待ち'} count={companyPending} to="/approvals" />
+                  <ActionTile label={lang === 'en' ? 'All Pending' : '全体承認待ち'} count={companyPending} to="/approvals?system=1" />
                   <ActionTile label={lang === 'en' ? 'In Settlement' : '精算承認中'} count={companySettle} to="/accounting" />
-                  <ActionTile label={lang === 'en' ? 'Approval History' : '承認履歴'} to="/approval-history" />
                 </Section>
                 <Section icon="⚙️" title={lang === 'en' ? 'Admin' : '管理'}>
                   <ActionTile label={lang === 'en' ? 'Admin Panel' : '管理パネル'} to="/admin" />
                   <ActionTile label={lang === 'en' ? 'Accounting' : '精算管理'} to="/accounting" />
-                  <ActionTile label={lang === 'en' ? 'All Applications' : '全申請一覧'} to="/admin" />
+                  <ActionTile label={lang === 'en' ? 'All Applications' : '全申請一覧'} to="/admin?tab=applications" />
                 </Section>
               </div>
 

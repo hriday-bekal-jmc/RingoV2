@@ -708,20 +708,26 @@ router.post('/:id/reject', async (req: Request, res: Response): Promise<void> =>
   }
 });
 
-// GET /approvals/history — all steps this user has acted on (approved/rejected/returned)
+// GET /approvals/history — steps acted on (approved/rejected/returned)
+// ?all=true  (admin only) → company-wide; otherwise scoped to req.user
+// ?approver  (admin + all=true) → filter by approver name (ILIKE)
 router.get('/history', async (req: Request, res: Response): Promise<void> => {
-  const userId = req.user!.id;
-  const { stage, status, template_id, date_from, date_to, applicant } = req.query as Record<string, string>;
+  const userId    = req.user!.id;
+  const systemView = isAdminUser(req.user) && req.query.all === 'true';
+  const { stage, status, template_id, date_from, date_to, applicant, approver } = req.query as Record<string, string>;
   const cursor = decodeCursor(req.query.cursor);
 
-  // acted_by = who actually clicked approve — only source of truth
-  // No approver_id fallback: assigned ≠ acted; showing unverified attribution would leak other users' approvals
+  // Personal view: scope to acting user. System view: all actors.
   const conditions: string[] = [
-    "s.acted_by = $1",
     "s.status IN ('APPROVED', 'REJECTED', 'RETURNED')",
   ];
-  const params: unknown[] = [userId];
-  let idx = 2;
+  const params: unknown[] = [];
+  let idx = 1;
+
+  if (!systemView) {
+    conditions.push(`s.acted_by = $${idx++}`);
+    params.push(userId);
+  }
 
   if (stage && stage !== 'ALL') {
     conditions.push(`s.stage = $${idx++}`);
@@ -746,6 +752,10 @@ router.get('/history', async (req: Request, res: Response): Promise<void> => {
   if (applicant) {
     conditions.push(`u_app.full_name ILIKE $${idx++}`);
     params.push(`%${applicant}%`);
+  }
+  if (systemView && approver) {
+    conditions.push(`u_act.full_name ILIKE $${idx++}`);
+    params.push(`%${approver}%`);
   }
   if (cursor) {
     conditions.push(`(s.acted_at, s.id) < ($${idx++}::timestamptz, $${idx++}::uuid)`);
@@ -775,11 +785,13 @@ router.get('/history', async (req: Request, res: Response): Promise<void> => {
         s.acted_at,
         u_app.full_name AS applicant_name,
         u_app.avatar_url AS applicant_avatar,
+        u_act.full_name AS approver_name,
         a.status AS app_status
       FROM approval_steps s
       JOIN applications a ON s.application_id = a.id
       JOIN form_templates t ON a.template_id = t.id
       LEFT JOIN users u_app ON a.applicant_id = u_app.id
+      LEFT JOIN users u_act ON s.acted_by = u_act.id
       WHERE ${conditions.join(' AND ')}
       ORDER BY s.acted_at DESC NULLS LAST, s.id DESC
       LIMIT $${limitIdx} OFFSET $${offsetIdx}`;

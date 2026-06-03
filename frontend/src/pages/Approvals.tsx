@@ -748,12 +748,13 @@ export default function Approvals() {
   const { toast, show: showToast, dismiss } = useToast();
   const [searchParams] = useSearchParams();
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
-  const [systemView, setSystemView] = useState(false);
+  const [systemView, setSystemView] = useState(searchParams.get('system') === '1');
   const [proxyView, setProxyView] = useState(searchParams.get('proxy') === '1');
 
-  // Sync proxy tab when URL param changes
+  // Sync view tabs when URL params change
   useEffect(() => {
     if (searchParams.get('proxy') === '1') setProxyView(true);
+    if (searchParams.get('system') === '1') setSystemView(true);
   }, [searchParams]);
   const [selectedProxyApp, setSelectedProxyApp] = useState<Application | null>(null);
   // ── Selection / bulk-approve state ────────────────────────────────────────
@@ -951,17 +952,16 @@ export default function Approvals() {
             {isAdmin && (
               <button
                 onClick={toggleSystemView}
-                title={systemView ? (lang === 'en' ? 'Switch to my approvals' : '自分の承認に戻す') : (lang === 'en' ? 'View all system approvals' : 'システム全体を表示')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all duration-150 ${
                   systemView
-                    ? 'bg-warmgray-800 text-white border-warmgray-700 shadow-sm'
-                    : 'bg-white/60 text-warmgray-500 border-white/80 hover:bg-white/90 hover:text-warmgray-800'
+                    ? 'bg-white/60 text-warmgray-500 border-white/80 hover:bg-white/90 hover:text-warmgray-800'
+                    : 'bg-warmgray-800 text-white border-warmgray-700 shadow-sm hover:bg-warmgray-700'
                 }`}
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
                 </svg>
-                {systemView ? (lang === 'en' ? 'System' : 'システム') : (lang === 'en' ? 'Mine' : '自分')}
+                {systemView ? (lang === 'en' ? 'My View' : 'マイビュー') : (lang === 'en' ? 'Company View' : '全社ビュー')}
               </button>
             )}
             {/* Bulk-select toggle — always occupies space, invisible when no items */}

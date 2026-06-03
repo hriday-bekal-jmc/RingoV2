@@ -6,6 +6,7 @@ import { useDelayedLoading } from '../hooks/useDelayedLoading';
 import Layout from '../components/common/Layout';
 import apiClient from '../services/apiClient';
 import { useLang } from '../context/LanguageContext';
+import { useAuth } from '../context/AuthContext';
 import CalendarPicker from '../components/forms/CalendarPicker';
 import CustomSelect from '../components/forms/CustomSelect';
 import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
@@ -51,6 +52,7 @@ interface HistoryItem {
   acted_at: string;
   applicant_name: string | null;
   applicant_avatar: string | null;
+  approver_name: string | null;
   app_status: string;
 }
 
@@ -310,19 +312,26 @@ const APP_STATUS_LABEL: Record<string, { ja: string; en: string }> = {
 
 export default function ApprovalHistory() {
   const { t, lang } = useLang();
+  const { isAdmin } = useAuth();
   const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
+
+  // Company-wide toggle (admin only) — query not sent until toggled
+  const [systemView, setSystemView] = useState(false);
 
   // Detail panel
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // Filters
-  const [stage, setStage]         = useState('ALL');
-  const [action, setAction]       = useState('ALL');
+  const [stage, setStage]           = useState('ALL');
+  const [action, setAction]         = useState('ALL');
   const [templateId, setTemplateId] = useState('ALL');
-  const [dateFrom, setDateFrom]   = useState('');
-  const [dateTo, setDateTo]       = useState('');
-  const [applicant, setApplicant] = useState('');
+  const [dateFrom, setDateFrom]     = useState('');
+  const [dateTo, setDateTo]         = useState('');
+  const [applicant, setApplicant]   = useState('');
   const [applicantInput, setApplicantInput] = useState('');
+  // System-view only: filter by approver name
+  const [approver, setApprover]           = useState('');
+  const [approverInput, setApproverInput] = useState('');
 
   // Build query params
   const params = new URLSearchParams();
@@ -332,6 +341,8 @@ export default function ApprovalHistory() {
   if (dateFrom)             params.set('date_from', dateFrom);
   if (dateTo)               params.set('date_to', dateTo);
   if (applicant)            params.set('applicant', applicant);
+  if (systemView)           params.set('all', 'true');
+  if (systemView && approver) params.set('approver', approver);
 
   const PAGE = 25;
   const {
@@ -343,7 +354,7 @@ export default function ApprovalHistory() {
     isFetching,
     error,
   } = useInfiniteQuery<{ items: HistoryItem[]; hasMore: boolean; offset: number; nextCursor?: string | null }>({
-    queryKey: ['approvalHistory', stage, action, templateId, dateFrom, dateTo, applicant],
+    queryKey: ['approvalHistory', systemView, stage, action, templateId, dateFrom, dateTo, applicant, approver],
     queryFn: async ({ pageParam = null }) => {
       const cursor = pageParam ? `&cursor=${encodeURIComponent(String(pageParam))}` : '';
       return (await apiClient.get(
@@ -354,7 +365,6 @@ export default function ApprovalHistory() {
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: 30_000,
     retry: 1,
-    // Keep old data visible while filter params change — no spinner flash between filters
     placeholderData: keepPreviousData,
   });
 
@@ -394,10 +404,12 @@ export default function ApprovalHistory() {
 
   function clearFilters() {
     setStage('ALL'); setAction('ALL'); setTemplateId('ALL');
-    setDateFrom(''); setDateTo(''); setApplicant(''); setApplicantInput('');
+    setDateFrom(''); setDateTo('');
+    setApplicant(''); setApplicantInput('');
+    setApprover(''); setApproverInput('');
   }
 
-  const hasFilters = stage !== 'ALL' || action !== 'ALL' || templateId !== 'ALL' || dateFrom || dateTo || applicant;
+  const hasFilters = stage !== 'ALL' || action !== 'ALL' || templateId !== 'ALL' || dateFrom || dateTo || applicant || approver;
 
   return (
     <Layout title={t('title_approval_history')}>
@@ -411,9 +423,35 @@ export default function ApprovalHistory() {
       <div className="max-w-[1800px] mx-auto space-y-6">
 
         {/* Header */}
-        <div className="animate-fade-up">
-          <p className="section-title mb-0">{t('nav_approval_history')}</p>
-          <h2 className="text-2xl font-bold text-warmgray-800 mt-1">{t('title_approval_history')}</h2>
+        <div className="flex items-end justify-between gap-4 animate-fade-up">
+          <div>
+            <p className="section-title mb-0">{t('nav_approval_history')}</p>
+            <h2 className="text-2xl font-bold text-warmgray-800 mt-1">
+              {t('title_approval_history')}
+              {systemView && (
+                <span className="ml-2 text-sm font-semibold text-ringo-500 bg-ringo-50 border border-ringo-200/60 px-2 py-0.5 rounded-lg">
+                  {lang === 'en' ? 'Company-wide' : '全社'}
+                </span>
+              )}
+            </h2>
+          </div>
+          {isAdmin && (
+            <button
+              onClick={() => { setSystemView((v) => !v); clearFilters(); }}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-xs font-bold transition-all duration-200 shrink-0
+                ${systemView
+                  ? 'bg-white/70 text-warmgray-600 border-white/80 hover:border-ringo-200 hover:text-ringo-600'
+                  : 'bg-ringo-500 text-white border-ringo-500 shadow-sm hover:bg-ringo-600'
+                }`}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941" />
+              </svg>
+              {systemView
+                ? (lang === 'en' ? 'My View' : 'マイビュー')
+                : (lang === 'en' ? 'Company View' : '全社ビュー')}
+            </button>
+          )}
         </div>
 
         {/* Filters — relative z-10 so calendar/select dropdowns escape the results card's stacking context */}
@@ -489,6 +527,40 @@ export default function ApprovalHistory() {
                 </button>
               )}
             </div>
+
+            {/* Approver search — system view only */}
+            {systemView && (
+              <div>
+                <label className="label">{lang === 'en' ? 'Approver' : '承認者'}</label>
+                <div className="relative">
+                  <input
+                    className="input pr-8"
+                    placeholder={lang === 'en' ? 'Search approver...' : '承認者名で検索'}
+                    value={approverInput}
+                    onChange={(e) => setApproverInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') setApprover(approverInput); }}
+                  />
+                  {approverInput && (
+                    <button
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-warmgray-400 hover:text-warmgray-600"
+                      onClick={() => { setApproverInput(''); setApprover(''); }}
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                {approverInput !== approver && (
+                  <button
+                    className="text-[11px] text-ringo-500 hover:text-ringo-600 mt-1 px-0.5"
+                    onClick={() => setApprover(approverInput)}
+                  >
+                    Enter で検索 →
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -535,6 +607,7 @@ export default function ApprovalHistory() {
                     <tr>
                       <th>{lang === 'en' ? 'Application' : '申請'}</th>
                       <th>{lang === 'en' ? 'Applicant' : '申請者'}</th>
+                      {systemView && <th>{lang === 'en' ? 'Approver' : '承認者'}</th>}
                       <th>{lang === 'en' ? 'Step' : 'ステップ'}</th>
                       <th>{lang === 'en' ? 'Stage' : 'ステージ'}</th>
                       <th>{lang === 'en' ? 'Action' : 'アクション'}</th>
@@ -600,10 +673,13 @@ export default function ApprovalHistory() {
                         </span>
                       </div>
 
-                      {/* Row 2: applicant */}
+                      {/* Row 2: applicant + optional approver */}
                       <div className="flex items-center gap-2">
                         <UserAvatar name={item.applicant_name ?? '?'} avatarUrl={item.applicant_avatar} size={6} />
                         <span className="text-xs text-warmgray-600 truncate">{item.applicant_name ?? '—'}</span>
+                        {systemView && item.approver_name && (
+                          <span className="text-[10px] text-ringo-500 font-semibold truncate">← {item.approver_name}</span>
+                        )}
                         <span className="text-[10px] text-warmgray-400 ml-auto shrink-0">{item.step_label}</span>
                       </div>
 
@@ -638,6 +714,7 @@ export default function ApprovalHistory() {
                     <tr>
                       <th>{lang === 'en' ? 'Application' : '申請'}</th>
                       <th>{lang === 'en' ? 'Applicant' : '申請者'}</th>
+                      {systemView && <th>{lang === 'en' ? 'Approver' : '承認者'}</th>}
                       <th>{lang === 'en' ? 'Step' : 'ステップ'}</th>
                       <th>{lang === 'en' ? 'Stage' : 'ステージ'}</th>
                       <th>{lang === 'en' ? 'Action' : 'アクション'}</th>
@@ -667,6 +744,11 @@ export default function ApprovalHistory() {
                               <span className="text-sm text-warmgray-700">{item.applicant_name ?? '—'}</span>
                             </div>
                           </td>
+                          {systemView && (
+                            <td>
+                              <span className="text-sm text-warmgray-700">{item.approver_name ?? '—'}</span>
+                            </td>
+                          )}
                           <td><span className="text-sm text-warmgray-600">{item.step_label}</span></td>
                           <td>
                             {item.stage === 'SETTLEMENT' ? (

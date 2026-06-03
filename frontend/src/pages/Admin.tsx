@@ -1,5 +1,6 @@
 ﻿import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useScrollEnd } from '../hooks/useScrollEnd';
 import { useDelayedLoading } from '../hooks/useDelayedLoading';
@@ -1981,7 +1982,10 @@ function AllowanceTab({ showToast }: { showToast: (msg: string, type?: 'success'
 type Tab = 'routes' | 'users' | 'applications' | 'permissions' | 'forms' | 'allowance' | 'notifications';
 
 export default function Admin() {
-  const [tab, setTab] = useState<Tab>('routes');
+  const [searchParams] = useSearchParams();
+  const VALID_TABS: Tab[] = ['routes', 'users', 'applications', 'permissions', 'forms', 'allowance', 'notifications'];
+  const initialTab = (searchParams.get('tab') ?? 'routes') as Tab;
+  const [tab, setTab] = useState<Tab>(VALID_TABS.includes(initialTab) ? initialTab : 'routes');
   const { t, lang } = useLang();
   const { toast, show: showToast, dismiss } = useToast();
 
