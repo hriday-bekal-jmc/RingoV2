@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import fs from 'fs';
 import path from 'path';
+import { z } from 'zod';
 import { query, withTransaction } from '../config/db';
 import { isAdminUser, requireAuth } from '../middlewares/authMiddleware';
 import { canRoleSettle } from '../services/rolePermissionsCache';
@@ -11,6 +12,19 @@ import { addCsvExportJob, getCsvExportMeta } from '../services/csvExportQueue';
 import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
 import type pg from 'pg';
 import multer from 'multer';
+
+// ── Request schemas ───────────────────────────────────────────────────────────
+const PatchSettlementSchema = z.object({
+  transfer_date:   z.string().nullable().optional(),
+  accounting_note: z.string().max(2000).optional(),
+});
+
+const CsvExportSchema = z.object({
+  ids:       z.array(z.string().uuid()).optional(),
+  selectAll: z.boolean().optional(),
+  dateFrom:  z.string().optional(),
+  dateTo:    z.string().optional(),
+});
 
 const router = Router();
 router.use(requireAuth);
@@ -193,10 +207,9 @@ router.get('/settlements', async (req: Request, res: Response): Promise<void> =>
 
 // ── PATCH /accounting/settlements/:id ────────────────────────────────────────
 router.patch('/settlements/:id', async (req: Request, res: Response): Promise<void> => {
-  const { transfer_date, accounting_note } = req.body as {
-    transfer_date?: string | null;
-    accounting_note?: string;
-  };
+  const parsed = PatchSettlementSchema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid request' }); return; }
+  const { transfer_date, accounting_note } = parsed.data;
 
   const setClauses: string[] = [];
   const values: unknown[] = [];
@@ -441,12 +454,9 @@ router.post('/settlements/:id/close', async (req: Request, res: Response): Promi
 
 // POST /accounting/settlements/csv/export — enqueue export job
 router.post('/settlements/csv/export', async (req: Request, res: Response): Promise<void> => {
-  const { ids, selectAll, dateFrom, dateTo } = req.body as {
-    ids?: string[];
-    selectAll?: boolean;
-    dateFrom?: string;
-    dateTo?: string;
-  };
+  const parsed = CsvExportSchema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid request' }); return; }
+  const { ids, selectAll, dateFrom, dateTo } = parsed.data;
   try {
     const jobId = await addCsvExportJob({
       userId:    req.user!.id,

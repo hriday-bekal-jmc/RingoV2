@@ -17,12 +17,14 @@ const router = Router();
 router.use(requireAuth);
 router.use(uploadLimiter);
 
-// Use memory storage so we can either:
-//   (a) push to Google Drive (when service account is configured), or
-//   (b) write to local FS as a fallback.
-// Memory cap matches per-file size limit, so OOM risk is bounded.
+// Disk storage: multer streams bytes to a temp file instead of buffering in RAM.
+// Prevents OOM when multiple users upload large files concurrently.
+// Temp files are deleted after processing (Drive upload or FS move).
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+    filename:    (_req, file, cb) => cb(null, safeName(file.originalname)),
+  }),
   limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB per file
   fileFilter: (_req, file, cb) => {
     const allowed = [
@@ -83,25 +85,25 @@ router.post('/', upload.array('files', 10), async (req: Request, res: Response):
   try {
     const results = await Promise.all(
       files.map(async (f) => {
+        const tempPath = f.path; // diskStorage writes here
         let stored_path = '';
         let drive_file_id: string | null = null;
         let drive_url:     string | null = null;
 
-        if (useDrive) {
-          // Drive path — bytes never touch our disk.
-          // folderCategory routes to the right subfolder (receipts/contracts/other).
-          // When undefined, default GDRIVE_FOLDER_ID is used.
-          const result = await uploadToDrive(f.originalname, f.mimetype, f.buffer, folderCategory);
-          drive_file_id = result.fileId;
-          drive_url     = result.webViewLink;
-          stored_path   = `drive:${result.fileId}`; // sentinel — never read from FS
-        } else {
-          // Local FS fallback — only used when Drive env is not configured
-          stored_path = safeName(f.originalname);
-          fs.writeFileSync(path.join(UPLOADS_DIR, stored_path), f.buffer);
-        }
+        try {
+          if (useDrive) {
+            const buffer = fs.readFileSync(tempPath);
+            const result = await uploadToDrive(f.originalname, f.mimetype, buffer, folderCategory);
+            drive_file_id = result.fileId;
+            drive_url     = result.webViewLink;
+            stored_path   = `drive:${result.fileId}`;
+            fs.unlinkSync(tempPath); // temp file no longer needed
+          } else {
+            // Local FS — temp file is already in UPLOADS_DIR, just record its name
+            stored_path = path.basename(tempPath);
+          }
 
-        const row = await query(
+          const row = await query(
           `INSERT INTO uploaded_files
              (application_id, uploader_id, field_name, original_name,
               stored_path, file_size, mime_type, drive_url, drive_file_id, category)
@@ -121,16 +123,19 @@ router.post('/', upload.array('files', 10), async (req: Request, res: Response):
           ],
         );
 
-        return {
-          id:            row.rows[0].id as string,
-          // Gated URL — fileRoutes enforces authz, then either redirects to
-          // Drive's webViewLink or streams local FS bytes.
-          url:           `/api/files/${row.rows[0].id}`,
-          original_name: f.originalname,
-          field_name:    field_name ?? null,
-          size:          f.size,
-          mime:          f.mimetype,
-        };
+          return {
+            id:            row.rows[0].id as string,
+            url:           `/api/files/${row.rows[0].id}`,
+            original_name: f.originalname,
+            field_name:    field_name ?? null,
+            size:          f.size,
+            mime:          f.mimetype,
+          };
+        } catch (err) {
+          // Clean up temp file on any error
+          try { fs.unlinkSync(tempPath); } catch { /* already gone */ }
+          throw err;
+        }
       }),
     );
     res.status(201).json({ files: results });

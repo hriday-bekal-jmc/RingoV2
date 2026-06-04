@@ -196,11 +196,15 @@ export async function listDriveOrphans(knownIds: Set<string>): Promise<string[]>
 
   const orphans: string[] = [];
 
+  // Only audit files created in last 90 days — avoids full-table Drive scan
+  // which grows unbounded as file count increases over years.
+  const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+
   for (const folderId of folderIds) {
     let pageToken: string | undefined;
     do {
       const resp = await drive.files.list({
-        q: `'${folderId}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'`,
+        q: `'${folderId}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder' and createdTime >= '${cutoff}'`,
         fields: 'nextPageToken, files(id)',
         pageSize: 200,
         pageToken,

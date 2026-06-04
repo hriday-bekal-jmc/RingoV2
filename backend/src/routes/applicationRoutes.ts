@@ -148,14 +148,19 @@ async function insertApprovalSteps(
   steps: ResolvedStep[],
   offset = 0,
 ): Promise<void> {
-  for (let i = 0; i < steps.length; i++) {
-    const s = steps[i];
-    await client.query(
-      `INSERT INTO approval_steps (application_id, step_order, stage, approver_id, label, action_type, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [appId, offset + s.step_order, stage, s.approver_id, s.label, s.action_type, i === 0 ? 'PENDING' : 'WAITING'],
-    );
-  }
+  if (steps.length === 0) return;
+  // Single bulk INSERT — one round-trip regardless of step count
+  const values: unknown[] = [];
+  const placeholders = steps.map((s, i) => {
+    const base = i * 7;
+    values.push(appId, offset + s.step_order, stage, s.approver_id, s.label, s.action_type, i === 0 ? 'PENDING' : 'WAITING');
+    return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7})`;
+  });
+  await client.query(
+    `INSERT INTO approval_steps (application_id, step_order, stage, approver_id, label, action_type, status)
+     VALUES ${placeholders.join(', ')}`,
+    values,
+  );
 }
 
 // GET /applications/route-preview?template_id=X&stage=RINGI|SETTLEMENT

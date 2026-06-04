@@ -1,10 +1,103 @@
 // Server-side safe formula evaluator — mirrors frontend/src/utils/formulaEval.ts.
 //
-// Formulas are admin-configured (not user-supplied), but we still allowlist
-// the expression after substitution so only digits/operators/Math calls can
-// reach Function(). This prevents any code-injection path.
+// Uses a recursive-descent AST parser instead of Function()/eval() to eliminate
+// any code-execution surface. Supports: +, -, *, /, unary minus, parentheses,
+// Math.min(...), Math.max(...), numeric literals.
 
-const SAFE_EXPR = /^[\d\s+\-*/.(),|]+$/;
+// ── Tokeniser ────────────────────────────────────────────────────────────────
+type Token = { type: 'num'; val: number }
+           | { type: 'op';  val: string }
+           | { type: 'lparen' | 'rparen' | 'comma' }
+           | { type: 'fn';  val: 'min' | 'max' };
+
+function tokenise(expr: string): Token[] {
+  const tokens: Token[] = [];
+  let i = 0;
+  while (i < expr.length) {
+    const ch = expr[i];
+    if (/\s/.test(ch)) { i++; continue; }
+    if (/\d|\./.test(ch)) {
+      let s = '';
+      while (i < expr.length && /[\d.]/.test(expr[i])) s += expr[i++];
+      tokens.push({ type: 'num', val: parseFloat(s) });
+    } else if (expr.slice(i, i + 8) === 'Math.min') {
+      tokens.push({ type: 'fn', val: 'min' }); i += 8;
+    } else if (expr.slice(i, i + 8) === 'Math.max') {
+      tokens.push({ type: 'fn', val: 'max' }); i += 8;
+    } else if ('+-*/'.includes(ch)) {
+      tokens.push({ type: 'op', val: ch }); i++;
+    } else if (ch === '(') { tokens.push({ type: 'lparen' });  i++; }
+    else if (ch === ')') { tokens.push({ type: 'rparen' }); i++; }
+    else if (ch === ',') { tokens.push({ type: 'comma' });  i++; }
+    else { throw new Error(`Unexpected char: ${ch}`); }
+  }
+  return tokens;
+}
+
+// ── Recursive-descent parser ─────────────────────────────────────────────────
+function parse(tokens: Token[]): number {
+  let pos = 0;
+  const peek  = () => tokens[pos];
+  const eat   = () => tokens[pos++];
+  const done  = () => pos >= tokens.length;
+
+  function parseExpr(): number { return parseAdd(); }
+
+  function parseAdd(): number {
+    let left = parseMul();
+    while (!done() && peek().type === 'op' && (peek() as any).val === '+' || (!done() && peek().type === 'op' && (peek() as any).val === '-')) {
+      const op = (eat() as any).val;
+      const right = parseMul();
+      left = op === '+' ? left + right : left - right;
+    }
+    return left;
+  }
+
+  function parseMul(): number {
+    let left = parseUnary();
+    while (!done() && peek().type === 'op' && ('*/'.includes((peek() as any).val))) {
+      const op = (eat() as any).val;
+      const right = parseUnary();
+      left = op === '*' ? left * right : right === 0 ? 0 : left / right;
+    }
+    return left;
+  }
+
+  function parseUnary(): number {
+    if (!done() && peek().type === 'op' && (peek() as any).val === '-') {
+      eat();
+      return -parseAtom();
+    }
+    return parseAtom();
+  }
+
+  function parseAtom(): number {
+    const tok = peek();
+    if (!tok) return 0;
+    if (tok.type === 'num') { eat(); return tok.val; }
+    if (tok.type === 'fn') {
+      const fn = tok.val; eat();
+      if (peek()?.type !== 'lparen') throw new Error('Expected (');
+      eat();
+      const args: number[] = [parseExpr()];
+      while (peek()?.type === 'comma') { eat(); args.push(parseExpr()); }
+      if (peek()?.type !== 'rparen') throw new Error('Expected )');
+      eat();
+      return fn === 'min' ? Math.min(...args) : Math.max(...args);
+    }
+    if (tok.type === 'lparen') {
+      eat();
+      const val = parseExpr();
+      if (peek()?.type !== 'rparen') throw new Error('Expected )');
+      eat();
+      return val;
+    }
+    return 0;
+  }
+
+  const result = parseExpr();
+  return result;
+}
 
 export function evalFormula(
   formula: string,
@@ -12,30 +105,16 @@ export function evalFormula(
 ): number {
   if (!formula) return 0;
   try {
-    let expr = formula
-      .replace(/\bMath\.min\b/g, '__min__')
-      .replace(/\bMath\.max\b/g, '__max__');
-
-    expr = expr.replace(/\b([a-zA-Z_]\w*)\b/g, (match) => {
-      if (match === '__min__' || match === '__max__') return match;
-      const v = values[match];
-      const n = typeof v === 'number' ? v : parseFloat(String(v ?? '0'));
-      return String(isFinite(n) ? n : 0);
-    });
-
-    expr = expr
-      .replace(/__min__/g, 'Math.min')
-      .replace(/__max__/g, 'Math.max');
-
-    const stripped = expr.replace(/Math\.(min|max)/g, '');
-    if (!SAFE_EXPR.test(stripped)) return 0;
-
-    // Formula comes from admin schema, not user input. Allowlist above ensures
-    // only arithmetic reaches eval.
-    // eslint-disable-next-line no-new-func
-    const result = Function('"use strict"; return (' + expr + ')')() as unknown;
-    const n = typeof result === 'number' ? result : parseFloat(String(result));
-    return isFinite(n) ? Math.round(n * 1e9) / 1e9 : 0;
+    // Substitute variable names with their numeric values
+    const expr = formula
+      .replace(/\b([a-zA-Z_]\w*)\b/g, (match) => {
+        if (match === 'Math' || match === 'min' || match === 'max') return match;
+        const v = values[match];
+        const n = typeof v === 'number' ? v : parseFloat(String(v ?? '0'));
+        return String(isFinite(n) ? n : 0);
+      });
+    const result = parse(tokenise(expr));
+    return isFinite(result) ? Math.round(result * 1e9) / 1e9 : 0;
   } catch {
     return 0;
   }

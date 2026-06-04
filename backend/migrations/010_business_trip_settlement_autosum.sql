@@ -40,7 +40,7 @@ SET
       {"name":"mileage","label":"走行距離（km）","label_en":"Mileage","type":"number","required":false,"unit":"km","validation":{"min":0},"conditional_on":{"field":"has_expressway","equals":"yes"}},
       {"name":"routes","label":"交通費明細","label_en":"Route Table","type":"route_entry","required":false,"show_mode":true,"show_date":true,"options":[{"value":"shinkansen","label_ja":"新幹線"},{"value":"airplane","label_ja":"飛行機"},{"value":"train","label_ja":"在来線・地下鉄"},{"value":"bus","label_ja":"バス"},{"value":"taxi","label_ja":"タクシー"},{"value":"other","label_ja":"その他"}],"conditional_on":{"field":"transport_mode","equals":["shinkansen","airplane","train","bus","taxi"]}},
       {"name":"transport_total","label":"交通費合計（円）","label_en":"Total Transportation","type":"number","computed":true,"sum_target":"routes","sum_field":"fare","unit":"円"},
-      {"name":"expected_amount","label":"申請合計（円）","label_en":"Total Application Amount","type":"number","computed":true,"formula":"transport_total+accommodation_fee_estimate+backpay_estimate","unit":"円","show_in_row":true,"amount_field":true}
+      {"name":"expected_amount","label":"申請合計（円）","label_en":"Total Application Amount","type":"number","computed":true,"formula":"transport_total+accommodation_fee_estimate+backpay_estimate","unit":"円","show_in_row":true,"amount_field":true,"row_compare_with":"settlement_total"}
     ]
   }'::jsonb,
 
