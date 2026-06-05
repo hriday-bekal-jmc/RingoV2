@@ -19,6 +19,7 @@ import { useLang } from '../../context/LanguageContext';
 import RepeatGroupDisplay from '../forms/RepeatGroupDisplay';
 import TransportationDetail from '../forms/TransportationDetail';
 import { FieldValueContent, isLongField } from '../forms/FieldValueDisplay';
+import { fieldColSpanClass, flattenFieldGroups } from '../forms/fieldLayout';
 import PatternBadge from '../common/PatternBadge';
 import CollapsibleComment from '../common/CollapsibleComment';
 import { Sk } from '../common/Skeleton';
@@ -420,7 +421,7 @@ function FormDataCard({ title, accent, data, schema, files, lang }: {
   files:  FileRow[];
   lang:   'ja' | 'en';
 }) {
-  const fields = schema?.fields ?? [];
+  const fields = flattenFieldGroups(schema?.fields ?? []);
   const entries = fields.length > 0
     ? fields.map(f => ({ ...f, label: (lang === 'en' && f.label_en) ? f.label_en : f.label, value: data[f.name] }))
     : Object.entries(data).map(([k, v]) => ({ name: k, label: k, type: 'text', value: v }));
@@ -439,7 +440,7 @@ function FormDataCard({ title, accent, data, schema, files, lang }: {
         <span className={`w-1 h-4 rounded-full ${accent === 'teal' ? 'bg-teal-500' : 'bg-ringo-500'}`} />
         <p className="text-sm font-bold text-warmgray-800">{title}</p>
       </div>
-      <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-3">
+      <dl className="grid grid-cols-1 md:grid-cols-12 gap-x-4 gap-y-3">
         {entries.map((f) => {
           const isFile = f.type === 'file';
           const isLong = isLongField(f, f.value);
@@ -448,7 +449,7 @@ function FormDataCard({ title, accent, data, schema, files, lang }: {
           if (isFile) {
             const parsed = parseFileValue(f.value, files);
             return (
-              <div key={f.name} className="md:col-span-2">
+              <div key={f.name} className="col-span-1 md:col-span-12">
                 <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{f.label}</dt>
                 <dd className="min-h-[36px]">
                   {parsed.length === 0 ? (
@@ -479,7 +480,7 @@ function FormDataCard({ title, accent, data, schema, files, lang }: {
           }
 
           return (
-            <div key={f.name} className={isLong ? 'md:col-span-2' : ''}>
+            <div key={f.name} className={isLong ? 'col-span-1 md:col-span-12' : fieldColSpanClass(f)}>
               <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{f.label}</dt>
               <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3 py-2 rounded-xl break-words min-h-[36px]">
                 <FieldValueContent

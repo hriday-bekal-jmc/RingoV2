@@ -62,6 +62,25 @@ export interface ValidationError {
 
 const DEFAULT_REPEAT_MAX_ROWS = 50;
 
+// field_group is a VISUAL container only — its children store their values at the
+// top level (flat), exactly as if the group were not there. Flattening here lets
+// every existing rule (required, validation, computed, sum, conditional) work
+// unchanged. A group-level conditional_on is pushed down to children that lack
+// their own, so hiding a group also exempts its children from required/validation.
+function flattenGroups(fields: FormField[], inherited?: FormField['conditional_on']): FormField[] {
+  const out: FormField[] = [];
+  for (const f of fields) {
+    if (f.type === 'field_group' && Array.isArray(f.fields)) {
+      out.push(...flattenGroups(f.fields, f.conditional_on ?? inherited));
+    } else if (inherited && !f.conditional_on) {
+      out.push({ ...f, conditional_on: inherited });
+    } else {
+      out.push(f);
+    }
+  }
+  return out;
+}
+
 function isEmptyValue(value: unknown): boolean {
   if (value == null || value === '') return true;
   if (Array.isArray(value)) return value.length === 0;
@@ -105,23 +124,26 @@ export function validateFormData(schema: FormSchema, data: Record<string, unknow
   const errors: ValidationError[] = [];
   if (!schema?.fields) return errors;
 
-  validateFieldList(schema.fields, data, data, errors);
+  validateFieldList(flattenGroups(schema.fields), data, data, errors);
   return errors;
 }
 
 export function applyComputedFormData(schema: FormSchema | null | undefined, data: Record<string, unknown>): Record<string, unknown> {
   if (!schema?.fields) return data;
 
+  // Flatten visual field_groups so computed/sum/formula/whitelist see children flat.
+  const flatFields = flattenGroups(schema.fields);
+
   const computedTargets = new Set(
-    schema.fields.filter((field) => field.type === 'number' && field.computed).map((field) => field.name),
+    flatFields.filter((field) => field.type === 'number' && field.computed).map((field) => field.name),
   );
-  const formulaFields = schema.fields.filter(
+  const formulaFields = flatFields.filter(
     (field) => field.type === 'number' && field.formula,
   );
 
   // Whitelist: only keep keys that exist in the schema + internal _seed marker.
   // Drops any unknown keys the client sends (prevents JSONB bloat / injection).
-  const allowedKeys = new Set(schema.fields.map((f) => f.name));
+  const allowedKeys = new Set(flatFields.map((f) => f.name));
   allowedKeys.add('_seed'); // internal test-data marker — preserve if present
   const sanitised: Record<string, unknown> = {};
   for (const key of Object.keys(data)) {
@@ -138,7 +160,7 @@ export function applyComputedFormData(schema: FormSchema | null | undefined, dat
     totals.set(target, (totals.get(target) ?? 0) + (Number(value) || 0));
   };
 
-  for (const field of schema.fields) {
+  for (const field of flatFields) {
     if (!conditionMatches(field, data, data)) continue;
 
     if (field.sum_target) {
@@ -164,7 +186,7 @@ export function applyComputedFormData(schema: FormSchema | null | undefined, dat
   });
 
   // Compute date-diff fields server-side (e.g. trip_duration from departure/return dates)
-  for (const field of schema.fields) {
+  for (const field of flatFields) {
     if (field.type === 'number' && field.date_diff_from && field.date_diff_to) {
       const from = String(next[field.date_diff_from] ?? '');
       const to   = String(next[field.date_diff_to]   ?? '');

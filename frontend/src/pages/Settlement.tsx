@@ -12,6 +12,7 @@ import CustomSelect from '../components/forms/CustomSelect';
 import RouteTimeline from '../components/common/RouteTimeline';
 import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
 import { FieldValueContent, type DisplayField } from '../components/forms/FieldValueDisplay';
+import { fieldColSpanClass, flattenFieldGroups } from '../components/forms/fieldLayout';
 
 interface FormField {
   name: string;
@@ -71,10 +72,14 @@ function ReadField({
 }) {
   if (value == null || value === '') return null;
 
+  const spanCls = fullWidth
+    ? 'col-span-1 md:col-span-12'
+    : (field ? fieldColSpanClass(field) : 'col-span-1 md:col-span-6');
+
   // Rich types: delegate to FieldValueContent for proper rendering
   if (field && RICH_TYPES.has(field.type)) {
     return (
-      <div className={`min-w-0 ${fullWidth ? 'md:col-span-2' : ''}`}>
+      <div className={`min-w-0 ${spanCls}`}>
         <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-0.5 break-words [overflow-wrap:anywhere]">
           {label}
         </dt>
@@ -91,7 +96,7 @@ function ReadField({
 
   const text = formatReadValue(value);
   return (
-    <div className={`min-w-0 ${fullWidth ? 'md:col-span-2' : ''}`}>
+    <div className={`min-w-0 ${spanCls}`}>
       <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-0.5 break-words [overflow-wrap:anywhere]">
         {label}
       </dt>
@@ -104,7 +109,7 @@ function ReadField({
 
 // ── Original RINGI summary ─────────────────────────────────────────────────────
 function RingiSummary({ app, badge }: { app: AppDetail; badge: string }) {
-  const fields = app.schema_definition?.fields ?? [];
+  const fields = flattenFieldGroups(app.schema_definition?.fields ?? []);
   const data = app.form_data ?? {};
   return (
     <div className="card space-y-3">
@@ -117,12 +122,12 @@ function RingiSummary({ app, badge }: { app: AppDetail; badge: string }) {
           <span className="ml-auto max-w-full text-[11px] font-mono text-warmgray-400 break-all">{app.application_number}</span>
         )}
       </div>
-      <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
+      <dl className="grid grid-cols-1 md:grid-cols-12 gap-x-6 gap-y-3">
         {fields.length > 0
           ? fields.map((f) => {
               if (f.type === 'repeat_group') {
                 return (
-                  <div key={f.name} className="min-w-0 md:col-span-2">
+                  <div key={f.name} className="min-w-0 col-span-1 md:col-span-12">
                     <dt className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 mb-1 break-words [overflow-wrap:anywhere]">
                       {f.label}
                     </dt>

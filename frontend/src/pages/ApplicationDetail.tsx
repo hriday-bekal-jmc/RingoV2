@@ -13,6 +13,7 @@ import { useLang } from '../context/LanguageContext';
 import { useAuth } from '../context/AuthContext';
 import { fieldLabel } from '../i18n';
 import { FieldValueContent, isLongField } from '../components/forms/FieldValueDisplay';
+import { fieldColSpanClass, flattenFieldGroups } from '../components/forms/fieldLayout';
 import PatternBadge from '../components/common/PatternBadge';
 import CustomSelect from '../components/forms/CustomSelect';
 import RouteTimeline from '../components/common/RouteTimeline';
@@ -78,14 +79,14 @@ const STATUS_BADGE: Record<string, string> = {
 // ── View Mode: 申請データを綺麗に表示するコンポーネント ──
 function FormDataViewer({ app }: { app: ApplicationDetail }) {
   const { lang } = useLang();
-  const fields = app.schema_definition?.fields ?? [];
+  const fields = flattenFieldGroups(app.schema_definition?.fields ?? []);
   return (
-    <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+    <dl className="grid grid-cols-1 md:grid-cols-12 gap-x-6 gap-y-4">
       {fields.map((f) => {
         const val = app.form_data[f.name];
         const isLong = isLongField(f, val);
         return (
-          <div key={f.name} className={isLong ? 'col-span-full' : ''}>
+          <div key={f.name} className={isLong ? 'col-span-1 md:col-span-12' : fieldColSpanClass(f)}>
             <dt className="text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{fieldLabel(f, lang)}</dt>
             <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3.5 py-2.5 rounded-xl break-words min-h-[42px]">
               <FieldValueContent
@@ -106,17 +107,17 @@ function FormDataViewer({ app }: { app: ApplicationDetail }) {
 // ── Settlement Data Viewer ─────────────────────────────────────────────────────
 function SettlementDataViewer({ app, t }: { app: ApplicationDetail; t: (k: any) => string }) {
   const { lang } = useLang();
-  const fields = app.settlement_schema?.fields ?? [];
+  const fields = flattenFieldGroups(app.settlement_schema?.fields ?? []);
   const data = app.settlement_data ?? {};
 
   return (
     <div className="space-y-4">
-      <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+      <dl className="grid grid-cols-1 md:grid-cols-12 gap-x-6 gap-y-4">
         {fields.map((f) => {
           const val = data[f.name];
           const long = isLongField(f, val);
           return (
-            <div key={f.name} className={long ? 'col-span-full' : ''}>
+            <div key={f.name} className={long ? 'col-span-1 md:col-span-12' : fieldColSpanClass(f)}>
               <dt className="text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{fieldLabel(f, lang)}</dt>
               <dd className={`text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3.5 py-2.5 rounded-xl break-words min-h-[42px] ${
                 f.computed ? 'border-teal-200/60 bg-teal-50/40 text-teal-800 font-bold' : ''

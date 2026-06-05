@@ -3,6 +3,7 @@ import { useForm, useWatch, type Control, type UseFormSetValue } from 'react-hoo
 import StandardInput from './StandardInput';
 import { useLang } from '../../context/LanguageContext';
 import { evalFormula, formulaDeps } from '../../utils/formulaEval';
+import { fieldColSpanClass, flattenFieldGroups } from './fieldLayout';
 
 interface FormField {
   name: string;
@@ -34,7 +35,7 @@ interface FormField {
     field: string;
     equals: string | number | boolean | Array<string | number | boolean>;
   };
-  col_span?: 'half' | 'full';
+  col_span?: string;
   hidden?: boolean;
   show_date?: boolean;
   date_diff_from?: string;
@@ -131,11 +132,14 @@ export default function DynamicForm({
 
   const activeSchema = isSettlementPhase ? template.settlement_schema : template.schema_definition;
   const allFields: FormField[] = useMemo(() => activeSchema?.fields ?? [], [activeSchema]);
+  // field_group is visual-only; flatten to a leaf list for all logic (defaults,
+  // conditional, sums, validation). The original allFields drives layout/render.
+  const allLeaves: FormField[] = useMemo(() => flattenFieldGroups(allFields), [allFields]);
 
   const resolvedDefaults = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     const schema: Record<string, unknown> = {};
-    allFields.forEach((f) => {
+    allLeaves.forEach((f) => {
       if (f.default_value === '__today__') schema[f.name] = today;
       else if (f.default_value != null) schema[f.name] = f.default_value;
     });
@@ -181,18 +185,18 @@ export default function DynamicForm({
   }, [JSON.stringify(externalValues)]);
 
   const conditionalSources = useMemo(
-    () => Array.from(new Set(allFields.map((f) => f.conditional_on?.field).filter(Boolean))) as string[],
-    [allFields],
+    () => Array.from(new Set(allLeaves.map((f) => f.conditional_on?.field).filter(Boolean))) as string[],
+    [allLeaves],
   );
   const watchedConds = useWatch({ control, name: conditionalSources.length ? conditionalSources : ['__noop__'] });
 
   const activeFields: FormField[] = useMemo(() => {
-    if (conditionalSources.length === 0) return allFields;
+    if (conditionalSources.length === 0) return allLeaves;
     const sourceMap: Record<string, unknown> = {};
     conditionalSources.forEach((name, i) => {
       sourceMap[name] = (watchedConds as unknown[])[i];
     });
-    return allFields.filter((f) => {
+    return allLeaves.filter((f) => {
       if (!f.conditional_on) return true;
       const got = sourceMap[f.conditional_on.field];
       if (got == null) return false;
@@ -201,7 +205,11 @@ export default function DynamicForm({
       const gotArr = Array.isArray(got) ? got.map(String) : [String(got)];
       return gotArr.some((v) => eqArr.includes(v));
     });
-  }, [allFields, watchedConds, conditionalSources]);
+  }, [allLeaves, watchedConds, conditionalSources]);
+
+  // Names of currently-visible leaf fields — drives both conditional rendering
+  // and which group children show inside their box.
+  const activeNameSet = useMemo(() => new Set(activeFields.map((f) => f.name)), [activeFields]);
 
   const sumSources = useMemo<SumSource[]>(() => {
     const computedTargets = new Set(
@@ -293,13 +301,35 @@ export default function DynamicForm({
     );
   }
 
-  const isFullWidth = (field: FormField) => {
-    if (field.type === 'header') return true;   // section headers always span full row
-    if (field.col_span === 'full') return true;
-    if (field.col_span === 'half') return false;
-    // Auto: type-based defaults
-    return field.type === 'textarea' || field.type === 'file' || field.type === 'repeat_group' || field.type === 'computed' || field.type === 'route_entry' || field.type === 'checkbox' || field.type === 'user_picker';
-  };
+  // Render a single leaf field (used at top level and inside group boxes).
+  const renderLeaf = (field: FormField) => (
+    <div key={field.name} className={fieldColSpanClass(field)}>
+      {field.type === 'header' ? (
+        <div className="flex items-center gap-3 py-1">
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-sm font-bold text-warmgray-700 leading-tight">{field.label}</span>
+            {field.helper_text && (
+              <span className="text-xs text-warmgray-400">{field.helper_text}</span>
+            )}
+          </div>
+          <div className="flex-1 h-px bg-warmgray-200/70" />
+        </div>
+      ) : (
+        <StandardInput
+          field={field as never}
+          register={register}
+          setValue={setValue}
+          watch={watch}
+          error={errors[field.name]}
+          initialValue={
+            field.type === 'file'
+              ? (defaultValues?.[field.name] as string | undefined)
+              : undefined
+          }
+        />
+      )}
+    </div>
+  );
 
   return (
     <form onSubmit={handleSubmit(handleFormSubmit, handleInvalid)} className="card space-y-6">
@@ -318,35 +348,27 @@ export default function DynamicForm({
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
-        {activeFields.filter((f) => !f.hidden).map((field) => (
-          <div key={field.name} className={isFullWidth(field) ? 'md:col-span-2' : ''}>
-            {field.type === 'header' ? (
-              <div className="flex items-center gap-3 py-1">
-                <div className="flex flex-col gap-0.5 min-w-0">
-                  <span className="text-sm font-bold text-warmgray-700 leading-tight">{field.label}</span>
-                  {field.helper_text && (
-                    <span className="text-xs text-warmgray-400">{field.helper_text}</span>
-                  )}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-x-6 gap-y-5">
+        {allFields.map((field) => {
+          // Visual group box — renders its visible children in a nested grid.
+          if (field.type === 'field_group') {
+            const kids = (field.fields ?? []).filter((c) => !c.hidden && activeNameSet.has(c.name));
+            if (kids.length === 0) return null;
+            return (
+              <fieldset key={field.name} className="col-span-1 md:col-span-12 rounded-2xl border border-warmgray-200/70 bg-white/40 px-4 pt-2 pb-4">
+                {field.label && (
+                  <legend className="px-2 text-xs font-bold uppercase tracking-widest text-warmgray-500">{field.label}</legend>
+                )}
+                {field.helper_text && <p className="text-[11px] text-warmgray-400 mb-2 px-2">{field.helper_text}</p>}
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-x-6 gap-y-5">
+                  {kids.map(renderLeaf)}
                 </div>
-                <div className="flex-1 h-px bg-warmgray-200/70" />
-              </div>
-            ) : (
-              <StandardInput
-                field={field as never}
-                register={register}
-                setValue={setValue}
-                watch={watch}
-                error={errors[field.name]}
-                initialValue={
-                  field.type === 'file'
-                    ? (defaultValues?.[field.name] as string | undefined)
-                    : undefined
-                }
-              />
-            )}
-          </div>
-        ))}
+              </fieldset>
+            );
+          }
+          if (field.hidden || !activeNameSet.has(field.name)) return null;
+          return renderLeaf(field);
+        })}
       </div>
 
       {sumSources.length > 0 && (

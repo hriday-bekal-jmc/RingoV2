@@ -572,60 +572,70 @@ function ComputedNumberDisplay({
   setValue?: UseFormSetValue<Record<string, unknown>>;
   register: UseFormRegister<Record<string, unknown>>;
 }) {
-  // Collect formula deps so useEffect only re-runs when they change
+  const { lang } = useLang();
+
+  // Collect formula deps so we only watch + recompute when they change
   const deps = useMemo(() => formulaDeps(field.formula ?? ''), [field.formula]);
 
-  // Watch all values for formula evaluation
-  const allValues = watch ? watch() as Record<string, unknown> : {};
+  // Watch ONLY the fields this calculation needs (not the whole form). Subscribing
+  // to every field via watch() re-rendered this component on every keystroke
+  // anywhere, which raced with typing and made digits appear to drop.
+  const watchNames = useMemo(() => {
+    const n = new Set<string>();
+    deps.forEach((d) => n.add(d));
+    if (field.date_diff_from) n.add(field.date_diff_from);
+    if (field.date_diff_to)   n.add(field.date_diff_to);
+    if (field.sum_target)     n.add(field.sum_target);
+    n.add(field.name); // own value — needed for injected/plain-computed display
+    return Array.from(n);
+  }, [deps, field.date_diff_from, field.date_diff_to, field.sum_target, field.name]);
 
-  useEffect(() => {
-    if (!setValue) return;
+  const watchedArr = (watch ? watch(watchNames) : []) as unknown[];
+  const valMap: Record<string, unknown> = {};
+  watchNames.forEach((nm, i) => { valMap[nm] = watchedArr[i]; });
 
-    // Injected value (e.g. _daily_rate set by backend via defaultValues) — no auto-compute, just display
-    if (!field.formula && !field.sum_target && !field.date_diff_from) return;
-
-    // Date diff: (to - from) + 1 days  e.g. trip_duration
+  // Compute the value DURING render so the display is always fresh (no 1-frame lag).
+  const computeValue = (): number => {
     if (field.date_diff_from && field.date_diff_to) {
-      const from = allValues[field.date_diff_from];
-      const to   = allValues[field.date_diff_to];
+      const from = valMap[field.date_diff_from];
+      const to   = valMap[field.date_diff_to];
       if (typeof from === 'string' && typeof to === 'string' && from && to) {
-        const diff = Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1);
-        setValue(field.name as never, diff as never, { shouldDirty: false });
-      } else {
-        setValue(field.name as never, 0 as never, { shouldDirty: false });
+        return Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1);
       }
-      return;
+      return 0;
     }
-
-    // Formula takes priority
     if (field.formula && deps.length > 0) {
       const numValues: Record<string, number> = {};
       for (const dep of deps) {
-        const v = allValues[dep];
+        const v = valMap[dep];
         numValues[dep] = typeof v === 'number' ? v : parseFloat(String(v ?? '0')) || 0;
       }
-      const result = evalFormula(field.formula, numValues);
-      setValue(field.name as never, result as never, { shouldDirty: false });
-      return;
+      return evalFormula(field.formula, numValues);
     }
-
-    // sum_target: sum repeat_group rows by sum_field
     if (field.sum_target && field.sum_field) {
-      const rows = allValues[field.sum_target];
+      const rows = valMap[field.sum_target];
       if (Array.isArray(rows)) {
-        const total = rows.reduce((acc: number, row: unknown) => {
+        return rows.reduce((acc: number, row: unknown) => {
           const r = row as Record<string, unknown>;
           const v = parseFloat(String(r[field.sum_field!] ?? '0'));
           return acc + (isFinite(v) ? v : 0);
         }, 0);
-        setValue(field.name as never, total as never, { shouldDirty: false });
       }
+      return 0;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(deps.map((d) => allValues[d])), allValues[field.sum_target ?? ''], allValues[field.date_diff_from ?? ''], allValues[field.date_diff_to ?? '']]);
+    // Injected / plain computed (e.g. set by SumWatcher or user_picker) — just read it.
+    return Number(valMap[field.name]) || 0;
+  };
 
-  const current = watch ? (Number(watch(field.name)) || 0) : 0;
-  const { lang } = useLang();
+  const isAutoComputed = !!(field.formula || (field.sum_target && field.sum_field) || field.date_diff_from);
+  const current = computeValue();
+
+  // Persist the computed value into the form (for submission). Display already
+  // shows `current`, so this effect never affects what the user sees.
+  useEffect(() => {
+    if (!setValue || !isAutoComputed) return;
+    setValue(field.name as never, current as never, { shouldDirty: false, shouldValidate: false, shouldTouch: false });
+  }, [current, isAutoComputed, setValue, field.name]);
 
   return (
     <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-teal-50/60 border border-teal-200/60">

@@ -8,7 +8,7 @@
 //   evalFormula("participant_count * 2000", { participant_count: 5 }) // → 10000
 //   evalFormula("Math.min(a * 2000, b)", { a: 3, b: 5000 })          // → 5000
 
-const SAFE_EXPR = /^[\d\s+\-*/.(),|]+$/;
+const SAFE_EXPR = /^[\d\s+\-*/%.(),|]+$/;
 
 export function evalFormula(
   formula: string,
@@ -18,13 +18,19 @@ export function evalFormula(
   try {
     // Protect built-in identifiers before field-name substitution
     let expr = formula
-      .replace(/\bMath\.min\b/g, '__min__')
-      .replace(/\bMath\.max\b/g, '__max__')
-      .replace(/\bNumber\b/g,    '__Number__');
+      .replace(/\bMath\.min\b/g,   '__min__')
+      .replace(/\bMath\.max\b/g,   '__max__')
+      .replace(/\bMath\.round\b/g, '__round__')
+      .replace(/\bMath\.abs\b/g,   '__abs__')
+      .replace(/\bMath\.floor\b/g, '__floor__')
+      .replace(/\bMath\.ceil\b/g,  '__ceil__')
+      .replace(/\bNumber\b/g,      '__Number__');
+
+    const protectedTokens = new Set(['__min__', '__max__', '__round__', '__abs__', '__floor__', '__ceil__', '__Number__']);
 
     // Replace every word-boundary identifier with its numeric value (0 if missing)
     expr = expr.replace(/\b([a-zA-Z_]\w*)\b/g, (match) => {
-      if (match === '__min__' || match === '__max__' || match === '__Number__') return match;
+      if (protectedTokens.has(match)) return match;
       const v = values[match];
       const n = typeof v === 'number' ? v : parseFloat(String(v ?? '0'));
       return String(isFinite(n) ? n : 0);
@@ -34,10 +40,14 @@ export function evalFormula(
     expr = expr
       .replace(/__min__/g,    'Math.min')
       .replace(/__max__/g,    'Math.max')
+      .replace(/__round__/g,  'Math.round')
+      .replace(/__abs__/g,    'Math.abs')
+      .replace(/__floor__/g,  'Math.floor')
+      .replace(/__ceil__/g,   'Math.ceil')
       .replace(/__Number__/g, 'Number');
 
     // Allowlist check — after substitution only digits/ops/Math/Number calls allowed
-    const stripped = expr.replace(/Math\.(min|max)/g, '').replace(/Number/g, '');
+    const stripped = expr.replace(/Math\.(min|max|round|abs|floor|ceil)/g, '').replace(/Number/g, '');
     if (!SAFE_EXPR.test(stripped)) return 0;
 
     // eslint-disable-next-line no-new-func
@@ -52,7 +62,7 @@ export function evalFormula(
 // Extract field names referenced in a formula string.
 export function formulaDeps(formula: string): string[] {
   if (!formula) return [];
-  const reserved = new Set(['Math', 'min', 'max', 'Number']);
+  const reserved = new Set(['Math', 'min', 'max', 'round', 'abs', 'floor', 'ceil', 'Number']);
   const matches = formula.match(/\b([a-zA-Z_]\w*)\b/g) ?? [];
   return [...new Set(matches.filter((m) => !reserved.has(m)))];
 }

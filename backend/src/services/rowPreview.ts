@@ -51,6 +51,17 @@ interface Schema {
   fields: FieldDef[];
 }
 
+// field_group is a visual-only container; its children live flat at the top
+// level. Expand groups so show_in_row children are discoverable here too.
+function flattenGroups(fields: FieldDef[]): FieldDef[] {
+  const out: FieldDef[] = [];
+  for (const f of fields) {
+    if (f.type === 'field_group' && Array.isArray(f.fields)) out.push(...flattenGroups(f.fields));
+    else out.push(f);
+  }
+  return out;
+}
+
 function toNum(raw: unknown): number | null {
   if (raw === null || raw === undefined || raw === '') return null;
   const n = Number(raw);
@@ -153,8 +164,8 @@ export function extractRowPreview(
   settlementSchema: Schema | null | undefined,
   settlementData:   Record<string, unknown> | null | undefined,
 ): RowPreview {
-  const ringiFields  = ringiSchema?.fields  ?? [];
-  const settleFields = settlementSchema?.fields ?? [];
+  const ringiFields  = flattenGroups(ringiSchema?.fields  ?? []);
+  const settleFields = flattenGroups(settlementSchema?.fields ?? []);
   const ringiData    = formData      ?? {};
   const settleData   = settlementData ?? {};
 
