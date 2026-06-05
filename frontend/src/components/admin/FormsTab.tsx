@@ -1006,6 +1006,11 @@ function FormBuilder({
                     ))}
                   </div>
                 )}
+                {currentFields.length > 0 && (
+                  <div className="mt-3 flex justify-end">
+                    <button onClick={addField} className="btn-outline text-xs">+ {lang === 'en' ? 'Add field' : '項目追加'}</button>
+                  </div>
+                )}
               </div>
 
               {/* Notes for version */}
@@ -2175,6 +2180,13 @@ function RepeatGroupFieldsEditor({
               </div>
             );
           })}
+          {childFields.length > 0 && (
+            <div className="flex justify-end mt-2">
+              <button type="button" onClick={addChild} className="btn-outline text-xs">
+                + {lang === 'en' ? 'Add row field' : '行項目追加'}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

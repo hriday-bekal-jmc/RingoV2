@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import fsPromises from 'fs/promises';
 import { query } from '../config/db';
 import { requireAuth } from '../middlewares/authMiddleware';
 import { uploadLimiter } from '../middlewares/rateLimit';
@@ -92,13 +93,11 @@ router.post('/', upload.array('files', 10), async (req: Request, res: Response):
 
         try {
           if (useDrive) {
-            // Stream directly from disk — file never fully loaded into RAM
             const stream = fs.createReadStream(tempPath);
             const result = await uploadToDrive(f.originalname, f.mimetype, stream, folderCategory);
             drive_file_id = result.fileId;
             drive_url     = result.webViewLink;
             stored_path   = `drive:${result.fileId}`;
-            fs.unlinkSync(tempPath); // temp file no longer needed
           } else {
             // Local FS — temp file is already in UPLOADS_DIR, just record its name
             stored_path = path.basename(tempPath);
@@ -132,10 +131,10 @@ router.post('/', upload.array('files', 10), async (req: Request, res: Response):
             size:          f.size,
             mime:          f.mimetype,
           };
-        } catch (err) {
-          // Clean up temp file on any error
-          try { fs.unlinkSync(tempPath); } catch { /* already gone */ }
-          throw err;
+        } finally {
+          // Always delete temp file — runs on success AND error.
+          // Drive path: removes temp after upload. Local FS path: no-op (file stays as stored_path).
+          if (useDrive) await fsPromises.unlink(tempPath).catch(() => {});
         }
       }),
     );

@@ -812,6 +812,12 @@ export default function Dashboard() {
                     {lang === 'en' ? 'Search' : '検索'}
                   </button>
                 </div>
+                <Section icon="📝" title={lang === 'en' ? 'Submit' : '申請する'}>
+                  <ActionTile label={lang === 'en' ? 'New' : '作成'} onClick={() => navigate('/applications/new')} />
+                  <ActionTile label={lang === 'en' ? 'Drafts' : '下書き'} count={draftCount} to="/history?filter=DRAFT" />
+                  <ActionTile label={lang === 'en' ? 'Unsettled' : '未精算'} count={approvedCount} onClick={() => setShowUnsettled(true)} />
+                  <ActionTile label={lang === 'en' ? 'In Progress' : '申請中'} count={pendingCount} to="/history?filter=PENDING_APPROVAL" />
+                </Section>
                 {perms.canApprove && (
                   <Section icon="✅" title={lang === 'en' ? 'Approve' : '承認する'}>
                     <ActionTile label={lang === 'en' ? 'Pending' : '未処理'} count={pendingApprovalsTotal} onClick={() => setShowAllPending(true)} />
@@ -819,12 +825,6 @@ export default function Dashboard() {
                     <ActionTile label={lang === 'en' ? 'Approval History' : '承認履歴'} to="/approval-history" />
                   </Section>
                 )}
-                <Section icon="📝" title={lang === 'en' ? 'Submit' : '申請する'}>
-                  <ActionTile label={lang === 'en' ? 'New' : '作成'} onClick={() => navigate('/applications/new')} />
-                  <ActionTile label={lang === 'en' ? 'Drafts' : '下書き'} count={draftCount} to="/history?filter=DRAFT" />
-                  <ActionTile label={lang === 'en' ? 'Unsettled' : '未精算'} count={approvedCount} onClick={() => setShowUnsettled(true)} />
-                  <ActionTile label={lang === 'en' ? 'In Progress' : '申請中'} count={pendingCount} to="/history?filter=PENDING_APPROVAL" />
-                </Section>
               </div>
 
               {/* Recent forms */}

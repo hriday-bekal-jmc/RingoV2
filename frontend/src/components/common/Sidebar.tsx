@@ -110,8 +110,8 @@ export default function Sidebar() {
         `}
       >
         <div className="relative flex flex-col flex-1 overflow-hidden">
-          <div className="absolute -top-16 -left-16 w-48 h-48 rounded-full bg-ringo-400/20 blur-3xl pointer-events-none" />
-          <div className="absolute bottom-0 -right-8 w-32 h-32 rounded-full bg-mustard-500/10 blur-2xl pointer-events-none" />
+          <div className="absolute -top-16 -left-16 w-48 h-48 rounded-full bg-white/10 blur-3xl pointer-events-none" />
+          <div className="absolute bottom-0 -right-8 w-32 h-32 rounded-full bg-ringo-700/30 blur-2xl pointer-events-none" />
 
           {/* Logo */}
           <div className={`relative border-b border-white/10 shrink-0 flex items-center ${collapsed ? 'px-3.5 py-4 justify-center' : 'px-5 py-5'}`}>
@@ -138,7 +138,7 @@ export default function Sidebar() {
               {!collapsed && (
                 <div className="min-w-0">
                   <div className="text-[15px] font-bold tracking-[0.08em] text-white leading-tight">RINGO</div>
-                  <div className="text-[9px] text-white/40 font-semibold tracking-[0.18em] uppercase mt-0.5">Workflow</div>
+                  <div className="text-[9px] text-white/60 font-semibold tracking-[0.18em] uppercase mt-0.5">Workflow</div>
                 </div>
               )}
             </button>
@@ -160,17 +160,17 @@ export default function Sidebar() {
                      transition-all duration-150
                      ${collapsed ? 'px-0 py-2.5 justify-center' : 'px-3 py-2.5'}
                      ${isActive
-                       ? 'bg-white/15 text-white shadow-sm'
-                       : 'text-white/60 hover:bg-white/10 hover:text-white/90'
+                       ? 'bg-white/20 text-white shadow-sm'
+                       : 'text-white/80 hover:bg-white/15 hover:text-white'
                      }`
                   }
                 >
                   {({ isActive }) => (
                     <>
                       {isActive && !collapsed && (
-                        <span className="absolute left-0 w-0.5 h-6 bg-gradient-to-b from-ringo-300 to-mustard-400 rounded-r-full" />
+                        <span className="absolute left-0 w-0.5 h-6 bg-gradient-to-b from-white/90 to-white/40 rounded-r-full" />
                       )}
-                      <span className={`transition-colors shrink-0 ${isActive ? 'text-white' : 'text-white/50 group-hover:text-white/80'}`}>
+                      <span className={`transition-colors shrink-0 ${isActive ? 'text-white' : 'text-white/70 group-hover:text-white'}`}>
                         {ICONS[item.to] ?? <span className="w-[18px] h-[18px] text-xs flex items-center justify-center">{item.icon}</span>}
                       </span>
                       {!collapsed && <span className="flex-1 truncate">{label}</span>}
@@ -207,7 +207,7 @@ export default function Sidebar() {
               {!collapsed && (
                 <div className="min-w-0 flex-1">
                   <div className="text-xs font-semibold text-white/90 truncate">{user?.full_name ?? '—'}</div>
-                  <div className="text-[10px] text-white/40">
+                  <div className="text-[10px] text-white/60">
                     {perms.label}
                     {user?.is_admin ? ' / Admin' : ''}
                   </div>
@@ -218,7 +218,7 @@ export default function Sidebar() {
             <button
               onClick={toggle}
               className="hidden md:flex w-full items-center justify-center gap-2 py-1.5 rounded-xl
-                         text-white/40 hover:text-white/70 hover:bg-white/10
+                         text-white/60 hover:text-white/90 hover:bg-white/10
                          transition-all duration-150 text-[11px] font-medium"
               title={collapsed ? '展開' : '折りたたむ'}
             >

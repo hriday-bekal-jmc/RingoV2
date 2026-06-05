@@ -5,6 +5,7 @@
 import { Router, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
+import fsPromises from 'fs/promises';
 import { query } from '../config/db';
 import { isAdminUser, requireAuth } from '../middlewares/authMiddleware';
 import { assertCanReadApp } from '../middlewares/authz';
@@ -177,7 +178,7 @@ router.post('/:id/ocr', async (req: Request, res: Response): Promise<void> => {
         res.status(404).json({ error: 'ファイルが見つかりません' });
         return;
       }
-      imageBuffer = fs.readFileSync(abs);
+      imageBuffer = await fsPromises.readFile(abs);
     } else {
       res.status(422).json({ error: 'ファイルを取得できませんでした' });
       return;

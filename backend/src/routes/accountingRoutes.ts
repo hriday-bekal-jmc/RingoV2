@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import fs from 'fs';
+import fsPromises from 'fs/promises';
 import path from 'path';
 import { z } from 'zod';
 import { query, withTransaction } from '../config/db';
@@ -292,22 +293,21 @@ router.post(
       let drive_file_id: string | null = null;
       let drive_url:     string | null = null;
 
-      const tempPath = file.path; // diskStorage wrote here
+      const tempPath  = file.path; // diskStorage wrote here
+      const driveMode = isDriveEnabled();
       try {
-        if (isDriveEnabled()) {
+        if (driveMode) {
           const stream = fs.createReadStream(tempPath);
           const r = await uploadToDrive(file.originalname, file.mimetype, stream, 'receipts');
           drive_file_id = r.fileId;
           drive_url     = r.webViewLink;
           stored_path   = `drive:${r.fileId}`;
-          fs.unlinkSync(tempPath);
         } else {
           // diskStorage already wrote to PROOF_UPLOADS_DIR with safeProofName
           stored_path = path.basename(tempPath);
         }
-      } catch (uploadErr) {
-        try { fs.unlinkSync(tempPath); } catch { /* already gone */ }
-        throw uploadErr;
+      } finally {
+        if (driveMode) await fsPromises.unlink(tempPath).catch(() => {});
       }
 
       let fileUrl = '';
