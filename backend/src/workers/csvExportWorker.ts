@@ -22,7 +22,7 @@ import { Worker, Job } from 'bullmq';
 import fs from 'fs';
 import path from 'path';
 import Cursor from 'pg-cursor';
-import { pool } from '../config/db';
+import { workerPool as pool } from '../config/db';
 import { bullConnection } from '../config/redis';
 import {
   CSV_EXPORT_QUEUE_NAME,

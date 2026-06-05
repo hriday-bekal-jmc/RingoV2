@@ -45,17 +45,30 @@ export function usePermissions(roleOverride?: string, isAdminOverride?: boolean)
     .map((route) => ALL_NAV_ITEMS.find((n) => n.to === route))
     .filter((n): n is NavPermission => Boolean(n));
 
-  // is_admin flag = full system access regardless of role.
-  // Nav: show ALL pages (not just role's nav_pages + /admin).
-  // This matches the static getPermissions() behaviour where isAdmin merges ADMIN_NAV.
-  const canAdmin = dbRow.canAdmin || isAdmin;
-  const finalNavItems = isAdmin ? ALL_NAV_ITEMS : navItems;
+  // Per-user capability overrides — additive only (can grant, never revoke)
+  const overrides   = user?.cap_overrides ?? [];
+  const hasOverride = (cap: string) => overrides.includes(cap);
+
+  const canApprove = dbRow.canApprove || isAdmin || hasOverride('can_approve');
+  const canSettle  = dbRow.canSettle  || isAdmin || hasOverride('can_settle');
+  const canAdmin   = dbRow.canAdmin   || isAdmin || hasOverride('can_admin');
+
+  // Nav: admins see all. Overrides add the matching page if not already present.
+  let finalNavItems = isAdmin ? ALL_NAV_ITEMS : navItems;
+  if (!isAdmin) {
+    const extra: NavPermission[] = [];
+    if (canSettle  && !finalNavItems.find((n) => n.to === '/accounting'))       extra.push(ALL_NAV_ITEMS.find((n) => n.to === '/accounting')!);
+    if (canApprove && !finalNavItems.find((n) => n.to === '/approvals'))        extra.push(ALL_NAV_ITEMS.find((n) => n.to === '/approvals')!);
+    if (canApprove && !finalNavItems.find((n) => n.to === '/approval-history')) extra.push(ALL_NAV_ITEMS.find((n) => n.to === '/approval-history')!);
+    if (canAdmin   && !finalNavItems.find((n) => n.to === '/admin'))            extra.push(ALL_NAV_ITEMS.find((n) => n.to === '/admin')!);
+    if (extra.length > 0) finalNavItems = [...finalNavItems, ...extra.filter(Boolean)];
+  }
 
   return {
     ...staticPerms,
     canSubmit:  dbRow.canSubmit,
-    canApprove: dbRow.canApprove || isAdmin,
-    canSettle:  dbRow.canSettle  || isAdmin,
+    canApprove,
+    canSettle,
     canAdmin,
     navItems: finalNavItems,
   };

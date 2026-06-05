@@ -119,9 +119,18 @@ export function applyComputedFormData(schema: FormSchema | null | undefined, dat
     (field) => field.type === 'number' && field.formula,
   );
 
-  if (computedTargets.size === 0 && formulaFields.length === 0) return data;
+  // Whitelist: only keep keys that exist in the schema + internal _seed marker.
+  // Drops any unknown keys the client sends (prevents JSONB bloat / injection).
+  const allowedKeys = new Set(schema.fields.map((f) => f.name));
+  allowedKeys.add('_seed'); // internal test-data marker — preserve if present
+  const sanitised: Record<string, unknown> = {};
+  for (const key of Object.keys(data)) {
+    if (allowedKeys.has(key)) sanitised[key] = data[key];
+  }
 
-  const next: Record<string, unknown> = { ...data };
+  if (computedTargets.size === 0 && formulaFields.length === 0) return sanitised;
+
+  const next: Record<string, unknown> = { ...sanitised };
   const totals = new Map<string, number>();
 
   const addToTarget = (target: string | undefined, value: unknown) => {

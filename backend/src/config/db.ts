@@ -15,6 +15,7 @@ function buildSslConfig(): { rejectUnauthorized: boolean; ca?: string } | false 
   return cfg;
 }
 
+// API pool — used by all user-facing request handlers
 export const pool = new Pool({
   host:     env.PGHOST,
   port:     env.PGPORT,
@@ -28,9 +29,24 @@ export const pool = new Pool({
   ssl: buildSslConfig(),
 });
 
-pool.on('error', (err: Error) => {
-  console.error('[pg] unexpected pool error', err);
+// Worker pool — separate low-limit pool for background jobs (CSV export, backups, etc.)
+// Prevents background workers from starving the API pool under concurrent load.
+// Hard cap of 3: enough for current worker concurrency (2) with one spare.
+export const workerPool = new Pool({
+  host:     env.PGHOST,
+  port:     env.PGPORT,
+  user:     env.PGUSER,
+  password: env.PGPASSWORD,
+  database: env.PGDATABASE,
+  min:      1,
+  max:      3,
+  idleTimeoutMillis:    60_000,
+  connectionTimeoutMillis: 10_000,
+  ssl: buildSslConfig(),
 });
+
+pool.on('error',       (err: Error) => { console.error('[pg] pool error',        err); });
+workerPool.on('error', (err: Error) => { console.error('[pg] workerPool error',  err); });
 
 export async function warmPgPool(): Promise<void> {
   const count = Math.max(env.PG_POOL_MIN, 1);

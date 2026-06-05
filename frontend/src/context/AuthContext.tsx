@@ -16,6 +16,8 @@ export interface User {
   notify_email:      boolean;
   notify_gchat:      boolean;
   gchat_webhook_url: string | null;
+  /** Per-user capability grants beyond role (e.g. ["can_settle"]) */
+  cap_overrides?:    string[];
 }
 
 interface AuthContextType {

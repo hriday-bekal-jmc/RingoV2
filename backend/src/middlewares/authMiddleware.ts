@@ -5,21 +5,24 @@ import { redis } from '../config/redis';
 import { SUPER_ADMIN_EMAILS } from '../config/env';
 
 export interface JwtPayload {
-  id: string;
-  email: string;
-  role: string;
-  is_admin: boolean;
+  id:            string;
+  email:         string;
+  role:          string;
+  is_admin:      boolean;
   department_id: string | null;
-  tv?: number;
-  iat?: number;
-  exp?: number;
+  cap_overrides?: string[];
+  tv?:           number;
+  iat?:          number;
+  exp?:          number;
 }
 
 export interface UserState {
-  is_active: boolean;
-  token_version: number;
-  role: string;
-  is_admin: boolean;
+  is_active:      boolean;
+  token_version:  number;
+  role:           string;
+  is_admin:       boolean;
+  /** Capabilities granted to this specific user beyond their role */
+  cap_overrides?: string[];
 }
 
 const USER_STATE_TTL_SEC = 60;
@@ -50,17 +53,18 @@ export async function loadUserState(userId: string): Promise<UserState | null> {
   if (inflight) return inflight;
 
   const loadPromise = (async (): Promise<UserState | null> => {
-    const r = await query(
-      `SELECT is_active, token_version, role, is_admin, email FROM users WHERE id = $1`,
-      [userId],
-    );
-    if (r.rows.length === 0) return null;
+    const [userRes, overridesRes] = await Promise.all([
+      query(`SELECT is_active, token_version, role, is_admin, email FROM users WHERE id = $1`, [userId]),
+      query(`SELECT capability FROM user_capability_overrides WHERE user_id = $1`, [userId]),
+    ]);
+    if (userRes.rows.length === 0) return null;
 
     const state: UserState = {
-      is_active:     r.rows[0].is_active,
-      token_version: r.rows[0].token_version ?? 0,
-      role:          r.rows[0].role,
-      is_admin:      Boolean(r.rows[0].is_admin) || SUPER_ADMIN_EMAILS.has(String(r.rows[0].email).toLowerCase()),
+      is_active:     userRes.rows[0].is_active,
+      token_version: userRes.rows[0].token_version ?? 0,
+      role:          userRes.rows[0].role,
+      is_admin:      Boolean(userRes.rows[0].is_admin) || SUPER_ADMIN_EMAILS.has(String(userRes.rows[0].email).toLowerCase()),
+      cap_overrides: overridesRes.rows.map((r: any) => r.capability as string),
     };
     await cacheUserState(userId, state);
     return state;
@@ -102,8 +106,9 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return;
   }
 
-  decoded.role = state.role;
-  decoded.is_admin = state.is_admin || SUPER_ADMIN_EMAILS.has(decoded.email.toLowerCase());
+  decoded.role         = state.role;
+  decoded.is_admin     = state.is_admin || SUPER_ADMIN_EMAILS.has(decoded.email.toLowerCase());
+  decoded.cap_overrides = state.cap_overrides ?? [];
   req.user = decoded;
   next();
 }

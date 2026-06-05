@@ -69,19 +69,26 @@ async function loadAuthProfile(userId: string): Promise<Record<string, unknown> 
   if (inflight) return inflight;
 
   const loadPromise = (async (): Promise<Record<string, unknown> | null> => {
-    const result = await query(
-      `SELECT u.id, u.full_name, u.email, u.role, u.is_admin, u.department_id, u.avatar_url,
-              COALESCE(u.daily_allowance_rate, ar.daily_rate_yen) AS daily_allowance_rate,
-              d.name AS department_name,
-              u.notify_email, u.notify_gchat, u.gchat_webhook_url
-       FROM users u
-       LEFT JOIN departments d ON u.department_id = d.id
-       LEFT JOIN allowance_rates ar ON ar.role = u.role
-       WHERE u.id = $1 AND u.is_active = TRUE`,
-      [userId],
-    );
-    const user = result.rows[0] as Record<string, unknown> | undefined;
+    const [profileRes, overridesRes] = await Promise.all([
+      query(
+        `SELECT u.id, u.full_name, u.email, u.role, u.is_admin, u.department_id, u.avatar_url,
+                COALESCE(u.daily_allowance_rate, ar.daily_rate_yen) AS daily_allowance_rate,
+                d.name AS department_name,
+                u.notify_email, u.notify_gchat, u.gchat_webhook_url
+         FROM users u
+         LEFT JOIN departments d ON u.department_id = d.id
+         LEFT JOIN allowance_rates ar ON ar.role = u.role
+         WHERE u.id = $1 AND u.is_active = TRUE`,
+        [userId],
+      ),
+      query(
+        `SELECT capability FROM user_capability_overrides WHERE user_id = $1`,
+        [userId],
+      ),
+    ]);
+    const user = profileRes.rows[0] as Record<string, unknown> | undefined;
     if (!user) return null;
+    user.cap_overrides = overridesRes.rows.map((r: any) => r.capability as string);
     await setJsonCache(key, user, AUTH_PROFILE_TTL_SEC);
     return user;
   })();

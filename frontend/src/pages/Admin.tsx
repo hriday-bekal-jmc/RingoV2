@@ -7,7 +7,8 @@ import { useDelayedLoading } from '../hooks/useDelayedLoading';
 import { useScrollLock } from '../hooks/useScrollLock';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
-import { ROLE_MAP, Role } from '../config/permissions';
+import { ROLE_MAP, type Role } from '../config/permissions';
+import { useAssignableRoles } from '../hooks/useRoles';
 import InlineConfirm from '../components/common/InlineConfirm';
 import AdminAppDetailModal from '../components/admin/AdminAppDetailModal';
 import FormsTab                    from '../components/admin/FormsTab';
@@ -108,6 +109,25 @@ interface UserModalProps {
 function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalProps) {
   const isNew = !user;
   const { t, lang } = useLang();
+  const { data: assignableRoles = [] } = useAssignableRoles();
+  const roleOptions = (assignableRoles.length > 0
+    ? assignableRoles
+    : ROLES.map((r) => ({ code: r, label_ja: (ROLE_MAP as any)[r]?.label ?? r, label_en: (ROLE_MAP as any)[r]?.label_en ?? r }))
+  ).map((r: any) => ({ value: r.code ?? r, label: lang === 'en' ? (r.label_en ?? r.label_ja ?? r) : (r.label_ja ?? r) }));
+
+  // Per-user capability overrides
+  const [capOverrides, setCapOverrides] = useState<string[]>([]);
+  const { data: existingOverrides } = useQuery<{ capability: string }[]>({
+    queryKey: ['admin', 'user-overrides', user?.id],
+    queryFn: async () => (await apiClient.get(`/admin/users/${user!.id}/capability-overrides`)).data,
+    enabled: !isNew && !!user?.id,
+    staleTime: 60_000,
+  });
+  useEffect(() => {
+    if (existingOverrides) setCapOverrides(existingOverrides.map((o) => o.capability));
+  }, [existingOverrides]);
+  const toggleCap = (cap: string) =>
+    setCapOverrides((prev) => prev.includes(cap) ? prev.filter((c) => c !== cap) : [...prev, cap]);
 
   // Lock page scroll while this modal is open — same reason as ConfirmDialog
   useScrollLock(true);
@@ -127,7 +147,7 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
   const set = (k: string, v: any) => setForm((p) => ({ ...p, [k]: v }));
 
   const handleSave = () => {
-    const payload: Record<string, any> = { ...form, department_id: form.department_id || null };
+    const payload: Record<string, any> = { ...form, department_id: form.department_id || null, cap_overrides: capOverrides };
     if (!payload.password) delete payload.password;
     onSave(payload);
   };
@@ -165,7 +185,7 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
           <div>
             <label className="label">{t('admin_field_role')}</label>
             <CustomSelect
-              options={ROLES.map((r) => ({ value: r, label: t(`role_${r}`) !== `role_${r}` ? t(`role_${r}`) : (ROLE_MAP[r as Role]?.label ?? r) }))}
+              options={roleOptions}
               value={form.role}
               onChange={(v) => set('role', v)}
             />
@@ -248,6 +268,44 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
           </div>
         </div>
 
+        {/* Additional access — per-user capability overrides (edit only) */}
+        {!isNew && (
+          <div className="border-t border-white/30 pt-4">
+            <p className="text-xs font-bold uppercase tracking-widest text-warmgray-500 mb-3">
+              {lang === 'en' ? 'Additional Access' : '追加アクセス権限'}
+            </p>
+            <p className="text-[11px] text-warmgray-400 mb-3">
+              {lang === 'en'
+                ? 'Grant specific capabilities beyond this user\'s role. Additive only.'
+                : 'ロール以外に個別で付与する権限です。役職変更は不要です。'}
+            </p>
+            <div className="space-y-2">
+              {([
+                { cap: 'can_approve', labelJa: '承認権限（承認・差し戻し・却下）', labelEn: 'Approval (approve / return / reject)' },
+                { cap: 'can_settle',  labelJa: '精算管理アクセス',                  labelEn: 'Accounting / Settlement access' },
+                { cap: 'can_admin',   labelJa: '管理者パネルアクセス',              labelEn: 'Admin panel access' },
+              ] as const).map(({ cap, labelJa, labelEn }) => (
+                <label key={cap} className="flex items-center gap-3 cursor-pointer select-none group">
+                  <div
+                    onClick={() => toggleCap(cap)}
+                    className={`w-9 h-5 rounded-full transition-colors duration-200 flex items-center px-0.5 ${capOverrides.includes(cap) ? 'bg-ringo-500' : 'bg-warmgray-200'}`}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${capOverrides.includes(cap) ? 'translate-x-4' : 'translate-x-0'}`} />
+                  </div>
+                  <span className={`text-xs font-medium transition-colors ${capOverrides.includes(cap) ? 'text-ringo-700' : 'text-warmgray-600'}`}>
+                    {lang === 'en' ? labelEn : labelJa}
+                  </span>
+                  {capOverrides.includes(cap) && (
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-ringo-50 text-ringo-600 border border-ringo-200/60">
+                      {lang === 'en' ? 'GRANTED' : '付与済み'}
+                    </span>
+                  )}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-end gap-3 pt-2">
           <button className="btn-outline" onClick={onClose}>{t('btn_cancel')}</button>
           <button
@@ -309,15 +367,11 @@ function UsersTab({ showToast, onGoToRoutes }: {
   });
 
   const updateUser = useMutation({
-    mutationFn: async ({ id, notify_email, notify_gchat, gchat_webhook_url, ...patch }: { id: string } & Record<string, any>) => {
-      // Send core user fields and notification settings in parallel
+    mutationFn: async ({ id, notify_email, notify_gchat, gchat_webhook_url, cap_overrides, ...patch }: { id: string } & Record<string, any>) => {
       await Promise.all([
         apiClient.patch(`/admin/users/${id}`, patch),
-        apiClient.patch(`/admin/users/${id}/notifications`, {
-          notify_email,
-          notify_gchat,
-          gchat_webhook_url: gchat_webhook_url || null,
-        }),
+        apiClient.patch(`/admin/users/${id}/notifications`, { notify_email, notify_gchat, gchat_webhook_url: gchat_webhook_url || null }),
+        apiClient.put(`/admin/users/${id}/capability-overrides`, { capabilities: cap_overrides ?? [] }),
       ]);
     },
     onSuccess: () => {

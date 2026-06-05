@@ -32,8 +32,17 @@ export async function sendGChat(
   }
 }
 
-/** Validate a user-submitted webhook URL */
+/** Validate a user-submitted webhook URL.
+ *  Checks parsed hostname — not just string prefix — to prevent @-credential SSRF bypass.
+ *  e.g. https://chat.googleapis.com@evil.com/ passes startsWith but hostname is evil.com.
+ */
 export function isValidGChatWebhook(url: string): boolean {
-  if (!url.startsWith(GCHAT_PREFIX)) return false;
-  try { new URL(url); return true; } catch { return false; }
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' &&
+           u.hostname  === 'chat.googleapis.com' &&
+           u.pathname.startsWith('/v1/spaces/');
+  } catch {
+    return false;
+  }
 }

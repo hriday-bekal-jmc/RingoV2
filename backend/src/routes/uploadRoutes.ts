@@ -92,8 +92,9 @@ router.post('/', upload.array('files', 10), async (req: Request, res: Response):
 
         try {
           if (useDrive) {
-            const buffer = fs.readFileSync(tempPath);
-            const result = await uploadToDrive(f.originalname, f.mimetype, buffer, folderCategory);
+            // Stream directly from disk — file never fully loaded into RAM
+            const stream = fs.createReadStream(tempPath);
+            const result = await uploadToDrive(f.originalname, f.mimetype, stream, folderCategory);
             drive_file_id = result.fileId;
             drive_url     = result.webViewLink;
             stored_path   = `drive:${result.fileId}`;

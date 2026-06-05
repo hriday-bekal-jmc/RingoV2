@@ -1058,4 +1058,57 @@ router.get('/notify-var-defs', async (_req: Request, res: Response) => {
   }
 });
 
+// ─── User capability overrides ───────────────────────────────────────────────
+
+const VALID_CAPABILITIES = new Set(['can_approve', 'can_settle', 'can_admin']);
+
+// GET /admin/users/:id/capability-overrides — list granted overrides for a user
+router.get('/users/:id/capability-overrides', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const res2 = await query(
+      `SELECT capability, created_at FROM user_capability_overrides WHERE user_id = $1`,
+      [req.params.id],
+    );
+    res.json(res2.rows);
+  } catch (err) {
+    console.error('[admin] get overrides failed:', err);
+    res.status(500).json({ error: '権限オーバーライドの取得に失敗しました' });
+  }
+});
+
+// PUT /admin/users/:id/capability-overrides — replace full override set
+// Body: { capabilities: string[] }  e.g. ["can_settle"]
+router.put('/users/:id/capability-overrides', async (req: Request, res: Response): Promise<void> => {
+  const { capabilities } = req.body as { capabilities?: string[] };
+  if (!Array.isArray(capabilities)) {
+    res.status(400).json({ error: 'capabilities must be an array' }); return;
+  }
+  const invalid = capabilities.filter((c) => !VALID_CAPABILITIES.has(c));
+  if (invalid.length > 0) {
+    res.status(400).json({ error: `Invalid capabilities: ${invalid.join(', ')}` }); return;
+  }
+
+  try {
+    await withTransaction(async (client) => {
+      await client.query(
+        `DELETE FROM user_capability_overrides WHERE user_id = $1`,
+        [req.params.id],
+      );
+      if (capabilities.length > 0) {
+        const placeholders = capabilities.map((_, i) => `($1, $${i + 2}, $${capabilities.length + 2})`).join(', ');
+        await client.query(
+          `INSERT INTO user_capability_overrides (user_id, capability, granted_by) VALUES ${placeholders}`,
+          [req.params.id, ...capabilities, req.user!.id],
+        );
+      }
+    });
+    // Bust cache so next request picks up new overrides immediately
+    await invalidateUserStateCache(String(req.params.id));
+    res.json({ capabilities });
+  } catch (err) {
+    console.error('[admin] set overrides failed:', err);
+    res.status(500).json({ error: '権限オーバーライドの更新に失敗しました' });
+  }
+});
+
 export default router;

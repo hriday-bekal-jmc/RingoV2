@@ -70,9 +70,24 @@ export function invalidateRolePermissionsCache(): void {
   redis.del(CACHE_KEY).catch(() => {});
 }
 
-/** Convenience: can user with given role access settlement/accounting? */
-export async function canRoleSettle(role: string, isAdmin: boolean): Promise<boolean> {
+/** Convenience: can user with given role (or personal overrides) access settlement/accounting? */
+export async function canRoleSettle(role: string, isAdmin: boolean, capOverrides?: string[]): Promise<boolean> {
   if (isAdmin) return true;
+  if (capOverrides?.includes('can_settle')) return true;
   const map = await getRolePermissions();
   return map[role]?.canSettle ?? false;
+}
+
+export async function canRoleApprove(role: string, isAdmin: boolean, capOverrides?: string[]): Promise<boolean> {
+  if (isAdmin) return true;
+  if (capOverrides?.includes('can_approve')) return true;
+  const map = await getRolePermissions();
+  return map[role]?.canApprove ?? false;
+}
+
+export async function canRoleAdmin(role: string, isAdmin: boolean, capOverrides?: string[]): Promise<boolean> {
+  if (isAdmin) return true;
+  if (capOverrides?.includes('can_admin')) return true;
+  const map = await getRolePermissions();
+  return map[role]?.canAdmin ?? false;
 }

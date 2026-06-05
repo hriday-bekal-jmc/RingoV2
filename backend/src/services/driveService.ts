@@ -100,9 +100,9 @@ export interface DriveUploadResult {
 export async function uploadToDrive(
   filename: string,
   mimeType: string,
-  buffer:   Buffer,
+  stream:   Buffer | Readable, // Accept stream to avoid buffering large files in RAM
   category?: DriveFolder,
-  parentFolderId?: string, // explicit override (e.g. per-application subfolder)
+  parentFolderId?: string,
 ): Promise<DriveUploadResult> {
   if (!isDriveEnabled()) throw new Error('Drive integration not configured');
 
@@ -117,7 +117,7 @@ export async function uploadToDrive(
     },
     media: {
       mimeType,
-      body: Readable.from(buffer),
+      body: stream instanceof Readable ? stream : Readable.from(stream),
     },
     fields: 'id, webViewLink, webContentLink',
     supportsAllDrives: true,

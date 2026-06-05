@@ -32,10 +32,11 @@ router.use(requireAuth);
 // Dynamic settle guard — reads can_settle from role_permissions table (Redis-cached, 60s TTL).
 // Admin flag (is_admin) always passes. No hardcoded role list.
 async function requireAccounting(req: Request, res: Response, next: NextFunction): Promise<void> {
-  const role    = req.user?.role    ?? '';
-  const isAdmin = isAdminUser(req.user);
+  const role         = req.user?.role          ?? '';
+  const isAdmin      = isAdminUser(req.user);
+  const capOverrides = req.user?.cap_overrides ?? [];
   try {
-    const allowed = await canRoleSettle(role, isAdmin);
+    const allowed = await canRoleSettle(role, isAdmin, capOverrides);
     if (!allowed) {
       res.status(403).json({ error: 'この機能は精算管理権限を持つユーザーのみ利用できます' });
       return;
@@ -61,7 +62,10 @@ const PROOF_UPLOADS_DIR = path.join(__dirname, '../../uploads');
 fs.mkdirSync(PROOF_UPLOADS_DIR, { recursive: true });
 
 const proofUpload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, PROOF_UPLOADS_DIR),
+    filename:    (_req, file, cb) => cb(null, safeProofName(file.originalname)),
+  }),
   limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = [
@@ -288,14 +292,22 @@ router.post(
       let drive_file_id: string | null = null;
       let drive_url:     string | null = null;
 
-      if (isDriveEnabled()) {
-        const r = await uploadToDrive(file.originalname, file.mimetype, file.buffer, 'receipts');
-        drive_file_id = r.fileId;
-        drive_url     = r.webViewLink;
-        stored_path   = `drive:${r.fileId}`;
-      } else {
-        stored_path = safeProofName(file.originalname);
-        fs.writeFileSync(path.join(PROOF_UPLOADS_DIR, stored_path), file.buffer);
+      const tempPath = file.path; // diskStorage wrote here
+      try {
+        if (isDriveEnabled()) {
+          const stream = fs.createReadStream(tempPath);
+          const r = await uploadToDrive(file.originalname, file.mimetype, stream, 'receipts');
+          drive_file_id = r.fileId;
+          drive_url     = r.webViewLink;
+          stored_path   = `drive:${r.fileId}`;
+          fs.unlinkSync(tempPath);
+        } else {
+          // diskStorage already wrote to PROOF_UPLOADS_DIR with safeProofName
+          stored_path = path.basename(tempPath);
+        }
+      } catch (uploadErr) {
+        try { fs.unlinkSync(tempPath); } catch { /* already gone */ }
+        throw uploadErr;
       }
 
       let fileUrl = '';
