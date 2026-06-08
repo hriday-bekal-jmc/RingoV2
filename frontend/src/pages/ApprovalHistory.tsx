@@ -423,7 +423,7 @@ export default function ApprovalHistory() {
       <div className="max-w-[1800px] mx-auto space-y-6">
 
         {/* Header */}
-        <div className="flex items-end justify-between gap-4 animate-fade-up">
+        <div className="flex items-end justify-between gap-4">
           <div>
             <p className="section-title mb-0">{t('nav_approval_history')}</p>
             <h2 className="text-2xl font-bold text-warmgray-800 mt-1">
@@ -455,7 +455,7 @@ export default function ApprovalHistory() {
         </div>
 
         {/* Filters — relative z-10 so calendar/select dropdowns escape the results card's stacking context */}
-        <div className="card animate-fade-up space-y-4 relative z-10">
+        <div className="card space-y-4 relative z-10">
           <div className="flex items-center justify-between">
             <p className="section-title mb-0">{lang === 'en' ? 'Filters' : '絞り込み'}</p>
             {hasFilters && (
@@ -565,7 +565,7 @@ export default function ApprovalHistory() {
         </div>
 
         {/* Results */}
-        <div className="card animate-fade-up">
+        <div className="card">
           <div className="flex items-center justify-between mb-4">
             <p className="section-title mb-0">
               {lang === 'en'
@@ -651,15 +651,14 @@ export default function ApprovalHistory() {
             <div className={`transition-opacity duration-200 ${isFetching && !isFetchingNextPage ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
 
               {/* ── Mobile card list ────────────────────────────────────────── */}
-              <div className="md:hidden space-y-3">
-                {items.map((item, i) => {
+              <div className="md:hidden space-y-3 stagger">
+                {items.map((item) => {
                   const act = ACTION_STYLES[item.action];
                   const appSt = APP_STATUS_LABEL[item.app_status];
                   return (
                     <div
                       key={item.step_id}
                       className="rounded-2xl border border-white/50 bg-white/40 backdrop-blur-sm px-4 py-3.5 space-y-2.5 cursor-pointer active:bg-white/60 transition-colors animate-fade-up"
-                      style={{ animationDelay: `${i * 20}ms` }}
                       onClick={() => setSelectedId(item.application_id)}
                     >
                       {/* Row 1: template + date */}
@@ -709,78 +708,80 @@ export default function ApprovalHistory() {
 
               {/* ── Desktop table ───────────────────────────────────────────── */}
               <div className="hidden md:block overflow-x-auto [scrollbar-gutter:stable]">
-                <table className="table-base">
+                <table className="table-base table-fixed min-w-[880px]">
                   <thead>
                     <tr>
-                      <th>{lang === 'en' ? 'Application' : '申請'}</th>
-                      <th>{lang === 'en' ? 'Applicant' : '申請者'}</th>
-                      {systemView && <th>{lang === 'en' ? 'Approver' : '承認者'}</th>}
-                      <th>{lang === 'en' ? 'Step' : 'ステップ'}</th>
-                      <th>{lang === 'en' ? 'Stage' : 'ステージ'}</th>
-                      <th>{lang === 'en' ? 'Action' : 'アクション'}</th>
-                      <th>{lang === 'en' ? 'App Status' : '申請状態'}</th>
-                      <th>{lang === 'en' ? 'Date' : '日時'}</th>
-                      <th></th>
+                      <th className="min-w-[180px]">{lang === 'en' ? 'Application' : '申請'}</th>
+                      <th className="w-36">{lang === 'en' ? 'Applicant' : '申請者'}</th>
+                      {systemView && <th className="w-28">{lang === 'en' ? 'Approver' : '承認者'}</th>}
+                      <th className="w-20">{lang === 'en' ? 'Stage' : 'ステージ'}</th>
+                      <th className="w-44">{lang === 'en' ? 'Action' : 'アクション'}</th>
+                      <th className="w-36">{lang === 'en' ? 'App Status' : '申請状態'}</th>
+                      <th className="w-20 sticky right-0 bg-[#FBF9F6] text-right">{lang === 'en' ? 'View' : '詳細'}</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {items.map((item, i) => {
+                  <tbody className="stagger">
+                    {items.map((item) => {
                       const act = ACTION_STYLES[item.action];
                       const appSt = APP_STATUS_LABEL[item.app_status];
                       return (
                         <tr
                           key={item.step_id}
-                          className="animate-fade-up cursor-pointer"
-                          style={{ animationDelay: `${i * 20}ms` }}
+                          className="cursor-pointer [&>td]:align-top animate-fade-in"
                           onClick={() => setSelectedId(item.application_id)}
                         >
-                          <td>
-                            <div className="font-semibold text-warmgray-800 text-sm">{item.template_name}</div>
-                            <div className="font-mono text-xs text-warmgray-400">{item.application_number ?? '—'}</div>
+                          <td className="align-top">
+                            <div className="font-semibold text-warmgray-800 text-sm leading-snug line-clamp-2">{item.template_name}</div>
+                            <div className="font-mono text-xs text-warmgray-400 mt-0.5 truncate">{item.application_number ?? '—'}</div>
                           </td>
                           <td>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 max-w-[160px]">
                               <UserAvatar name={item.applicant_name ?? '?'} avatarUrl={item.applicant_avatar} size={7} />
-                              <span className="text-sm text-warmgray-700">{item.applicant_name ?? '—'}</span>
+                              <div className="min-w-0">
+                                <span className="block text-sm text-warmgray-700 truncate">{item.applicant_name ?? '—'}</span>
+                                {!systemView && item.step_label && (
+                                  <span className="block text-[11px] text-warmgray-400 truncate">{item.step_label}</span>
+                                )}
+                              </div>
                             </div>
                           </td>
                           {systemView && (
                             <td>
-                              <span className="text-sm text-warmgray-700">{item.approver_name ?? '—'}</span>
+                              <span className="block text-sm text-warmgray-700 max-w-[140px] truncate">{item.approver_name ?? '—'}</span>
+                              {item.step_label && (
+                                <span className="block text-[11px] text-warmgray-400 max-w-[140px] truncate">{item.step_label}</span>
+                              )}
                             </td>
                           )}
-                          <td><span className="text-sm text-warmgray-600">{item.step_label}</span></td>
                           <td>
                             {item.stage === 'SETTLEMENT' ? (
-                              <span className="badge-teal">{lang === 'en' ? 'Settlement' : '精算'}</span>
+                              <span className="badge-teal whitespace-nowrap">{lang === 'en' ? 'Settlement' : '精算'}</span>
                             ) : (
-                              <span className="badge-ringo">{lang === 'en' ? 'Ringi' : '稟議'}</span>
+                              <span className="badge-ringo whitespace-nowrap">{lang === 'en' ? 'Ringi' : '稟議'}</span>
                             )}
                           </td>
-                          <td>
-                            <span className={act.badge}>
+                          <td className="align-top">
+                            <span className={`${act.badge} whitespace-nowrap`}>
                               {act.icon} {lang === 'en' ? act.label_en : act.label_ja}
                             </span>
+                            <div className="text-[11px] text-warmgray-400 tabular-nums whitespace-nowrap mt-1">
+                              {new Date(item.acted_at).toLocaleDateString(dateLocale)} {new Date(item.acted_at).toLocaleTimeString(dateLocale, { hour: '2-digit', minute: '2-digit' })}
+                            </div>
                             {item.comment && (
-                              <div className="text-[11px] text-warmgray-400 mt-0.5 max-w-[180px] truncate" title={item.comment}>
+                              <div className="text-[11px] text-warmgray-400 mt-0.5 break-words line-clamp-2" title={item.comment}>
                                 "{item.comment}"
                               </div>
                             )}
                           </td>
-                          <td>
-                            <span className={APP_STATUS_BADGE[item.app_status] ?? 'badge-draft'}>
+                          <td className="align-top">
+                            <span className={`${APP_STATUS_BADGE[item.app_status] ?? 'badge-draft'} whitespace-nowrap`}>
                               {lang === 'en' ? (appSt?.en ?? item.app_status) : (appSt?.ja ?? item.app_status)}
                             </span>
                           </td>
-                          <td>
-                            <span className="text-xs text-warmgray-500 tabular-nums whitespace-nowrap">
-                              {new Date(item.acted_at).toLocaleDateString(dateLocale)}
-                            </span>
-                            <div className="text-[11px] text-warmgray-400 tabular-nums">
-                              {new Date(item.acted_at).toLocaleTimeString(dateLocale, { hour: '2-digit', minute: '2-digit' })}
-                            </div>
-                          </td>
-                          <td onClick={(e) => e.stopPropagation()}>
+                          <td
+                            onClick={(e) => e.stopPropagation()}
+                            className="sticky right-0 bg-[#FBF9F6] shadow-[-8px_0_8px_-6px_rgba(60,40,20,0.10)]"
+                          >
                             <button
                               className="btn-ghost btn-sm text-ringo-500 hover:text-ringo-600 whitespace-nowrap"
                               onClick={() => setSelectedId(item.application_id)}

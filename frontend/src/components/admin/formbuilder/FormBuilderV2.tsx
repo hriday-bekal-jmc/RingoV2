@@ -12,8 +12,9 @@ import { useState, useMemo, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors, useDroppable,
-  type DragEndEvent, type CollisionDetection,
+  DndContext, DragOverlay, closestCenter, pointerWithin, rectIntersection,
+  PointerSensor, KeyboardSensor, useSensor, useSensors, useDroppable,
+  type DragEndEvent, type DragStartEvent, type CollisionDetection,
 } from '@dnd-kit/core';
 import {
   SortableContext, arrayMove, verticalListSortingStrategy, sortableKeyboardCoordinates,
@@ -25,6 +26,7 @@ import FieldPalette from './FieldPalette';
 import CanvasField from './CanvasField';
 import PropertiesPanel from './PropertiesPanel';
 import DynamicForm from '../../forms/DynamicForm';
+import { catalogFor, fieldGlyph } from './fieldCatalog';
 import {
   GRADIENT_OPTIONS, DEFAULT_REPEAT_MAX_ROWS, mirrorFields, genCode,
   type FormField, type TemplateDetail, type Department,
@@ -139,6 +141,7 @@ export default function FormBuilderV2({
   const [selectedChild, setSelectedChild]     = useState<number | null>(null);
   const [mobileTab, setMobileTab]             = useState<MobileTab>('build');
   const [canvasMode, setCanvasMode]           = useState<'build' | 'preview'>('build');
+  const [activeDrag, setActiveDrag]           = useState<{ glyph: string; label: string } | null>(null);
 
   const { data: departments } = useQuery<Department[]>({
     queryKey: ['admin', 'departments-list'],
@@ -344,10 +347,56 @@ export default function FormBuilderV2({
       ? currentFields[loc.index]
       : currentFields[currentIds.indexOf(loc.zone)]?.fields?.[loc.index];
 
+  // Drop a NEW field (dragged from the palette) at a location.
+  const insertNewField = (type: string, dst: Loc | null) => {
+    if (dst && dst.zone !== 'root' && CONTAINER_TYPES.has(type)) {
+      showToast(lang === 'en' ? 'A group/table cannot go inside another box' : 'グループ・表は他のボックスに入れられません', 'error');
+      return;
+    }
+    if (!dst || dst.zone === 'root') {
+      const at = !dst || dst.append ? currentFields.length : Math.min(dst.index, currentFields.length);
+      const uid = genUid();
+      const nf = [...currentFields]; nf.splice(at, 0, newFieldOfType(type, currentFields.length));
+      const ni = [...currentIds]; ni.splice(at, 0, uid);
+      setCurrentFields(nf); setCurrentIds(ni);
+      setSelectedUid(uid); setSelectedChild(null);
+    } else {
+      const p = currentIds.indexOf(dst.zone);
+      if (p < 0) return;
+      const kids = currentFields[p].fields ?? [];
+      const at = dst.append ? kids.length : Math.min(dst.index, kids.length);
+      const next = [...kids]; next.splice(at, 0, newFieldOfType(type, kids.length));
+      setChildren(p, next);
+      setSelectedUid(currentIds[p]); setSelectedChild(at);
+    }
+    setMobileTab('edit');
+  };
+
+  const onDragStart = (e: DragStartEvent) => {
+    const id = String(e.active.id);
+    if (id.startsWith('new:')) {
+      const c = catalogFor(id.slice(4));
+      setActiveDrag(c ? { glyph: c.icon, label: lang === 'en' ? c.label_en : c.label_ja } : null);
+      return;
+    }
+    const loc = parseLoc(id);
+    const f = loc ? fieldAt(loc) : null;
+    setActiveDrag(f ? { glyph: fieldGlyph(f.type), label: f.label || f.type } : null);
+  };
+
   const onDragEnd = (e: DragEndEvent) => {
     const { active, over } = e;
+    setActiveDrag(null);
     if (!over) return;
-    const src = parseLoc(String(active.id));
+
+    // Palette-origin drag → insert a brand-new field.
+    const rawActive = String(active.id);
+    if (rawActive.startsWith('new:')) {
+      insertNewField(rawActive.slice(4), parseLoc(String(over.id)));
+      return;
+    }
+
+    const src = parseLoc(rawActive);
     const dst = parseLoc(String(over.id));
     if (!src || !dst) return;
     if (src.zone === dst.zone && src.index === dst.index && !dst.append) return;
@@ -394,16 +443,23 @@ export default function FormBuilderV2({
     setSelectedUid(null); setSelectedChild(null);
   };
 
-  // A top-level drag must only target other top-level slots (its own children
-  // would otherwise steal the collision and block downward moves). Child drags
-  // can target anything (reorder, or move out to root).
   const collisionDetection: CollisionDetection = (args) => {
+    // A top-level drag only targets other top-level slots — its own children
+    // would otherwise steal the collision and block downward moves.
     if (String(args.active.id).startsWith('t:')) {
       const filtered = args.droppableContainers.filter((c) => {
         const id = String(c.id);
         return id.startsWith('t:') || id === 'z:root';
       });
       return closestCenter({ ...args, droppableContainers: filtered });
+    }
+    // Child reorder + palette-new drags: restrict to droppables actually under
+    // the pointer, then order those by closest center. This makes dropping INSIDE
+    // a box land where the cursor is (closestCenter alone snapped to the box row).
+    const hits = pointerWithin(args).length ? pointerWithin(args) : rectIntersection(args);
+    if (hits.length) {
+      const under = args.droppableContainers.filter((c) => hits.some((h) => h.id === c.id));
+      return closestCenter({ ...args, droppableContainers: under });
     }
     return closestCenter(args);
   };
@@ -633,6 +689,7 @@ export default function FormBuilderV2({
               />
             </div>
           ) : (
+            <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragStart={onDragStart} onDragEnd={onDragEnd}>
             <div className="flex-1 grid md:grid-cols-[200px_1fr_minmax(280px,360px)] min-h-0 overflow-hidden">
               {/* Palette */}
               <div className={`${mobileTab === 'add' ? 'flex' : 'hidden'} md:flex flex-col min-h-0 overflow-y-auto border-r border-white/40 bg-white/30 p-3`}>
@@ -693,13 +750,16 @@ export default function FormBuilderV2({
                       </div>
                     )
                   ) : currentFields.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center text-center text-warmgray-400 gap-2 py-16">
-                      <span className="text-3xl">📋</span>
-                      <p className="text-sm font-medium">{lang === 'en' ? 'No fields yet' : 'まだ項目がありません'}</p>
-                      <p className="text-xs">{lang === 'en' ? 'Pick a field type from the left to start.' : '左から項目を選んで追加してください。'}</p>
-                    </div>
+                    <>
+                      <div className="flex flex-col items-center justify-center text-center text-warmgray-400 gap-2 py-12">
+                        <span className="text-3xl">📋</span>
+                        <p className="text-sm font-medium">{lang === 'en' ? 'No fields yet' : 'まだ項目がありません'}</p>
+                        <p className="text-xs">{lang === 'en' ? 'Click or drag a field type from the left to start.' : '左から項目をクリックまたはドラッグして追加。'}</p>
+                      </div>
+                      <RootDropZone label={lang === 'en' ? 'Drop a field here' : 'ここに項目をドロップ'} />
+                    </>
                   ) : (
-                    <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragEnd={onDragEnd}>
+                    <>
                       <SortableContext items={currentFields.map((_, i) => `t:${currentIds[i]}`)} strategy={verticalListSortingStrategy}>
                         <div className="space-y-1.5">
                           {currentFields.map((f, i) => (
@@ -747,7 +807,7 @@ export default function FormBuilderV2({
                         </div>
                       </SortableContext>
                       <RootDropZone label={lang === 'en' ? 'Drop here to place at the bottom' : 'ここにドロップで最下部に配置'} />
-                    </DndContext>
+                    </>
                   )}
                 </div>
               </div>
@@ -779,6 +839,14 @@ export default function FormBuilderV2({
                 )}
               </div>
             </div>
+            <DragOverlay>
+              {activeDrag ? (
+                <div className="flex items-center gap-2 rounded-xl border border-ringo-300 bg-white px-2.5 py-2 shadow-lg text-xs font-semibold text-warmgray-700">
+                  <span>{activeDrag.glyph}</span>{activeDrag.label}
+                </div>
+              ) : null}
+            </DragOverlay>
+            </DndContext>
           )}
         </div>
 

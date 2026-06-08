@@ -9,18 +9,18 @@
 :root {
   --ringo-50:  #FFF1F0;
   --ringo-100: #FFD9D7;
-  --ringo-200: #FFB3AF;
-  --ringo-300: #FF8C87;
-  --ringo-400: #FF6460;
-  --ringo-500: #FF4640;
-  --ringo-600: #E03028;
+  --ringo-200: #FFB0AB;
+  --ringo-300: #FF867F;
+  --ringo-400: #F85850;
+  --ringo-500: #ED3A33;
+  --ringo-600: #D02A24;
   --ringo-700: #B82820;
   --ringo-800: #3A1812;
   --ringo-900: #2A1512;
-  /* Semantic gradient — updated to coral red */
-  --ringo-gradient: linear-gradient(135deg, #B82820 0%, #FF4640 60%, #FF6460 100%);
-  /* Sidebar bg gradient — #FF4640 dominant, deeper reds only for depth */
-  --ringo-sidebar:  linear-gradient(160deg, #E84040 0%, #D83430 35%, #C42820 70%, #A82018 100%);
+  /* Semantic gradient — apple red */
+  --ringo-gradient: linear-gradient(135deg, #B82820 0%, #ED3A33 60%, #F85850 100%);
+  /* Sidebar bg gradient — apple-red dominant, deeper reds only for depth */
+  --ringo-sidebar:  linear-gradient(160deg, #E03A37 0%, #D0302B 35%, #B82820 70%, #9E2018 100%);
 }
 
 @layer base {

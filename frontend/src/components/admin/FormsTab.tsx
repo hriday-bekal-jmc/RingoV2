@@ -194,8 +194,8 @@ export default function FormsTab({ showToast }: { showToast: (m: string, t?: 'su
       {/* Header w/ "New form" CTA */}
       <div className="flex items-center justify-between">
         <h3 className="section-title mb-0">{lang === 'en' ? 'Form templates' : 'フォームテンプレート'}</h3>
-        <button onClick={() => setBetaCreating(true)} className="btn-primary text-xs">
-          + {lang === 'en' ? 'New form' : '新規作成'}
+        <button onClick={() => setBetaCreating(true)} className="btn-primary text-xs bg-gradient-to-r from-ringo-500 to-ringo-400">
+          ✨ {lang === 'en' ? 'New form' : '新規作成'}
         </button>
       </div>
 
@@ -237,9 +237,9 @@ export default function FormsTab({ showToast }: { showToast: (m: string, t?: 'su
               <div className="flex gap-2 flex-wrap">
                 <button
                   onClick={() => setBetaEditingId(t.id)}
-                  className="btn-outline flex-1 text-xs min-w-[100px]"
+                  className="btn-primary flex-1 text-xs min-w-[100px] bg-gradient-to-r from-ringo-500 to-ringo-400"
                 >
-                  {lang === 'en' ? 'Edit / Versions' : '編集・履歴'}
+                  ✨ {lang === 'en' ? 'Edit' : '編集'}
                 </button>
                 <button
                   onClick={() => toggleActive.mutate({ id: t.id, is_active: !t.is_active })}

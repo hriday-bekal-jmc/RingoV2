@@ -4,15 +4,15 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Coral red — primary brand color (#FF4640)
+        // Apple red — primary brand color (#ED3A33, slightly deeper than coral)
         ringo: {
           50:  '#FFF1F0',
           100: '#FFD9D7',
-          200: '#FFB3AF',
-          300: '#FF8C87',
-          400: '#FF6460',
-          500: '#FF4640',   // primary
-          600: '#E03028',
+          200: '#FFB0AB',
+          300: '#FF867F',
+          400: '#F85850',
+          500: '#ED3A33',   // primary — apple red
+          600: '#D02A24',
           700: '#B82820',
           800: '#3A1812',   // sidebar dark surface (unchanged for contrast)
           900: '#2A1512',   // darkest — login gradient
