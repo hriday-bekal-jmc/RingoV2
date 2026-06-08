@@ -13,6 +13,7 @@ import PatternBadge from '../components/common/PatternBadge';
 import { templateLabel } from '../config/templateLabels';
 import apiClient from '../services/apiClient';
 import RingoLoader from '../components/common/RingoLoader';
+import { useDelayedLoading } from '../hooks/useDelayedLoading';
 
 interface TemplateTile {
   id:             string;
@@ -46,6 +47,8 @@ export default function FormSelector() {
     staleTime: 300_000,
   });
 
+  const showLoader = useDelayedLoading(isLoading);
+
   return (
     <Layout title={lang === 'en' ? 'New Application' : '申請フォーム'}>
       <div className="max-w-5xl mx-auto space-y-6">
@@ -70,9 +73,9 @@ export default function FormSelector() {
         </div>
 
         {/* Template grid */}
-        {isLoading ? (
+        {showLoader ? (
           <RingoLoader.Block />
-        ) : (
+        ) : isLoading ? null : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-up">
             {(templates ?? []).map((tmpl, i) => {
                           const label = templateLabel(tmpl.code, lang, tmpl.title_ja, tmpl.title);

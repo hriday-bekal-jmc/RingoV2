@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/apiClient';
 import Layout from '../components/common/Layout';
 import RingoLoader from '../components/common/RingoLoader';
+import { useDelayedLoading } from '../hooks/useDelayedLoading';
 import DynamicForm from '../components/forms/DynamicForm';
 import TransportationForm from '../components/forms/TransportationForm';
 import TransportationDetail from '../components/forms/TransportationDetail';
@@ -499,6 +500,8 @@ export default function ApplicationDetail() {
     refetchOnWindowFocus: true,
   });
 
+  const showLoader = useDelayedLoading(isLoading);
+
   // Approval actions (visible when current user is a pending approver)
   const [approvalComment, setApprovalComment] = useState('');
   const [approvalAction, setApprovalAction] = useState<'approve' | 'return' | 'reject' | null>(null);
@@ -545,7 +548,8 @@ export default function ApplicationDetail() {
     SETTLEMENT_APPROVED: t('status_settle_approved'),
   };
 
-  if (isLoading) return <Layout title={t('loading')}><RingoLoader.Block /></Layout>;
+  if (showLoader) return <Layout title={t('loading')}><RingoLoader.Block /></Layout>;
+  if (isLoading) return <Layout title={t('loading')}><></></Layout>;
   if (!app) return <Layout title={t('error_load')}><div className="p-8 text-ringo-500 font-bold">{t('settle_not_found')}</div></Layout>;
 
   if (app.status === 'DRAFT') {

@@ -109,10 +109,12 @@ function DetailPanel({ applicationId, onClose, lang }: { applicationId: string; 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-warmgray-900/60 backdrop-blur-sm" onClick={onClose} />
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 xl:items-stretch xl:justify-end xl:p-0">
+      <div className="absolute inset-0 bg-warmgray-900/60 backdrop-blur-sm xl:bg-warmgray-900/25" onClick={onClose} />
 
-      <div className="relative glass rounded-none md:rounded-3xl shadow-2xl w-full max-w-3xl max-h-[100dvh] md:max-h-[92vh] flex flex-col animate-scale-in overflow-hidden">
+      <div className="relative glass shadow-2xl w-full flex flex-col animate-scale-in overflow-hidden
+                      max-w-3xl max-h-[100dvh] md:max-h-[92vh] rounded-none md:rounded-3xl
+                      xl:max-w-[540px] xl:max-h-full xl:h-full xl:rounded-none xl:rounded-l-3xl xl:border-l xl:border-white/40">
 
         {/* Header */}
         <div className="px-4 md:px-7 pt-5 md:pt-6 pb-4 md:pb-5 border-b border-white/30 shrink-0 flex items-center justify-between gap-3">
@@ -134,7 +136,7 @@ function DetailPanel({ applicationId, onClose, lang }: { applicationId: string; 
             {app && (
               <Link
                 to={`/applications/${applicationId}`}
-                className="hidden sm:inline-flex btn-outline btn-sm text-xs"
+                className="inline-flex btn-outline btn-sm text-xs"
                 onClick={onClose}
               >
                 {lang === 'en' ? 'Full page →' : '詳細ページ →'}
@@ -423,13 +425,13 @@ export default function ApprovalHistory() {
       <div className="max-w-[1800px] mx-auto space-y-6">
 
         {/* Header */}
-        <div className="flex items-end justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
           <div>
             <p className="section-title mb-0">{t('nav_approval_history')}</p>
-            <h2 className="text-2xl font-bold text-warmgray-800 mt-1">
+            <h2 className="text-xl sm:text-2xl font-bold text-warmgray-800 mt-1 flex flex-wrap items-center gap-2">
               {t('title_approval_history')}
               {systemView && (
-                <span className="ml-2 text-sm font-semibold text-ringo-500 bg-ringo-50 border border-ringo-200/60 px-2 py-0.5 rounded-lg">
+                <span className="text-sm font-semibold text-ringo-500 bg-ringo-50 border border-ringo-200/60 px-2 py-0.5 rounded-lg">
                   {lang === 'en' ? 'Company-wide' : '全社'}
                 </span>
               )}
@@ -438,18 +440,20 @@ export default function ApprovalHistory() {
           {isAdmin && (
             <button
               onClick={() => { setSystemView((v) => !v); clearFilters(); }}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-xs font-bold transition-all duration-200 shrink-0
+              className={`self-start sm:self-auto flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl border text-xs font-bold transition-all duration-200 shrink-0
                 ${systemView
                   ? 'bg-white/70 text-warmgray-600 border-white/80 hover:border-ringo-200 hover:text-ringo-600'
                   : 'bg-ringo-500 text-white border-ringo-500 shadow-sm hover:bg-ringo-600'
                 }`}
             >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941" />
               </svg>
-              {systemView
-                ? (lang === 'en' ? 'My View' : 'マイビュー')
-                : (lang === 'en' ? 'Company View' : '全社ビュー')}
+              <span>
+                {systemView
+                  ? (lang === 'en' ? 'My View' : 'マイビュー')
+                  : (lang === 'en' ? 'Company View' : '全社ビュー')}
+              </span>
             </button>
           )}
         </div>
@@ -465,7 +469,7 @@ export default function ApprovalHistory() {
             )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {/* Stage */}
             <div>
               <label className="label">{lang === 'en' ? 'Stage' : 'ステージ'}</label>
@@ -523,7 +527,7 @@ export default function ApprovalHistory() {
                   className="text-[11px] text-ringo-500 hover:text-ringo-600 mt-1 px-0.5"
                   onClick={() => setApplicant(applicantInput)}
                 >
-                  Enter で検索 →
+                  {lang === 'en' ? 'Press Enter to search →' : 'Enter で検索 →'}
                 </button>
               )}
             </div>
@@ -556,7 +560,7 @@ export default function ApprovalHistory() {
                     className="text-[11px] text-ringo-500 hover:text-ringo-600 mt-1 px-0.5"
                     onClick={() => setApprover(approverInput)}
                   >
-                    Enter で検索 →
+                    {lang === 'en' ? 'Press Enter to search →' : 'Enter で検索 →'}
                   </button>
                 )}
               </div>
@@ -602,18 +606,17 @@ export default function ApprovalHistory() {
               </div>
               {/* Desktop skeleton */}
               <div className="hidden md:block overflow-x-auto [scrollbar-gutter:stable]">
-                <table className="table-base">
+                <table className={`table-base table-fixed ${systemView ? 'min-w-[960px] xl:min-w-[1120px]' : 'min-w-[880px] xl:min-w-[1040px]'}`}>
                   <thead>
                     <tr>
-                      <th>{lang === 'en' ? 'Application' : '申請'}</th>
-                      <th>{lang === 'en' ? 'Applicant' : '申請者'}</th>
-                      {systemView && <th>{lang === 'en' ? 'Approver' : '承認者'}</th>}
-                      <th>{lang === 'en' ? 'Step' : 'ステップ'}</th>
-                      <th>{lang === 'en' ? 'Stage' : 'ステージ'}</th>
-                      <th>{lang === 'en' ? 'Action' : 'アクション'}</th>
-                      <th>{lang === 'en' ? 'App Status' : '申請状態'}</th>
-                      <th>{lang === 'en' ? 'Date' : '日時'}</th>
-                      <th />
+                      <th className="min-w-[180px]">{lang === 'en' ? 'Application' : '申請'}</th>
+                      <th className="w-36">{lang === 'en' ? 'Applicant' : '申請者'}</th>
+                      {systemView && <th className="w-28">{lang === 'en' ? 'Approver' : '承認者'}</th>}
+                      <th className="w-20">{lang === 'en' ? 'Stage' : 'ステージ'}</th>
+                      <th className="w-44">{lang === 'en' ? 'Action' : 'アクション'}</th>
+                      <th className="hidden xl:table-cell w-44">{lang === 'en' ? 'Comment' : 'コメント'}</th>
+                      <th className="w-36">{lang === 'en' ? 'App Status' : '申請状態'}</th>
+                      <th className="w-20 sticky right-0 bg-[#FBF9F6] text-right">{lang === 'en' ? 'View' : '詳細'}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -621,11 +624,11 @@ export default function ApprovalHistory() {
                       <tr key={i}>
                         <td><div className="space-y-1.5"><Sk.Line w={i % 3 === 0 ? 'w-32' : i % 3 === 1 ? 'w-28' : 'w-40'} h="h-3.5" /><Sk.Line w="w-20" h="h-2.5" /></div></td>
                         <td><div className="space-y-1.5"><Sk.Line w={i % 2 === 0 ? 'w-24' : 'w-28'} h="h-3.5" /><Sk.Line w="w-16" h="h-2.5" /></div></td>
-                        <td><Sk.Line w={i % 2 === 0 ? 'w-28' : 'w-24'} h="h-3" /></td>
-                        <td><Sk.Badge w="w-16" /></td>
-                        <td><Sk.Badge w={i % 2 === 0 ? 'w-16' : 'w-20'} /></td>
-                        <td><Sk.Badge w="w-20" /></td>
-                        <td><Sk.Line w="w-24" h="h-3" /></td>
+                        {systemView && <td><Sk.Line w={i % 2 === 0 ? 'w-20' : 'w-24'} h="h-3" /></td>}
+                        <td><Sk.Badge w="w-14" /></td>
+                        <td><div className="space-y-1.5"><Sk.Badge w={i % 2 === 0 ? 'w-16' : 'w-20'} /><Sk.Line w="w-20" h="h-2.5" /></div></td>
+                        <td className="hidden xl:table-cell"><Sk.Line w={i % 2 === 0 ? 'w-28' : 'w-36'} h="h-3" /></td>
+                        <td><Sk.Badge w="w-24" /></td>
                         <td />
                       </tr>
                     ))}
@@ -708,7 +711,7 @@ export default function ApprovalHistory() {
 
               {/* ── Desktop table ───────────────────────────────────────────── */}
               <div className="hidden md:block overflow-x-auto [scrollbar-gutter:stable]">
-                <table className="table-base table-fixed min-w-[880px]">
+                <table className={`table-base table-fixed ${systemView ? 'min-w-[960px] xl:min-w-[1120px]' : 'min-w-[880px] xl:min-w-[1040px]'}`}>
                   <thead>
                     <tr>
                       <th className="min-w-[180px]">{lang === 'en' ? 'Application' : '申請'}</th>
@@ -716,6 +719,7 @@ export default function ApprovalHistory() {
                       {systemView && <th className="w-28">{lang === 'en' ? 'Approver' : '承認者'}</th>}
                       <th className="w-20">{lang === 'en' ? 'Stage' : 'ステージ'}</th>
                       <th className="w-44">{lang === 'en' ? 'Action' : 'アクション'}</th>
+                      <th className="hidden xl:table-cell w-44">{lang === 'en' ? 'Comment' : 'コメント'}</th>
                       <th className="w-36">{lang === 'en' ? 'App Status' : '申請状態'}</th>
                       <th className="w-20 sticky right-0 bg-[#FBF9F6] text-right">{lang === 'en' ? 'View' : '詳細'}</th>
                     </tr>
@@ -767,10 +771,21 @@ export default function ApprovalHistory() {
                             <div className="text-[11px] text-warmgray-400 tabular-nums whitespace-nowrap mt-1">
                               {new Date(item.acted_at).toLocaleDateString(dateLocale)} {new Date(item.acted_at).toLocaleTimeString(dateLocale, { hour: '2-digit', minute: '2-digit' })}
                             </div>
+                            {/* Comment shown inline on <xl; dedicated column on xl+ */}
                             {item.comment && (
-                              <div className="text-[11px] text-warmgray-400 mt-0.5 break-words line-clamp-2" title={item.comment}>
+                              <div className="xl:hidden text-[11px] text-warmgray-400 mt-0.5 break-words line-clamp-2" title={item.comment}>
                                 "{item.comment}"
                               </div>
+                            )}
+                          </td>
+                          {/* Dedicated comment column on xl+ */}
+                          <td className="hidden xl:table-cell align-top">
+                            {item.comment ? (
+                              <span className="text-[11px] text-warmgray-500 italic line-clamp-3 break-words" title={item.comment}>
+                                "{item.comment}"
+                              </span>
+                            ) : (
+                              <span className="text-warmgray-200 text-[11px]">—</span>
                             )}
                           </td>
                           <td className="align-top">

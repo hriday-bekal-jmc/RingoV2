@@ -19,7 +19,7 @@
 //   <RingoLoader.Inline />                         // small inline w/ text
 //   <RingoLoader.Page />                           // full-page centered
 
-import type { CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 
 interface Props {
   /** Pixel size of the square SVG. Default 64. */
@@ -180,4 +180,24 @@ RingoLoader.Block = function RingoLoaderBlock({ label = '読み込み中...', si
       <p className="text-xs font-medium">{label}</p>
     </div>
   );
+};
+
+/**
+ * Delayed block loader — renders nothing for `delay` ms, then the Block.
+ * Use as a Suspense fallback: a lazy chunk that resolves within `delay`
+ * unmounts the fallback before it ever paints, so the user sees no loader
+ * flash on fast (cached / preloaded) chunk loads.
+ */
+RingoLoader.DelayedBlock = function RingoLoaderDelayedBlock({
+  delay = 220,
+  label = '読み込み中...',
+  size = 56,
+}: { delay?: number; label?: string; size?: number }) {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setShow(true), delay);
+    return () => clearTimeout(t);
+  }, [delay]);
+  if (!show) return null;
+  return <RingoLoader.Block label={label} size={size} />;
 };

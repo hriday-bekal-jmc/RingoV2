@@ -1,4 +1,4 @@
-import { ReactNode, lazy, Suspense } from 'react';
+import { ReactNode, Suspense, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { usePermissions } from './hooks/usePermissions';
@@ -6,6 +6,7 @@ import type { RolePermissions } from './config/permissions';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import RingoLoader from './components/common/RingoLoader';
 import Layout from './components/common/Layout';
+import { LazyPages, preloadAllRoutes } from './routes/lazyPages';
 
 // ─── Eager imports (small, used on initial load) ─────────────────────────────
 import Login from './pages/Login';
@@ -17,20 +18,18 @@ import ApplicationDetail from './pages/ApplicationDetail';
 import Approvals from './pages/Approvals';
 import Profile from './pages/Profile';
 
-// ─── Lazy imports (heavy, accessed less often) ───────────────────────────────
-// Code-split these so the initial bundle stays light. Each loads on first nav.
-const Admin            = lazy(() => import('./pages/Admin'));
-const Accounting       = lazy(() => import('./pages/Accounting'));
-const ApprovalHistory  = lazy(() => import('./pages/ApprovalHistory'));
-const Settlement       = lazy(() => import('./pages/Settlement'));
-// DEV-ONLY: i18n editor. Email-gated inside the page. Remove on prod cleanup.
-const DevI18n          = lazy(() => import('./pages/DevI18n'));
+// ─── Lazy pages (heavy, code-split) ──────────────────────────────────────────
+// Importers live in routes/lazyPages.ts so Sidebar can preload chunks on hover
+// and we can idle-preload them all after first paint (see effect below).
+const { Admin, Accounting, ApprovalHistory, Settlement, DevI18n } = LazyPages;
 
 // Per-route Suspense wrapper. Renders Layout shell so Sidebar stays mounted
 // while the lazy chunk downloads — no sidebar blink on first nav to a lazy page.
+// Fallback is DELAYED: a chunk that resolves fast (preloaded / cached) unmounts
+// the fallback before it paints, so there's no loader flash on quick loads.
 function LazyRoute({ children, title = '' }: { children: ReactNode; title?: string }) {
   return (
-    <Suspense fallback={<Layout title={title}><RingoLoader.Block /></Layout>}>
+    <Suspense fallback={<Layout title={title}><RingoLoader.DelayedBlock /></Layout>}>
       {children}
     </Suspense>
   );
@@ -60,6 +59,16 @@ function RequirePermission({
 
 // ─── メインルーティング ───
 export default function App() {
+  // Warm all lazy chunks during browser idle time after first paint. By the
+  // time the user navigates to Admin / Accounting / etc., the JS is already
+  // parsed — no chunk-download loader, navigation feels instant.
+  useEffect(() => {
+    const ric = window.requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 800));
+    const cancel = window.cancelIdleCallback ?? window.clearTimeout;
+    const id = ric(() => preloadAllRoutes());
+    return () => cancel(id as number);
+  }, []);
+
   return (
     <ErrorBoundary>
       <Routes>

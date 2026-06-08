@@ -6,6 +6,7 @@ import { useLang } from '../../context/LanguageContext';
 import { usePermissions } from '../../hooks/usePermissions';
 import apiClient from '../../services/apiClient';
 import UserAvatar from './UserAvatar';
+import { preloadRoute } from '../../routes/lazyPages';
 
 // ── Icon map ──────────────────────────────────────────────────────────────────
 const ICONS: Record<string, JSX.Element> = {
@@ -155,6 +156,8 @@ export default function Sidebar() {
                   to={item.to}
                   end={item.to === '/dashboard'}
                   title={collapsed ? label : undefined}
+                  onMouseEnter={() => preloadRoute(item.to)}
+                  onFocus={() => preloadRoute(item.to)}
                   className={({ isActive }) =>
                     `relative group flex items-center gap-3 rounded-xl text-sm font-medium
                      transition-all duration-150
@@ -264,6 +267,8 @@ export default function Sidebar() {
                 key={item.to}
                 to={item.to}
                 end={item.to === '/dashboard'}
+                onTouchStart={() => preloadRoute(item.to)}
+                onMouseEnter={() => preloadRoute(item.to)}
                 className="select-none active:opacity-60 transition-opacity duration-100"
               >
                 {/*

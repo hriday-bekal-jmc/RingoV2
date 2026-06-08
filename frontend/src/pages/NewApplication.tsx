@@ -9,6 +9,7 @@ import { useLang } from '../context/LanguageContext';
 import CustomSelect from '../components/forms/CustomSelect';
 import RouteTimeline from '../components/common/RouteTimeline';
 import Toast, { useToast } from '../components/common/Toast';
+import { useDelayedLoading } from '../hooks/useDelayedLoading';
 
 interface RouteStep {
   step_order: number;
@@ -54,6 +55,8 @@ export default function NewApplication() {
     staleTime: 5 * 60_000,
     gcTime:    30 * 60_000,
   });
+
+  const showTemplateLoader = useDelayedLoading(templateLoading);
 
   // pattern_id=2 (e.g. transportation) → direct settlement, no ringi phase → show SETTLEMENT routes
   const routeStage = template?.pattern_id === 2 ? 'SETTLEMENT' : 'RINGI';
@@ -120,8 +123,8 @@ export default function NewApplication() {
           {lang === 'en' ? 'Back' : '戻る'}
         </button>
 
-        {/* Loading / Error */}
-        {templateLoading && (
+        {/* Loading / Error — delayed so a fast template fetch shows no flash */}
+        {showTemplateLoader && (
           <div className="card flex items-center gap-3 text-warmgray-400 py-10 justify-center">
             <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
