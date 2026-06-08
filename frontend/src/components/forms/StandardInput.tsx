@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import {
   UseFormRegister,
+  RegisterOptions,
   FieldError,
   Merge,
   FieldErrorsImpl,
@@ -207,7 +208,36 @@ export default function StandardInput({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchedValue]);
 
+  const { lang } = useLang();
   const requiredRule = isDraft ? false : (field.required ?? false);
+
+  // Client-side format rules from field.validation. Surfaces "incompatible
+  // format" etc. in RHF errors BEFORE submit → DynamicForm.handleInvalid
+  // scrolls to + highlights the offending field (no backend roundtrip).
+  // Drafts skip format checks (partial data allowed).
+  const en = lang === 'en';
+  const textRules = (): RegisterOptions => {
+    const r: RegisterOptions = { required: requiredRule };
+    if (isDraft) return r;
+    const v = field.validation;
+    if (v?.regex) {
+      try {
+        r.pattern = { value: new RegExp(v.regex), message: en ? 'Format is invalid.' : '形式が正しくありません。' };
+      } catch { /* invalid stored regex — skip client check, backend still guards */ }
+    }
+    if (v?.maxlength) {
+      r.maxLength = { value: v.maxlength, message: en ? `Up to ${v.maxlength} characters.` : `${v.maxlength}文字以内で入力してください。` };
+    }
+    return r;
+  };
+  const numberRules = (): RegisterOptions => {
+    const r: RegisterOptions = { required: requiredRule, valueAsNumber: true };
+    if (isDraft) return r;
+    const v = field.validation;
+    if (typeof v?.min === 'number') r.min = { value: v.min, message: en ? `Must be ${v.min} or more.` : `${v.min}以上で入力してください。` };
+    if (typeof v?.max === 'number') r.max = { value: v.max, message: en ? `Must be ${v.max} or less.` : `${v.max}以下で入力してください。` };
+    return r;
+  };
 
   // ── File upload ────────────────────────────────────────────────────────────
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -253,13 +283,21 @@ export default function StandardInput({
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
-  const { lang } = useLang();
   // Prefer EN label when lang=en AND label_en provided; otherwise fall back
   // to the legacy Japanese `label` field (kept for backward compat).
   const displayLabel = lang === 'en' && field.label_en ? field.label_en : field.label;
+  const hasError = !!error && !isDraft;
   return (
-    <div className="flex flex-col gap-1.5">
-      <label className="label-normal">
+    <div
+      id={`field-${field.name}`}
+      data-field-error={hasError ? 'true' : undefined}
+      // scroll-mt keeps the field clear of any sticky header when scrolled into view.
+      // Ring is an outline (no box-model space) → highlight never shifts layout.
+      className={`flex flex-col gap-1.5 scroll-mt-24 transition-all duration-200 ${
+        hasError ? 'ring-1 ring-red-300 rounded-xl p-2 -m-2 bg-red-50/30' : ''
+      }`}
+    >
+      <label className={`label-normal ${hasError ? 'text-red-600' : ''}`}>
         {displayLabel}
         {field.required && !isDraft && <span className="text-ringo-500 ml-0.5">*</span>}
       </label>
@@ -280,7 +318,8 @@ export default function StandardInput({
       {field.type === 'text' && (
         <input
           type="text"
-          {...register(field.name, { required: requiredRule })}
+          placeholder={field.placeholder}
+          {...register(field.name, textRules())}
           className="input"
         />
       )}
@@ -304,6 +343,7 @@ export default function StandardInput({
               options={opts}
               value={watched}
               onChange={(v) => setValue?.(field.name, v)}
+              placeholder={field.placeholder}
             />
           </>
         );
@@ -312,7 +352,8 @@ export default function StandardInput({
       {field.type === 'number' && !field.computed && (
         <input
           type="number"
-          {...register(field.name, { required: requiredRule, valueAsNumber: true })}
+          placeholder={field.placeholder}
+          {...register(field.name, numberRules())}
           className="input"
         />
       )}
@@ -368,7 +409,8 @@ export default function StandardInput({
 
       {field.type === 'textarea' && (
         <textarea
-          {...register(field.name, { required: requiredRule })}
+          placeholder={field.placeholder}
+          {...register(field.name, textRules())}
           className="input resize-y"
           rows={3}
         />

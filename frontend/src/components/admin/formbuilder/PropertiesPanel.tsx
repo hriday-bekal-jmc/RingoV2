@@ -581,11 +581,27 @@ export default function PropertiesPanel({
               <Box tone="warmgray" title={en ? 'Validation' : '入力チェック'}>
                 <Field label={en ? 'Input format' : '入力形式'}>
                   <select className="select text-xs w-full"
-                    value={REGEX_PRESETS.find((p) => p.regex === field.validation?.regex)?.key ?? (field.validation?.regex ? 'custom' : '')}
+                    value={
+                      // undefined → 制限なし; matches a preset → that preset;
+                      // any other string (incl. '') → custom. Treating '' as custom
+                      // lets the user switch FROM a preset TO custom without the
+                      // dropdown snapping back (the old code kept the preset's regex,
+                      // so find() re-matched it and reverted the selection).
+                      field.validation?.regex == null
+                        ? ''
+                        : REGEX_PRESETS.find((p) => p.regex === field.validation?.regex)?.key ?? 'custom'
+                    }
                     onChange={(e) => {
-                      const p = REGEX_PRESETS.find((x) => x.key === e.target.value);
-                      if (e.target.value === '') setVal({ regex: undefined });
-                      else if (e.target.value === 'custom') setVal({ regex: field.validation?.regex || '' });
+                      const v = e.target.value;
+                      const p = REGEX_PRESETS.find((x) => x.key === v);
+                      if (v === '') setVal({ regex: undefined });
+                      else if (v === 'custom') {
+                        // Keep an existing custom regex; if coming from a preset,
+                        // start blank so the dropdown stays on "custom".
+                        const cur = field.validation?.regex;
+                        const fromPreset = cur != null && REGEX_PRESETS.some((x) => x.regex === cur);
+                        setVal({ regex: fromPreset || cur == null ? '' : cur });
+                      }
                       else if (p) setVal({ regex: p.regex });
                     }}>
                     <option value="">{en ? 'No restriction' : '制限なし'}</option>

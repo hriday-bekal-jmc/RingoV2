@@ -625,8 +625,9 @@ function UsersTab({ showToast, onGoToRoutes }: {
 interface ApproverPickerProps {
   users: User[];
   departments: Department[];
-  value: string;
-  onChange: (id: string) => void;
+  /** Ordered list of selected approver IDs — selection order = step order. */
+  value: string[];
+  onChange: (ids: string[]) => void;
 }
 
 function ApproverPicker({ users, departments, value, onChange }: ApproverPickerProps) {
@@ -635,7 +636,14 @@ function ApproverPicker({ users, departments, value, onChange }: ApproverPickerP
   const [deptFilter, setDeptFilter] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
 
-  const selectedUser = users.find((u) => u.id === value);
+  // Toggle a user: append to the end if new (preserves click order), remove otherwise.
+  const toggle = (id: string) =>
+    onChange(value.includes(id) ? value.filter((v) => v !== id) : [...value, id]);
+
+  // Selected users in selection order (for the ordered summary list).
+  const selectedUsers = value
+    .map((id) => users.find((u) => u.id === id))
+    .filter(Boolean) as User[];
 
   const filtered = users.filter((u) => {
     if (!u.is_active) return false;
@@ -695,12 +703,13 @@ function ApproverPicker({ users, departments, value, onChange }: ApproverPickerP
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2 p-0.5">
             {filtered.map((u) => {
-              const isSelected = u.id === value;
+              const order = value.indexOf(u.id);
+              const isSelected = order !== -1;
               return (
                 <button
                   key={u.id}
                   type="button"
-                  onClick={() => onChange(isSelected ? '' : u.id)}
+                  onClick={() => toggle(u.id)}
                   className={`relative flex flex-col items-center gap-1.5 p-3 rounded-xl text-center
                     transition-all duration-150 border
                     ${isSelected
@@ -708,12 +717,10 @@ function ApproverPicker({ users, departments, value, onChange }: ApproverPickerP
                       : 'border-warmgray-200/50 bg-white/50 hover:bg-white/80 hover:border-warmgray-300/60 hover:scale-[1.01]'
                     }`}
                 >
-                  {/* Selected checkmark */}
+                  {/* Selection order badge — the number = its position in the route */}
                   {isSelected && (
-                    <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-ringo-500 flex items-center justify-center shadow-sm">
-                      <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                      </svg>
+                    <span className="absolute top-1.5 right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-ringo-500 flex items-center justify-center shadow-sm text-white text-[10px] font-bold tabular-nums">
+                      {order + 1}
                     </span>
                   )}
 
@@ -737,25 +744,79 @@ function ApproverPicker({ users, departments, value, onChange }: ApproverPickerP
         )}
       </div>
 
-      {/* Selected summary pill */}
-      {selectedUser && (
-        <div className="flex items-center gap-2.5 px-3 py-2 bg-ringo-50/60 rounded-xl border border-ringo-200/50">
-          <UserAvatar name={selectedUser.full_name} avatarUrl={selectedUser.avatar_url} size={6} />
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-ringo-700 truncate">{selectedUser.full_name}</p>
-            <p className="text-[10px] text-warmgray-500 truncate">{selectedUser.department_name ?? '—'}</p>
+      {/* Selected summary — ordered list. Position = step order in the route. */}
+      {selectedUsers.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between px-0.5">
+            <p className="text-[11px] font-bold text-warmgray-500 uppercase tracking-wide">
+              {lang === 'en'
+                ? `${selectedUsers.length} selected — added in this order`
+                : `${selectedUsers.length}名選択 — この順で追加されます`}
+            </p>
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className="text-[11px] text-warmgray-400 hover:text-ringo-600 transition-colors"
+            >
+              {lang === 'en' ? 'Clear all' : 'すべて解除'}
+            </button>
           </div>
-          <RoleBadge role={selectedUser.role} />
-          <button
-            type="button"
-            onClick={() => onChange('')}
-            className="text-warmgray-400 hover:text-warmgray-600 transition-colors ml-1"
-            title={lang === 'en' ? 'Clear' : 'クリア'}
-          >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          {selectedUsers.map((su, i) => (
+            <div key={su.id} className="flex items-center gap-2.5 px-3 py-2 bg-ringo-50/60 rounded-xl border border-ringo-200/50">
+              <span className="w-5 h-5 rounded-full bg-ringo-500 text-white text-[10px] font-bold flex items-center justify-center shrink-0 tabular-nums">
+                {i + 1}
+              </span>
+              <UserAvatar name={su.full_name} avatarUrl={su.avatar_url} size={6} />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-ringo-700 truncate">{su.full_name}</p>
+                <p className="text-[10px] text-warmgray-500 truncate">{su.department_name ?? '—'}</p>
+              </div>
+              <RoleBadge role={su.role} />
+              {/* Reorder up/down */}
+              <div className="flex flex-col">
+                <button
+                  type="button"
+                  disabled={i === 0}
+                  onClick={() => {
+                    const next = [...value];
+                    [next[i - 1], next[i]] = [next[i], next[i - 1]];
+                    onChange(next);
+                  }}
+                  className="text-warmgray-400 hover:text-ringo-600 disabled:opacity-25 disabled:hover:text-warmgray-400 transition-colors"
+                  title={lang === 'en' ? 'Move up' : '上へ'}
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  disabled={i === selectedUsers.length - 1}
+                  onClick={() => {
+                    const next = [...value];
+                    [next[i + 1], next[i]] = [next[i], next[i + 1]];
+                    onChange(next);
+                  }}
+                  className="text-warmgray-400 hover:text-ringo-600 disabled:opacity-25 disabled:hover:text-warmgray-400 transition-colors"
+                  title={lang === 'en' ? 'Move down' : '下へ'}
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                  </svg>
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => toggle(su.id)}
+                className="text-warmgray-400 hover:text-warmgray-600 transition-colors"
+                title={lang === 'en' ? 'Remove' : '削除'}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -781,7 +842,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
   const { lang, t } = useLang();
   const [addingStepToRoute, setAddingStepToRoute] = useState<string | null>(null);
   const [insertAfterOrder, setInsertAfterOrder] = useState<number | null>(null);
-  const [newStep, setNewStep] = useState({ approver_id: '', label: '', action_type: 'APPROVE' });
+  const [newStep, setNewStep] = useState<{ approver_ids: string[]; label: string; action_type: string }>({ approver_ids: [], label: '', action_type: 'APPROVE' });
   const [showNewRoute, setShowNewRoute] = useState(false);
   const [newRoute, setNewRoute] = useState({ template_id: '', department_id: '', name: '', stage: 'RINGI' });
   // Inline confirm — track id of the row currently in confirm state
@@ -821,14 +882,28 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
   const refetch = () => queryClient.invalidateQueries({ queryKey: ['admin', 'routes'] });
 
   const addStep = useMutation({
-    mutationFn: async ({ routeId, insert_after, ...step }: { routeId: string; approver_id: string; label: string; action_type: string; insert_after?: number }) =>
-      (await apiClient.post(`/admin/routes/${routeId}/steps`, insert_after !== undefined ? { ...step, insert_after } : step)).data,
-    onSuccess: () => {
+    // Adds one step per selected approver, IN SELECTION ORDER. Posts run
+    // sequentially (not Promise.all) so step_order is deterministic:
+    //  - append mode: each lands at MAX+1 → preserves order
+    //  - insert_after mode: bump the anchor by 1 each iteration so the batch
+    //    keeps its order right after the insertion point
+    mutationFn: async ({ routeId, approver_ids, label, action_type, insert_after }:
+      { routeId: string; approver_ids: string[]; label: string; action_type: string; insert_after?: number }) => {
+      let anchor = insert_after;
+      for (const approver_id of approver_ids) {
+        const body = anchor !== undefined
+          ? { approver_id, label, action_type, insert_after: anchor }
+          : { approver_id, label, action_type };
+        await apiClient.post(`/admin/routes/${routeId}/steps`, body);
+        if (anchor !== undefined) anchor += 1;
+      }
+    },
+    onSuccess: (_d, vars) => {
       refetch();
       setAddingStepToRoute(null);
       setInsertAfterOrder(null);
-      setNewStep({ approver_id: '', label: '', action_type: 'APPROVE' });
-      showToast('ステップを追加しました');
+      setNewStep({ approver_ids: [], label: '', action_type: 'APPROVE' });
+      showToast(vars.approver_ids.length > 1 ? `${vars.approver_ids.length}件のステップを追加しました` : 'ステップを追加しました');
     },
     onError: (err: any) => showToast(`ステップ追加失敗: ${err.message}`, 'error'),
   });
@@ -1104,8 +1179,8 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
                 <ApproverPicker
                   users={users}
                   departments={departments}
-                  value={newStep.approver_id}
-                  onChange={(v) => setNewStep({ ...newStep, approver_id: v })}
+                  value={newStep.approver_ids}
+                  onChange={(ids) => setNewStep({ ...newStep, approver_ids: ids })}
                 />
               </div>
 
@@ -1119,6 +1194,13 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
                     value={newStep.label}
                     onChange={(e) => setNewStep({ ...newStep, label: e.target.value })}
                   />
+                  {newStep.approver_ids.length > 1 && (
+                    <p className="text-[10px] text-warmgray-400 mt-1">
+                      {newStep.label
+                        ? (lang === 'en' ? 'Applied to all added steps.' : '追加する全ステップに適用されます。')
+                        : (lang === 'en' ? 'Left blank → auto-numbered per step.' : '空欄の場合、各ステップに自動採番されます。')}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="label">{t('admin_step_action')}</label>
@@ -1137,14 +1219,18 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
                 <button className="btn-ghost text-xs" onClick={() => { setAddingStepToRoute(null); setInsertAfterOrder(null); }}>{t('btn_cancel')}</button>
                 <button
                   className="btn-primary text-xs"
-                  disabled={!newStep.approver_id || addStep.isPending}
+                  disabled={newStep.approver_ids.length === 0 || addStep.isPending}
                   onClick={() => addStep.mutate({
                     routeId: route.id,
                     ...newStep,
                     ...(insertAfterOrder !== null ? { insert_after: insertAfterOrder } : {}),
                   })}
                 >
-                  {addStep.isPending ? t('admin_adding') : t('admin_step_form_title')}
+                  {addStep.isPending
+                    ? t('admin_adding')
+                    : newStep.approver_ids.length > 1
+                      ? (lang === 'en' ? `Add ${newStep.approver_ids.length} steps` : `${newStep.approver_ids.length}件を追加`)
+                      : t('admin_step_form_title')}
                 </button>
               </div>
             </div>

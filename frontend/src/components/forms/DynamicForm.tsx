@@ -273,10 +273,14 @@ export default function DynamicForm({
       ? 'Please fix the highlighted fields before submitting.'
       : '入力内容に不備があります。赤いフィールドを確認してください。'
     );
-    // Scroll to first error field
-    setTimeout(() => {
-      document.querySelector('[data-field-error="true"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 50);
+    // Wait for the error state to paint (data-field-error attrs appear), then
+    // scroll to the first errored field in document order and focus its input.
+    requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLElement>('[data-field-error="true"]');
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.querySelector<HTMLElement>('input, textarea, select')?.focus({ preventScroll: true });
+    });
   };
 
   const handleDraftClick = async () => {
