@@ -1170,7 +1170,15 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
   const offset = Math.max(Number(req.query.offset ?? 0), 0);
   const status = ((req.query.status as string | undefined) ?? 'ALL').toUpperCase();
   const cursor = decodeCursor(req.query.cursor);
-  const includeArchived = req.query.include_archived === 'true';
+  // Archive visibility:
+  //   ?archived=only    → ONLY archived rows (the History "Archived" view)
+  //   ?include_archived=true (or ?archived=include) → active + archived
+  //   default           → active only (archived_at IS NULL)
+  const archivedMode = req.query.archived === 'only'
+    ? 'only'
+    : (req.query.include_archived === 'true' || req.query.archived === 'include')
+      ? 'include'
+      : 'exclude';
   // Free-text search: application_number, form_data subject, template name
   // Trimmed, lowercased, min 2 chars enforced client-side (skip empty/short server-side too)
   const rawQ = ((req.query.q as string | undefined) ?? '').trim();
@@ -1180,7 +1188,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
     const result = await query(
       `SELECT
          a.id, a.application_number, a.status, a.created_at, a.submitted_at,
-         a.settlement_submitted_at,
+         a.settlement_submitted_at, a.archived_at,
          a.form_data, a.settlement_data, a.template_id,
          t.title_ja AS template_name, t.title AS template_title_en, t.code AS template_code,
          t.settlement_schema IS NOT NULL AS has_settlement,
@@ -1210,7 +1218,11 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
        ) ps ON TRUE
        WHERE a.applicant_id = $1
          AND ($2 = 'ALL' OR a.status = $2)
-         AND ($7::boolean OR a.archived_at IS NULL)
+         AND (
+           $7 = 'include'
+           OR ($7 = 'exclude' AND a.archived_at IS NULL)
+           OR ($7 = 'only'    AND a.archived_at IS NOT NULL)
+         )
          AND (
            $3::timestamptz IS NULL
            OR (a.created_at, a.id) < ($3::timestamptz, $4::uuid)
@@ -1224,7 +1236,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
          )
        ORDER BY a.created_at DESC, a.id DESC
        LIMIT $5 OFFSET $6`,
-      [req.user!.id, status, cursor?.created_at ?? null, cursor?.id ?? null, limit + 1, cursor ? 0 : offset, includeArchived, searchQ],
+      [req.user!.id, status, cursor?.created_at ?? null, cursor?.id ?? null, limit + 1, cursor ? 0 : offset, archivedMode, searchQ],
     );
     const rows    = result.rows;
     const hasMore = rows.length > limit;

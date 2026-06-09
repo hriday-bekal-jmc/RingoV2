@@ -25,7 +25,7 @@ interface DashboardSummary {
     PENDING_SETTLEMENT: number; SETTLEMENT_APPROVED: number; COMPLETED: number; REJECTED: number;
   };
   recent_apps: Array<{ id: string; template_code: string; template_name: string; template_title_en?: string | null; status: string; created_at: string }>;
-  pending_approvals?: { items: PendingItem[]; total: number };
+  pending_approvals?: { items: PendingItem[]; total: number; proxy_total: number };
 }
 
 interface PendingItem {
@@ -54,10 +54,26 @@ const TILE_ACCENT: Record<string, { bg: string; icon: string }> = {
   'New':           { bg: 'from-ringo-400 to-rose-500',     icon: '✏️' },
   '下書き':        { bg: 'from-warmgray-400 to-warmgray-500', icon: '📄' },
   'Drafts':        { bg: 'from-warmgray-400 to-warmgray-500', icon: '📄' },
+  '差し戻し':      { bg: 'from-rose-400 to-red-500',       icon: '↩️' },
+  'Returned':      { bg: 'from-rose-400 to-red-500',       icon: '↩️' },
   '未精算':        { bg: 'from-teal-400 to-emerald-500',   icon: '💴' },
   'Unsettled':     { bg: 'from-teal-400 to-emerald-500',   icon: '💴' },
   '申請中':        { bg: 'from-sky-400 to-blue-500',       icon: '🔄' },
   'In Progress':   { bg: 'from-sky-400 to-blue-500',       icon: '🔄' },
+  // search group
+  '検索':          { bg: 'from-ringo-400 to-rose-500',     icon: '🔍' },
+  'Search':        { bg: 'from-ringo-400 to-rose-500',     icon: '🔍' },
+  '申請履歴':      { bg: 'from-slate-400 to-slate-500',    icon: '🗂️' },
+  'Application History': { bg: 'from-slate-400 to-slate-500', icon: '🗂️' },
+  // status group
+  '精算承認済':    { bg: 'from-teal-400 to-emerald-500',   icon: '✅' },
+  'Settlement OK': { bg: 'from-teal-400 to-emerald-500',   icon: '✅' },
+  '完了':          { bg: 'from-emerald-400 to-green-500',  icon: '🎉' },
+  'Completed':     { bg: 'from-emerald-400 to-green-500',  icon: '🎉' },
+  '却下':          { bg: 'from-warmgray-400 to-warmgray-500', icon: '🚫' },
+  'Rejected':      { bg: 'from-warmgray-400 to-warmgray-500', icon: '🚫' },
+  'すべて':        { bg: 'from-slate-400 to-slate-500',    icon: '📚' },
+  'All':           { bg: 'from-slate-400 to-slate-500',    icon: '📚' },
   // admin group
   '全体承認待ち':  { bg: 'from-amber-400 to-orange-400',   icon: '⏳' },
   'All Pending':   { bg: 'from-amber-400 to-orange-400',   icon: '⏳' },
@@ -72,10 +88,28 @@ const TILE_ACCENT: Record<string, { bg: string; icon: string }> = {
 };
 const DEFAULT_ACCENT = { bg: 'from-warmgray-400 to-warmgray-500', icon: '📌' };
 
+// Compact badge text. Alert badges cap at 99+ (a large actionable backlog only
+// needs to read "many"). Muted totals grow unbounded over months, so show
+// magnitude compactly: 1.2k, 12k, 1.5M — never overflows the pill.
+function badgeText(count: number, tone: 'alert' | 'muted'): string {
+  if (tone === 'alert') return count > 99 ? '99+' : String(count);
+  if (count < 1000) return String(count);
+  if (count < 1_000_000) {
+    const k = count / 1000;
+    return (k < 10 ? k.toFixed(1).replace(/\.0$/, '') : Math.round(k)) + 'k';
+  }
+  const m = count / 1_000_000;
+  return (m < 10 ? m.toFixed(1).replace(/\.0$/, '') : Math.round(m)) + 'M';
+}
+
 function ActionTile({
-  label, count, onClick, to, disabled,
+  label, count, onClick, to, disabled, countTone = 'alert',
 }: {
   label: string; count?: number; onClick?: () => void; to?: string; disabled?: boolean;
+  /** 'alert' = red badge (actionable / needs attention). 'muted' = neutral
+      total (informational, e.g. terminal statuses like Completed) — avoids
+      the false urgency of a red badge on counts that only ever grow. */
+  countTone?: 'alert' | 'muted';
 }) {
   const { bg, icon } = TILE_ACCENT[label] ?? DEFAULT_ACCENT;
   const cls = `relative flex flex-col items-center gap-2 px-3 py-4 rounded-2xl border text-center select-none
@@ -85,11 +119,15 @@ function ActionTile({
       : 'bg-white/90 border-warmgray-100/80 shadow-sm hover:shadow-md hover:bg-white hover:border-ringo-200/60 hover:-translate-y-1 cursor-pointer'
     }`;
 
+  const badgeCls = countTone === 'muted'
+    ? 'bg-warmgray-100 text-warmgray-500 ring-1 ring-warmgray-200/70'
+    : 'bg-ringo-500 text-white ring-2 ring-white';
+
   const inner = (
     <>
       {count !== undefined && count > 0 && (
-        <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 rounded-full bg-ringo-500 text-white text-[9px] font-bold flex items-center justify-center shadow-sm ring-2 ring-white z-10">
-          {count > 99 ? '99+' : count}
+        <span className={`absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1.5 rounded-full text-[9px] font-bold flex items-center justify-center shadow-sm z-10 tabular-nums ${badgeCls}`}>
+          {badgeText(count, countTone)}
         </span>
       )}
       <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${bg} flex items-center justify-center text-lg shadow-md group-hover:scale-110 group-hover:shadow-lg transition-all duration-200 shrink-0`}>
@@ -614,9 +652,14 @@ export default function Dashboard() {
 
   const counts = summary?.status_counts;
   const pendingApprovalsTotal = summary?.pending_approvals?.total ?? 0;
+  const scheduledReviewTotal  = summary?.pending_approvals?.proxy_total ?? 0;
   const draftCount            = counts?.DRAFT ?? 0;
+  const returnedCount         = counts?.RETURNED ?? 0;
   const approvedCount         = counts?.APPROVED ?? 0;  // awaiting settlement
   const pendingCount          = counts?.PENDING_APPROVAL ?? 0;
+  const settlementApprovedCount = counts?.SETTLEMENT_APPROVED ?? 0;
+  const completedCount        = counts?.COMPLETED ?? 0;
+  const rejectedCount         = counts?.REJECTED ?? 0;
   const recentApps            = summary?.recent_apps ?? [];
   const firstName = user?.full_name?.split(' ')[0] ?? 'ゲスト';
   const hour      = new Date().getHours();
@@ -815,16 +858,29 @@ export default function Dashboard() {
                 <Section icon="📝" title={lang === 'en' ? 'Submit' : '申請する'}>
                   <ActionTile label={lang === 'en' ? 'New' : '作成'} onClick={() => navigate('/applications/new')} />
                   <ActionTile label={lang === 'en' ? 'Drafts' : '下書き'} count={draftCount} to="/history?filter=DRAFT" />
-                  <ActionTile label={lang === 'en' ? 'Unsettled' : '未精算'} count={approvedCount} onClick={() => setShowUnsettled(true)} />
+                  <ActionTile label={lang === 'en' ? 'Returned' : '差し戻し'} count={returnedCount} to="/history?filter=RETURNED" />
                   <ActionTile label={lang === 'en' ? 'In Progress' : '申請中'} count={pendingCount} to="/history?filter=PENDING_APPROVAL" />
+                  <ActionTile label={lang === 'en' ? 'Unsettled' : '未精算'} count={approvedCount} onClick={() => setShowUnsettled(true)} />
                 </Section>
                 {perms.canApprove && (
                   <Section icon="✅" title={lang === 'en' ? 'Approve' : '承認する'}>
                     <ActionTile label={lang === 'en' ? 'Pending' : '未処理'} count={pendingApprovalsTotal} onClick={() => setShowAllPending(true)} />
-                    <ActionTile label={lang === 'en' ? 'Proxy Approval' : '代理承認'} to="/approvals?proxy=1" />
-                    <ActionTile label={lang === 'en' ? 'Approval History' : '承認履歴'} to="/approval-history" />
+                    <ActionTile label={lang === 'en' ? 'Proxy Approval' : '代理承認'} count={scheduledReviewTotal} to="/approvals?proxy=1" />
                   </Section>
                 )}
+                <Section icon="🔍" title={lang === 'en' ? 'Search' : '探す'}>
+                  <ActionTile label={lang === 'en' ? 'Search' : '検索'} onClick={() => setShowSearch(true)} />
+                  <ActionTile label={lang === 'en' ? 'Application History' : '申請履歴'} to="/history" />
+                  {perms.canApprove && (
+                    <ActionTile label={lang === 'en' ? 'Approval History' : '承認履歴'} to="/approval-history" />
+                  )}
+                </Section>
+                <Section icon="🏁" title={lang === 'en' ? 'Status' : '状態'}>
+                  <ActionTile label={lang === 'en' ? 'Settlement OK' : '精算承認済'} count={settlementApprovedCount} countTone="muted" to="/history?filter=SETTLEMENT_APPROVED" />
+                  <ActionTile label={lang === 'en' ? 'Completed' : '完了'} count={completedCount} countTone="muted" to="/history?filter=COMPLETED" />
+                  <ActionTile label={lang === 'en' ? 'Rejected' : '却下'} count={rejectedCount} countTone="muted" to="/history?filter=REJECTED" />
+                  <ActionTile label={lang === 'en' ? 'All' : 'すべて'} to="/history" />
+                </Section>
               </div>
 
               {/* Recent forms */}

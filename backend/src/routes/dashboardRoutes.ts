@@ -63,6 +63,9 @@ interface DashboardSummary {
       created_at:       string;
     }>;
     total: number;
+    /** Apps where the user is a downstream (WAITING, higher step_order)
+        approver — can preview but not yet act. "Scheduled for review". */
+    proxy_total: number;
   };
 }
 
@@ -171,6 +174,28 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
           )
       : { rows: [] as Array<Record<string, unknown>> };
 
+    // 3b. "Scheduled for review" count — apps where the user is a downstream
+    // (WAITING, higher step_order) approver: can preview but not yet act.
+    // Same proven logic as GET /approvals/pending/count's proxy_total.
+    const proxyRes = canApprove
+      ? await query(
+            `SELECT COUNT(DISTINCT a.id)::int AS proxy_total
+             FROM applications a
+             JOIN approval_steps ps ON ps.application_id = a.id AND ps.status = 'PENDING'
+             WHERE a.status IN ('PENDING_APPROVAL','PENDING_SETTLEMENT')
+               AND a.archived_at IS NULL
+               AND EXISTS (
+                 SELECT 1 FROM approval_steps ms
+                 WHERE ms.application_id = a.id
+                   AND ms.stage = ps.stage
+                   AND ms.status = 'WAITING'
+                   AND ms.approver_id = $1
+                   AND ms.step_order > ps.step_order
+               )`,
+            [userId],
+          )
+      : { rows: [{ proxy_total: 0 }] as Array<Record<string, unknown>> };
+
     // Build status_counts
     const status_counts: StatusCounts = { ...ZERO_COUNTS };
     for (const r of countsRes.rows) {
@@ -214,6 +239,7 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
           created_at:         r.created_at,
         })),
         total,
+        proxy_total: Number((proxyRes.rows[0] as { proxy_total: number })?.proxy_total ?? 0),
       };
     }
 

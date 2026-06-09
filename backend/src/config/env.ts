@@ -86,6 +86,15 @@ const schema = z.object({
   // Optional: alert email on backup failure (uses SMTP config above)
   BACKUP_ALERT_EMAIL: z.string().email().optional(),
 
+  // ── Auto-archive (application cleanup) ──
+  // Terminal apps (COMPLETED/REJECTED/CANCELLED) inactive longer than
+  // ARCHIVE_AFTER_DAYS are soft-archived (archived_at set). They leave the
+  // active partial indexes → hot queries stay fast as data grows. Users can
+  // still view archived apps via ?include_archived=true.
+  ARCHIVE_ENABLED:    z.string().optional(),                                  // 'true' to enable
+  ARCHIVE_CRON:       z.string().default('0 3 * * *'),                        // default 03:00 daily
+  ARCHIVE_AFTER_DAYS: z.coerce.number().int().positive().default(365),        // 1 year
+
   // ── Misc ──
   SUPER_ADMIN_EMAIL: z.string().email().optional(),
   SUPER_ADMIN_EMAILS: z.string().optional(),

@@ -33,6 +33,7 @@ interface Application {
   current_step?: number | null;
   total_steps?: number;
   row_preview?: RowPreview | null;
+  archived_at?: string | null;
 }
 
 function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
@@ -90,6 +91,9 @@ export default function History() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Application | null>(null);
   const [confirmSubmit, setConfirmSubmit] = useState<Application | null>(null);
+  // Archived apps are excluded by default (kept out of hot queries). Opt-in
+  // toggle re-fetches with include_archived so users can still view old apps.
+  const [showArchived, setShowArchived] = useState(false);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -111,11 +115,15 @@ export default function History() {
     isLoading,
     isFetching,
   } = useInfiniteQuery<{ items: Application[]; hasMore: boolean; offset: number; nextCursor?: string | null }>({
-    queryKey: ['myApplications'],                          // always ALL — filter is client-side
+    queryKey: ['myApplications', showArchived],            // status filter is client-side; archived needs a refetch
     queryFn: async ({ pageParam = null }) => {
       const cursor = pageParam ? `&cursor=${encodeURIComponent(String(pageParam))}` : '';
+      // "Archived" toggle = dedicated archived view (only archived rows), so
+      // old archived apps surface immediately instead of being buried on a
+      // later page behind newer active ones.
+      const archived = showArchived ? '&archived=only' : '';
       return (await apiClient.get(
-        `/applications?limit=${PAGE}&status=ALL${cursor}`
+        `/applications?limit=${PAGE}&status=ALL${archived}${cursor}`
       )).data;
     },
     initialPageParam: null,
@@ -229,7 +237,7 @@ export default function History() {
         </div>
 
         {/* Filter pills */}
-        <div className="animate-fade-up flex gap-2 flex-wrap">
+        <div className="animate-fade-up flex gap-2 flex-wrap items-center">
           {ALL_STATUS_KEYS.map((s) => {
             const isActive = statusFilter === s;
             const label = s === 'ALL' ? t('history_filter_all') : (STATUS_LABEL[s] ?? s);
@@ -247,6 +255,24 @@ export default function History() {
               </button>
             );
           })}
+          {/* Archived toggle — opt-in, refetches with include_archived */}
+          <button
+            onClick={() => {
+              if (!showArchived) setStatusFilter('ALL'); // entering archived view → clear any status pill
+              setShowArchived((v) => !v);
+            }}
+            title={lang === 'en' ? 'Show archived applications' : 'アーカイブ済みを表示'}
+            className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-150
+              ${showArchived
+                ? 'bg-ringo-500 text-white shadow-sm'
+                : 'bg-white/60 text-warmgray-500 hover:bg-white/90 border border-white/80 backdrop-blur-sm'
+              }`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5C21.75 4.254 21.246 3.75 20.625 3.75H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+            </svg>
+            {lang === 'en' ? 'Archived' : 'アーカイブ'}
+          </button>
         </div>
 
         {/* List */}
@@ -346,6 +372,11 @@ export default function History() {
                         )}
                         {(isDraft || isReturned) && (
                           <span className="text-[10px] text-warmgray-400 font-medium">{t('history_editable')}</span>
+                        )}
+                        {app.archived_at && (
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-warmgray-100 text-warmgray-500 ring-1 ring-warmgray-200/70">
+                            {lang === 'en' ? 'Archived' : 'アーカイブ'}
+                          </span>
                         )}
                       </div>
                       {app.row_preview?.text && (
