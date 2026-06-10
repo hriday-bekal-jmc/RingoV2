@@ -14,7 +14,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/db';
 import { extractRowPreview } from '../services/rowPreview';
-import { redis } from '../config/redis';
+import { swrJson } from '../services/cache';
 import { isAdminUser, requireAuth } from '../middlewares/authMiddleware';
 
 // Roles that may have pending approvals assigned. Backend role-gates the
@@ -79,18 +79,12 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
   const role   = req.user!.role;
   const canApprove = isAdminUser(req.user) || APPROVER_ROLES.has(role);
 
-  // ── Redis cache check ──────────────────────────────────────────────────
+  // Stale-while-revalidate: a soft-stale cache is served instantly while a
+  // fresh copy recomputes in the background — only a truly cold load waits on
+  // the queries below. Mutations still redis.del() this key (see dashboardCache)
+  // → next read recomputes fresh.
   try {
-    const cached = await redis.get(cacheKey(userId));
-    if (cached) {
-      res.json(JSON.parse(cached));
-      return;
-    }
-  } catch {
-    // Cache miss / Redis down → fall through to DB
-  }
-
-  try {
+    const summary = await swrJson<DashboardSummary>(cacheKey(userId), CACHE_TTL_SEC, 600, async () => {
     // Keep these sequential to avoid one dashboard request occupying multiple
     // Postgres connections on a cache miss. The individual queries are small.
     // 1. Status counts via GROUP BY (one row per status)
@@ -243,8 +237,8 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
       };
     }
 
-    // Cache and return
-    redis.setex(cacheKey(userId), CACHE_TTL_SEC, JSON.stringify(summary)).catch(() => {});
+      return summary;
+    });
     res.json(summary);
   } catch (err) {
     console.error('[dashboard] summary failed:', err);
@@ -261,12 +255,11 @@ router.get('/admin-overview', async (req: Request, res: Response): Promise<void>
 
   const CACHE_KEY = 'dashboard:admin-overview';
 
+  // Stale-while-revalidate (shared key across all admins): the first admin to
+  // hit a soft-stale cache gets it instantly while it refreshes in the
+  // background. Removes the cold-miss spike when several admins load at once.
   try {
-    const cached = await redis.get(CACHE_KEY);
-    if (cached) { res.json(JSON.parse(cached)); return; }
-  } catch { /* fall through */ }
-
-  try {
+    const overview = await swrJson(CACHE_KEY, 120, 600, async () => {
     // Keep this sequential to avoid a single admin request occupying five
     // Postgres connections on a cache miss.
 
@@ -350,7 +343,8 @@ router.get('/admin-overview', async (req: Request, res: Response): Promise<void>
       settlement_overview: settleRes.rows[0] ?? { awaiting_approval: 0, awaiting_transfer: 0, completed: 0 },
     };
 
-    redis.setex(CACHE_KEY, 120, JSON.stringify(overview)).catch(() => {});
+      return overview;
+    });
     res.json(overview);
   } catch (err) {
     console.error('[dashboard] admin-overview failed:', err);
