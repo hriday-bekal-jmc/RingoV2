@@ -636,7 +636,7 @@ export default function ApprovalHistory() {
                 </table>
               </div>
             </>
-          ) : items.length === 0 ? (
+          ) : isLoading ? null /* loader-delay window — blank, never flash "no data" while fetching */ : items.length === 0 ? (
             <div className="py-16 text-center">
               <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-surface-100/60 flex items-center justify-center">
                 <svg className="w-7 h-7 text-warmgray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

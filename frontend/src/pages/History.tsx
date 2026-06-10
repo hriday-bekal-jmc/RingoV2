@@ -300,7 +300,7 @@ export default function History() {
               })}
             </ul>
           </div>
-        ) : sorted.length === 0 ? (
+        ) : isLoading ? null /* loader-delay window — blank, never flash "no data" while fetching */ : sorted.length === 0 ? (
           <div className="card flex flex-col items-center justify-center py-20 gap-4 text-warmgray-400 animate-fade-up">
             <span className="text-5xl">📭</span>
             <p className="text-sm font-medium">{t('history_no_items')}</p>

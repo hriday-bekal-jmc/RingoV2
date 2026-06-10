@@ -191,7 +191,7 @@ function PendingApprovalsDrawer({ total, onClose }: { total: number; onClose: ()
           <button onClick={onClose} className="text-warmgray-400 hover:text-warmgray-700 transition-colors text-lg px-1">✕</button>
         </div>
         <div className="flex-1 overflow-y-auto overscroll-contain">
-          {showLoader ? <RingoLoader.Block /> : items.length === 0 ? (
+          {showLoader ? <RingoLoader.Block /> : isLoading ? null : items.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-warmgray-400">
               <span className="text-3xl mb-2">✅</span>
               <p className="text-sm">{lang === 'en' ? 'All caught up!' : '承認待ちはありません'}</p>
@@ -264,7 +264,7 @@ function UnsettledDrawer({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} className="text-warmgray-400 hover:text-warmgray-700 transition-colors text-lg px-1">✕</button>
         </div>
         <div className="flex-1 overflow-y-auto overscroll-contain">
-          {showLoader ? <RingoLoader.Block /> : items.length === 0 ? (
+          {showLoader ? <RingoLoader.Block /> : isLoading ? null : items.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-warmgray-400">
               <span className="text-3xl mb-2">✅</span>
               <p className="text-sm">{lang === 'en' ? 'No unsettled applications' : '精算待ちはありません'}</p>

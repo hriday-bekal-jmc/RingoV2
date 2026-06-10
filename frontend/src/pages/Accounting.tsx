@@ -699,7 +699,7 @@ export default function Accounting() {
               </table>
             </div>
           </div>
-        ) : filtered.length === 0 ? (
+        ) : isLoading ? null /* loader-delay window — blank, never flash "no data" while fetching */ : filtered.length === 0 ? (
           <div className="card flex flex-col items-center justify-center py-20 gap-4 text-warmgray-400">
             <span className="text-5xl">📭</span>
             <p className="text-sm font-medium">{t('accounting_no_items')}</p>

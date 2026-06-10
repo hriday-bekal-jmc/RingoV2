@@ -527,7 +527,7 @@ function UsersTab({ showToast, onGoToRoutes }: {
 
       {showLoader ? (
         <RingoLoader.Block label="読み込み中..." />
-      ) : (
+      ) : isLoading ? null /* loader-delay window — blank, never flash empty table */ : (
         <div className="card !p-0 md:overflow-hidden">
           <table className="table-base table-responsive">
             <thead>
@@ -939,6 +939,7 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
   });
 
   if (showLoader) return <RingoLoader.Block label="読み込み中..." />;
+  if (isLoading) return null; // loader-delay window — blank, never flash empty UI while fetching
 
   return (
     <div className="space-y-4">
@@ -1469,6 +1470,7 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
               </tr>
             </thead>
             <tbody>
+              {/* skeleton rows */}
               {[...Array(9)].map((_, i) => (
                 <tr key={i}>
                   <td><Sk.Line w="w-20" h="h-2.5" /></td>
@@ -1488,7 +1490,7 @@ function ApplicationsTab({ showToast }: { showToast: (m: string, t?: 'success' |
             </tbody>
           </table>
         </div>
-      ) : (
+      ) : isLoading ? null /* loader-delay window — blank, never flash empty table */ : (
         <div className={`card !p-0 md:overflow-hidden transition-opacity duration-200 ${isFetching && !isFetchingNextPage ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
           <table className="table-base table-responsive">
             <thead>
@@ -1720,6 +1722,7 @@ function PermissionsTab({ showToast }: { showToast: (msg: string, type?: 'succes
   if (showLoader) {
     return <RingoLoader.Block />;
   }
+  if (isLoading) return null; // loader-delay window — blank, never flash empty UI while fetching
 
   return (
     <div className="space-y-6">
@@ -2024,6 +2027,7 @@ function AllowanceTab({ showToast }: { showToast: (msg: string, type?: 'success'
   };
 
   if (showLoader) return <div className="card flex justify-center py-12"><RingoLoader.Block /></div>;
+  if (isLoading) return null; // loader-delay window — blank, never flash empty UI while fetching
 
   return (
     <div className="card space-y-5">
