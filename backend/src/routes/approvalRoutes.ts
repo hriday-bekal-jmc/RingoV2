@@ -9,6 +9,7 @@ import { invalidateDashboardCache } from '../services/dashboardCache';
 import { notifyApplicationEvent }  from '../services/notificationService';
 import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
 import { extractRowPreview } from '../services/rowPreview';
+import { swrJson, invalidateCachePattern } from '../services/cache';
 import type pg from 'pg';
 
 const router = Router();
@@ -79,20 +80,13 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
          u.avatar_url AS applicant_avatar,
          COALESCE(d.name, '—') AS department_name,
          s.id AS current_step_id,
-         (SELECT COUNT(*) FROM approval_steps
-          WHERE application_id = a.id AND stage = s.stage
-            AND step_order / 100 = s.step_order / 100
-            AND step_order <= s.step_order
-            AND status != 'CANCELLED')::int AS current_step,
+         step_cnt.current_step,
          s.stage AS current_stage,
          s.label AS current_step_label,
          s.action_type AS current_step_action,
          approver.full_name AS current_approver_name,
          approver.avatar_url AS current_approver_avatar,
-         (SELECT COUNT(*) FROM approval_steps
-          WHERE application_id = a.id AND stage = s.stage
-            AND step_order / 100 = s.step_order / 100
-            AND status != 'CANCELLED')::int AS total_steps,
+         step_cnt.total_steps,
          COUNT(*) OVER() AS total_count
        FROM applications a
        JOIN form_templates t ON a.template_id = t.id
@@ -101,6 +95,13 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
        JOIN approval_steps s
          ON s.application_id = a.id AND s.status = 'PENDING'
        LEFT JOIN users approver ON s.approver_id = approver.id
+       LEFT JOIN LATERAL (
+         SELECT
+           COUNT(*) FILTER (WHERE status != 'CANCELLED' AND step_order <= s.step_order)::int AS current_step,
+           COUNT(*) FILTER (WHERE status != 'CANCELLED')::int AS total_steps
+         FROM approval_steps
+         WHERE application_id = a.id AND stage = s.stage AND step_order / 100 = s.step_order / 100
+       ) step_cnt ON TRUE
        WHERE a.status IN ('PENDING_APPROVAL', 'PENDING_SETTLEMENT')
          AND a.archived_at IS NULL
          AND ($1 OR s.approver_id = $2)
@@ -179,20 +180,13 @@ router.get('/pending/proxy', async (req: Request, res: Response): Promise<void> 
          u.avatar_url  AS applicant_avatar,
          COALESCE(d.name, '—') AS department_name,
          ps.id          AS current_step_id,
-         (SELECT COUNT(*) FROM approval_steps
-          WHERE application_id = a.id AND stage = ps.stage
-            AND step_order / 100 = ps.step_order / 100
-            AND step_order <= ps.step_order
-            AND status != 'CANCELLED')::int AS current_step,
+         step_cnt.current_step,
          ps.stage       AS current_stage,
          ps.label       AS current_step_label,
          ps.action_type AS current_step_action,
          approver.full_name  AS current_approver_name,
          approver.avatar_url AS current_approver_avatar,
-         (SELECT COUNT(*) FROM approval_steps
-          WHERE application_id = a.id AND stage = ps.stage
-            AND step_order / 100 = ps.step_order / 100
-            AND status != 'CANCELLED')::int AS total_steps,
+         step_cnt.total_steps,
          COUNT(*) OVER() AS total_count
        FROM applications a
        JOIN form_templates t ON a.template_id = t.id
@@ -200,6 +194,13 @@ router.get('/pending/proxy', async (req: Request, res: Response): Promise<void> 
        LEFT JOIN departments d ON d.id = u.department_id
        JOIN approval_steps ps ON ps.application_id = a.id AND ps.status = 'PENDING'
        LEFT JOIN users approver ON ps.approver_id = approver.id
+       LEFT JOIN LATERAL (
+         SELECT
+           COUNT(*) FILTER (WHERE status != 'CANCELLED' AND step_order <= ps.step_order)::int AS current_step,
+           COUNT(*) FILTER (WHERE status != 'CANCELLED')::int AS total_steps
+         FROM approval_steps
+         WHERE application_id = a.id AND stage = ps.stage AND step_order / 100 = ps.step_order / 100
+       ) step_cnt ON TRUE
        WHERE a.status IN ('PENDING_APPROVAL','PENDING_SETTLEMENT')
          AND a.archived_at IS NULL
          AND EXISTS (
@@ -484,6 +485,7 @@ router.post('/bulk-approve', async (req: Request, res: Response): Promise<void> 
       }
     });
 
+    void invalidateHistoryCache(userId);
     res.json({ succeeded: succeeded.length, failed });
   } catch (err) {
     console.error('[approvals] bulk-approve failed:', err);
@@ -521,6 +523,7 @@ router.post('/bulk-proxy-approve', async (req: Request, res: Response): Promise<
       else failed.push({ applicationId: (applicationIds as string[])[i], reason: (r.reason as { message?: string })?.message ?? 'Unknown error' });
     });
 
+    void invalidateHistoryCache(userId);
     res.json({ succeeded: succeeded.length, failed });
   } catch (err) {
     console.error('[approvals] bulk-proxy-approve failed:', err);
@@ -536,6 +539,7 @@ router.post('/:id/approve', async (req: Request, res: Response): Promise<void> =
   const isAdmin = isAdminUser(req.user);
   try {
     const result = await processSingleApprove(String(id), userId, isAdmin, comment);
+    void invalidateHistoryCache(userId);
     const status = (result as { status?: string }).status;
     const isFinal = status === 'APPROVED' || status === 'COMPLETED' || status === 'SETTLEMENT_APPROVED';
     const isSettlementApproved = status === 'SETTLEMENT_APPROVED';
@@ -649,6 +653,7 @@ router.post('/:id/return', async (req: Request, res: Response): Promise<void> =>
       returnRecipients = recipients;
     });
     invalidateDashboardCache(returnRecipients);
+    void invalidateHistoryCache(userId);
     notifyApplicationEvent('APP_RETURNED', String(id), { actor_id: userId, comment: comment ?? '' });
     res.json({ message: '差し戻しました' });
   } catch (err: unknown) {
@@ -709,6 +714,7 @@ router.post('/:id/reject', async (req: Request, res: Response): Promise<void> =>
       rejectRecipients = recipients;
     });
     invalidateDashboardCache(rejectRecipients);
+    void invalidateHistoryCache(userId);
     notifyApplicationEvent('APP_REJECTED', String(id), { actor_id: userId, comment: comment ?? '' });
     res.json({ message: '却下しました' });
   } catch (err: unknown) {
@@ -725,7 +731,7 @@ router.post('/:id/reject', async (req: Request, res: Response): Promise<void> =>
 router.get('/history', async (req: Request, res: Response): Promise<void> => {
   const userId    = req.user!.id;
   const systemView = isAdminUser(req.user) && req.query.all === 'true';
-  const { stage, status, template_id, date_from, date_to, applicant, approver } = req.query as Record<string, string>;
+  const { template_id, date_from, date_to, applicant, approver, keyword, completion } = req.query as Record<string, string>;
   const cursor = decodeCursor(req.query.cursor);
 
   // Personal view: scope to acting user. System view: all actors.
@@ -740,24 +746,16 @@ router.get('/history', async (req: Request, res: Response): Promise<void> => {
     params.push(userId);
   }
 
-  if (stage && stage !== 'ALL') {
-    conditions.push(`s.stage = $${idx++}`);
-    params.push(stage);
-  }
-  if (status && status !== 'ALL') {
-    conditions.push(`s.status = $${idx++}`);
-    params.push(status);
-  }
   if (template_id && template_id !== 'ALL') {
     conditions.push(`a.template_id = $${idx++}`);
     params.push(template_id);
   }
   if (date_from) {
-    conditions.push(`s.acted_at >= $${idx++}`);
+    conditions.push(`a.created_at >= $${idx++}`);
     params.push(date_from);
   }
   if (date_to) {
-    conditions.push(`s.acted_at < ($${idx++}::date + INTERVAL '1 day')`);
+    conditions.push(`a.created_at < ($${idx++}::date + INTERVAL '1 day')`);
     params.push(date_to);
   }
   if (applicant) {
@@ -767,6 +765,16 @@ router.get('/history', async (req: Request, res: Response): Promise<void> => {
   if (systemView && approver) {
     conditions.push(`u_act.full_name ILIKE $${idx++}`);
     params.push(`%${approver}%`);
+  }
+  if (keyword) {
+    params.push(`%${keyword}%`);
+    const kIdx = idx++;
+    conditions.push(`(a.application_number ILIKE $${kIdx} OR t.title_ja ILIKE $${kIdx} OR t.title ILIKE $${kIdx})`);
+  }
+  if (completion === 'INCOMPLETE') {
+    conditions.push(`a.status NOT IN ('COMPLETED', 'REJECTED')`);
+  } else if (completion === 'COMPLETE') {
+    conditions.push(`a.status IN ('COMPLETED', 'REJECTED')`);
   }
   if (cursor) {
     conditions.push(`(s.acted_at, s.id) < ($${idx++}::timestamptz, $${idx++}::uuid)`);
@@ -779,6 +787,13 @@ router.get('/history', async (req: Request, res: Response): Promise<void> => {
   const limitIdx = idx++;
   params.push(cursor ? 0 : offset);
   const offsetIdx = idx++;
+
+  // Cache key: scoped to user (or system) + full filter params + cursor.
+  // History steps are immutable once written — 60s fresh / 300s hard is safe.
+  // Invalidated via invalidateHistoryCache() on any approval action.
+  const histCacheKey = systemView
+    ? `approval:history:system:${req.query.cursor ?? ''}:${conditions.join('|')}:${params.slice(0, -2).join(',')}`
+    : `approval:history:${userId}:${req.query.cursor ?? ''}:${conditions.join('|')}:${params.slice(0, -2).join(',')}`;
 
   try {
     const sql = `
@@ -806,22 +821,32 @@ router.get('/history', async (req: Request, res: Response): Promise<void> => {
       WHERE ${conditions.join(' AND ')}
       ORDER BY s.acted_at DESC NULLS LAST, s.id DESC
       LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
-    const result = await query(sql, params);
-    const rows    = result.rows;
-    const hasMore = rows.length > limit;
-    if (hasMore) rows.pop();
-    res.json({
-      items: rows,
-      hasMore,
-      offset,
-      nextCursor: hasMore
-        ? encodeCursor({ created_at: rows[rows.length - 1].acted_at, id: rows[rows.length - 1].step_id })
-        : null,
+
+    const payload = await swrJson(histCacheKey, 60, 300, async () => {
+      const result = await query(sql, params);
+      const rows    = result.rows;
+      const hasMore = rows.length > limit;
+      if (hasMore) rows.pop();
+      return {
+        items: rows,
+        hasMore,
+        offset,
+        nextCursor: hasMore
+          ? encodeCursor({ created_at: rows[rows.length - 1].acted_at, id: rows[rows.length - 1].step_id })
+          : null,
+      };
     });
+
+    res.json(payload);
   } catch (err) {
     console.error('[approvals] history failed:', err);
     res.status(500).json({ error: `承認履歴の取得に失敗しました: ${(err as Error).message}` });
   }
 });
+
+// Invalidate all approval history cache entries for a user (called after any action).
+export async function invalidateHistoryCache(userId: string): Promise<void> {
+  await invalidateCachePattern(`approval:history:${userId}:*`);
+}
 
 export default router;

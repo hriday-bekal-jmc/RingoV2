@@ -75,27 +75,31 @@ export default function ApprovalHistory() {
   const [systemView, setSystemView] = useState(false);
 
   // Filters
-  const [stage, setStage]           = useState('ALL');
-  const [action, setAction]         = useState('ALL');
-  const [templateId, setTemplateId] = useState('ALL');
-  const [dateFrom, setDateFrom]     = useState('');
-  const [dateTo, setDateTo]         = useState('');
-  const [applicant, setApplicant]   = useState('');
+  const [templateId, setTemplateId]       = useState('ALL');
+  const [dateFrom, setDateFrom]           = useState('');
+  const [dateTo, setDateTo]               = useState('');
+  const [applicant, setApplicant]         = useState('');
   const [applicantInput, setApplicantInput] = useState('');
+  const [keyword, setKeyword]             = useState('');
+  const [keywordInput, setKeywordInput]   = useState('');
+  const [completion, setCompletion]       = useState('ALL');
   // System-view only: filter by approver name
   const [approver, setApprover]           = useState('');
   const [approverInput, setApproverInput] = useState('');
 
-  // Build query params
-  const params = new URLSearchParams();
-  if (stage !== 'ALL')      params.set('stage', stage);
-  if (action !== 'ALL')     params.set('status', action);
-  if (templateId !== 'ALL') params.set('template_id', templateId);
-  if (dateFrom)             params.set('date_from', dateFrom);
-  if (dateTo)               params.set('date_to', dateTo);
-  if (applicant)            params.set('applicant', applicant);
-  if (systemView)           params.set('all', 'true');
-  if (systemView && approver) params.set('approver', approver);
+  // Stable query string — primitive in queryKey guarantees fresh fetch on every change
+  const queryString = useMemo(() => {
+    const p = new URLSearchParams();
+    if (templateId !== 'ALL')   p.set('template_id', templateId);
+    if (dateFrom)               p.set('date_from', dateFrom);
+    if (dateTo)                 p.set('date_to', dateTo);
+    if (applicant)              p.set('applicant', applicant);
+    if (keyword)                p.set('keyword', keyword);
+    if (completion !== 'ALL')   p.set('completion', completion);
+    if (systemView)             p.set('all', 'true');
+    if (systemView && approver) p.set('approver', approver);
+    return p.toString();
+  }, [templateId, dateFrom, dateTo, applicant, keyword, completion, systemView, approver]);
 
   const PAGE = 25;
   const {
@@ -107,16 +111,15 @@ export default function ApprovalHistory() {
     isFetching,
     error,
   } = useInfiniteQuery<{ items: HistoryItem[]; hasMore: boolean; offset: number; nextCursor?: string | null }>({
-    queryKey: ['approvalHistory', systemView, stage, action, templateId, dateFrom, dateTo, applicant, approver],
+    queryKey: ['approvalHistory', queryString],
     queryFn: async ({ pageParam = null }) => {
       const cursor = pageParam ? `&cursor=${encodeURIComponent(String(pageParam))}` : '';
       return (await apiClient.get(
-        `/approvals/history?${params}&limit=${PAGE}${cursor}`
+        `/approvals/history?${queryString}&limit=${PAGE}${cursor}`
       )).data;
     },
     initialPageParam: null,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
-    staleTime: 30_000,
     retry: 1,
     placeholderData: keepPreviousData,
   });
@@ -142,27 +145,21 @@ export default function ApprovalHistory() {
     ];
   }, [items, lang]);
 
-  const stageOptions = [
-    { value: 'ALL',        label: lang === 'en' ? 'All stages'    : '全ステージ' },
-    { value: 'RINGI',      label: lang === 'en' ? 'Ringi'         : '稟議' },
-    { value: 'SETTLEMENT', label: lang === 'en' ? 'Settlement'    : '精算' },
-  ];
-
-  const actionOptions = [
-    { value: 'ALL',      label: lang === 'en' ? 'All actions' : '全アクション' },
-    { value: 'APPROVED', label: lang === 'en' ? 'Approved'    : '承認' },
-    { value: 'REJECTED', label: lang === 'en' ? 'Rejected'    : '却下' },
-    { value: 'RETURNED', label: lang === 'en' ? 'Returned'    : '差し戻し' },
+  const completionOptions = [
+    { value: 'ALL',        label: lang === 'en' ? 'All'         : '全て' },
+    { value: 'INCOMPLETE', label: lang === 'en' ? 'In Progress' : '未完了（進行中）' },
+    { value: 'COMPLETE',   label: lang === 'en' ? 'Completed'   : '完了' },
   ];
 
   function clearFilters() {
-    setStage('ALL'); setAction('ALL'); setTemplateId('ALL');
+    setTemplateId('ALL'); setCompletion('ALL');
     setDateFrom(''); setDateTo('');
     setApplicant(''); setApplicantInput('');
+    setKeyword(''); setKeywordInput('');
     setApprover(''); setApproverInput('');
   }
 
-  const hasFilters = stage !== 'ALL' || action !== 'ALL' || templateId !== 'ALL' || dateFrom || dateTo || applicant || approver;
+  const hasFilters = templateId !== 'ALL' || completion !== 'ALL' || dateFrom || dateTo || applicant || keyword || approver;
 
   return (
     <Layout title={t('title_approval_history')}>
@@ -213,67 +210,89 @@ export default function ApprovalHistory() {
             )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {/* Stage */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {/* 申請区分 */}
             <div>
-              <label className="label">{lang === 'en' ? 'Stage' : 'ステージ'}</label>
-              <CustomSelect options={stageOptions} value={stage} onChange={setStage} />
-            </div>
-
-            {/* Action */}
-            <div>
-              <label className="label">{lang === 'en' ? 'Action' : 'アクション'}</label>
-              <CustomSelect options={actionOptions} value={action} onChange={setAction} />
-            </div>
-
-            {/* Template */}
-            <div>
-              <label className="label">{lang === 'en' ? 'Template' : 'テンプレート'}</label>
+              <label className="label">{lang === 'en' ? 'Application Type' : '申請区分'}</label>
               <CustomSelect options={templateOptions} value={templateId} onChange={setTemplateId} />
             </div>
 
-            {/* Date From */}
+            {/* 期間（申請日）From */}
             <div>
-              <label className="label">{lang === 'en' ? 'From' : '開始日'}</label>
+              <label className="label">{lang === 'en' ? 'From (application date)' : '期間（申請日）開始'}</label>
               <CalendarPicker value={dateFrom} onChange={setDateFrom} />
             </div>
 
-            {/* Date To */}
+            {/* 期間（申請日）To */}
             <div>
-              <label className="label">{lang === 'en' ? 'To' : '終了日'}</label>
+              <label className="label">{lang === 'en' ? 'To (application date)' : '期間（申請日）終了'}</label>
               <CalendarPicker value={dateTo} onChange={setDateTo} />
             </div>
 
-            {/* Applicant search */}
+            {/* 申請者 */}
             <div>
               <label className="label">{lang === 'en' ? 'Applicant' : '申請者'}</label>
               <div className="relative">
                 <input
                   className="input pr-8"
-                  placeholder={lang === 'en' ? 'Search name...' : '氏名で検索'}
+                  placeholder={lang === 'en' ? 'Search name…' : '氏名で検索'}
                   value={applicantInput}
                   onChange={(e) => setApplicantInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') setApplicant(applicantInput); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') setApplicant(applicantInput.trim()); }}
                 />
                 {applicantInput && (
-                  <button
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-warmgray-400 hover:text-warmgray-600"
-                    onClick={() => { setApplicantInput(''); setApplicant(''); }}
-                  >
+                  <button className="absolute right-2 top-1/2 -translate-y-1/2 text-warmgray-400 hover:text-warmgray-600"
+                    onClick={() => { setApplicantInput(''); setApplicant(''); }}>
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
                 )}
               </div>
-              {applicantInput !== applicant && (
-                <button
-                  className="text-[11px] text-ringo-500 hover:text-ringo-600 mt-1 px-0.5"
-                  onClick={() => setApplicant(applicantInput)}
-                >
+              {applicantInput.trim() !== applicant && applicantInput.trim() && (
+                <button className="text-[11px] text-ringo-500 hover:text-ringo-600 mt-1 px-0.5"
+                  onClick={() => setApplicant(applicantInput.trim())}>
                   {lang === 'en' ? 'Press Enter to search →' : 'Enter で検索 →'}
                 </button>
               )}
+            </div>
+
+            {/* キーワード */}
+            <div>
+              <label className="label">{lang === 'en' ? 'Keyword' : 'キーワード'}</label>
+              <div className="relative">
+                <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-warmgray-400 pointer-events-none"
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M16.65 16.65A7.5 7.5 0 104.5 4.5a7.5 7.5 0 0012.15 12.15z" />
+                </svg>
+                <input
+                  className="input pl-8 pr-8"
+                  placeholder={lang === 'en' ? 'Search form name, number…' : '申請名・申請番号で検索'}
+                  value={keywordInput}
+                  onChange={(e) => setKeywordInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') setKeyword(keywordInput.trim()); }}
+                />
+                {keywordInput && (
+                  <button className="absolute right-2 top-1/2 -translate-y-1/2 text-warmgray-400 hover:text-warmgray-600"
+                    onClick={() => { setKeywordInput(''); setKeyword(''); }}>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              {keywordInput.trim() !== keyword && keywordInput.trim() && (
+                <button className="text-[11px] text-ringo-500 hover:text-ringo-600 mt-1 px-0.5"
+                  onClick={() => setKeyword(keywordInput.trim())}>
+                  {lang === 'en' ? 'Press Enter to search →' : 'Enter で検索 →'}
+                </button>
+              )}
+            </div>
+
+            {/* 未完了（進行中）・完了 */}
+            <div>
+              <label className="label">{lang === 'en' ? 'Status' : '未完了・完了'}</label>
+              <CustomSelect options={completionOptions} value={completion} onChange={setCompletion} />
             </div>
 
             {/* Approver search — system view only */}
@@ -283,27 +302,23 @@ export default function ApprovalHistory() {
                 <div className="relative">
                   <input
                     className="input pr-8"
-                    placeholder={lang === 'en' ? 'Search approver...' : '承認者名で検索'}
+                    placeholder={lang === 'en' ? 'Search approver…' : '承認者名で検索'}
                     value={approverInput}
                     onChange={(e) => setApproverInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') setApprover(approverInput); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') setApprover(approverInput.trim()); }}
                   />
                   {approverInput && (
-                    <button
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-warmgray-400 hover:text-warmgray-600"
-                      onClick={() => { setApproverInput(''); setApprover(''); }}
-                    >
+                    <button className="absolute right-2 top-1/2 -translate-y-1/2 text-warmgray-400 hover:text-warmgray-600"
+                      onClick={() => { setApproverInput(''); setApprover(''); }}>
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                       </svg>
                     </button>
                   )}
                 </div>
-                {approverInput !== approver && (
-                  <button
-                    className="text-[11px] text-ringo-500 hover:text-ringo-600 mt-1 px-0.5"
-                    onClick={() => setApprover(approverInput)}
-                  >
+                {approverInput.trim() !== approver && approverInput.trim() && (
+                  <button className="text-[11px] text-ringo-500 hover:text-ringo-600 mt-1 px-0.5"
+                    onClick={() => setApprover(approverInput.trim())}>
                     {lang === 'en' ? 'Press Enter to search →' : 'Enter で検索 →'}
                   </button>
                 )}
