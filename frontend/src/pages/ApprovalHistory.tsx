@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
-import { useQuery, useInfiniteQuery, keepPreviousData } from '@tanstack/react-query';
-import { Link } from 'react-router-dom'; // used inside DetailPanel
+import { useInfiniteQuery, keepPreviousData } from '@tanstack/react-query';
+import { Link, useNavigate } from 'react-router-dom';
 import { useScrollEnd } from '../hooks/useScrollEnd';
 import { useDelayedLoading } from '../hooks/useDelayedLoading';
 import Layout from '../components/common/Layout';
@@ -9,32 +9,9 @@ import { useLang } from '../context/LanguageContext';
 import { useAuth } from '../context/AuthContext';
 import CalendarPicker from '../components/forms/CalendarPicker';
 import CustomSelect from '../components/forms/CustomSelect';
-import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
-import CollapsibleComment from '../components/common/CollapsibleComment';
 import RingoLoader from '../components/common/RingoLoader';
 import { Sk } from '../components/common/Skeleton';
 import UserAvatar from '../components/common/UserAvatar';
-
-// ── File helpers ──────────────────────────────────────────────────────────────
-function isFileValue(v: unknown): boolean {
-  if (typeof v !== 'string' || !v) return false;
-  return v.split(',').some((s) => s.trim().startsWith('/api/files/'));
-}
-function renderFileLinks(val: unknown, lang: string) {
-  return (
-    <div className="flex flex-wrap gap-1.5 mt-0.5">
-      {String(val).split(',').filter(Boolean).map((url, i) => (
-        <a key={i} href={url.trim()} target="_blank" rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-ringo-600 hover:text-ringo-700 bg-ringo-50/60 border border-ringo-200/60 px-2 py-0.5 rounded-lg font-medium transition-colors">
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-          </svg>
-          {lang === 'en' ? 'File' : 'ファイル'} {i + 1}
-        </a>
-      ))}
-    </div>
-  );
-}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -54,230 +31,6 @@ interface HistoryItem {
   applicant_avatar: string | null;
   approver_name: string | null;
   app_status: string;
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-// ── Application Detail Types ───────────────────────────────────────────────────
-
-interface AppStep {
-  step_order: number;
-  stage: string;
-  label: string;
-  status: string;
-  approver_name: string | null;
-  comment: string | null;
-  acted_at: string | null;
-}
-
-interface AppDetail {
-  id: string;
-  application_number: string | null;
-  template_name: string;
-  applicant_name: string;
-  applicant_avatar?: string | null;
-  status: string;
-  form_data: Record<string, any>;
-  settlement_data: Record<string, any> | null;
-  schema_definition: { fields: any[] };
-  settlement_schema: { fields: any[] } | null;
-  steps: AppStep[];
-  created_at: string;
-  submitted_at?: string | null;
-}
-
-// ── Detail Panel ──────────────────────────────────────────────────────────────
-
-function DetailPanel({ applicationId, onClose, lang }: { applicationId: string; onClose: () => void; lang: string }) {
-  const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
-
-  const { data: app, isLoading, error } = useQuery<AppDetail>({
-    queryKey: ['appDetailHistory', applicationId],
-    queryFn: async () => (await apiClient.get(`/applications/${applicationId}`)).data,
-    staleTime: 60_000,
-  });
-
-  const showLoader = useDelayedLoading(isLoading);
-
-  const STEP_STATUS: Record<string, { label: string; cls: string }> = {
-    APPROVED: { label: lang === 'en' ? 'Approved' : '承認',     cls: 'text-emerald-600' },
-    REJECTED: { label: lang === 'en' ? 'Rejected' : '却下',     cls: 'text-red-500' },
-    RETURNED: { label: lang === 'en' ? 'Returned' : '差し戻し', cls: 'text-amber-600' },
-    PENDING:  { label: lang === 'en' ? 'Pending'  : '承認待ち', cls: 'text-ringo-500' },
-    WAITING:  { label: lang === 'en' ? 'Waiting'  : '待機中',   cls: 'text-warmgray-400' },
-    SKIPPED:  { label: lang === 'en' ? 'Skipped'  : 'スキップ', cls: 'text-warmgray-300' },
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 xl:items-stretch xl:justify-end xl:p-0">
-      <div className="absolute inset-0 bg-warmgray-900/60 backdrop-blur-sm xl:bg-warmgray-900/25" onClick={onClose} />
-
-      <div className="relative glass shadow-2xl w-full flex flex-col animate-scale-in overflow-hidden
-                      max-w-3xl max-h-[100dvh] md:max-h-[92vh] rounded-none md:rounded-3xl
-                      xl:max-w-[540px] xl:max-h-full xl:h-full xl:rounded-none xl:rounded-l-3xl xl:border-l xl:border-white/40">
-
-        {/* Header */}
-        <div className="px-4 md:px-7 pt-5 md:pt-6 pb-4 md:pb-5 border-b border-white/30 shrink-0 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            {app && <UserAvatar name={app.applicant_name ?? '?'} avatarUrl={app.applicant_avatar} size={9} />}
-            <div className="min-w-0">
-              {app ? (
-                <>
-                  <h3 className="text-base md:text-lg font-bold text-warmgray-800 leading-tight truncate">{app.template_name}</h3>
-                  <p className="text-xs text-warmgray-500 mt-0.5 truncate">{lang === 'en' ? 'Applicant' : '申請者'}: {app.applicant_name}</p>
-                  <p className="text-[11px] text-warmgray-400 mt-0.5 font-mono">{app.application_number ?? '—'}</p>
-                </>
-              ) : (
-                <div className="h-5 w-48 bg-warmgray-200/60 rounded animate-pulse" />
-              )}
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {app && (
-              <Link
-                to={`/applications/${applicationId}`}
-                className="inline-flex btn-outline btn-sm text-xs"
-                onClick={onClose}
-              >
-                {lang === 'en' ? 'Full page →' : '詳細ページ →'}
-              </Link>
-            )}
-            <button
-              onClick={onClose}
-              className="w-8 h-8 rounded-xl bg-surface-100/80 hover:bg-surface-200/80 flex items-center justify-center text-warmgray-500 hover:text-warmgray-800 transition-all"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto [overflow-x:clip] [scrollbar-gutter:stable] px-4 md:px-7 py-4 md:py-5 space-y-6">
-          {showLoader && (
-            <div className="space-y-3">
-              {[...Array(6)].map((_, i) => <div key={i} className="h-12 rounded-xl bg-white/40 animate-pulse" />)}
-            </div>
-          )}
-          {error && (
-            <div className="text-sm text-red-500 text-center py-8">
-              {lang === 'en' ? 'Failed to load application' : '申請の読み込みに失敗しました'}
-            </div>
-          )}
-          {app && (
-            <>
-              {/* Form fields */}
-              <div>
-                <p className="section-title mb-4">{lang === 'en' ? 'Application Content' : '申請内容'}</p>
-                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
-                  {(app.schema_definition?.fields ?? []).map((f: any) => {
-                    const val = app.form_data[f.name];
-                    const isRepeat = f.type === 'repeat_group';
-                    const isFile = f.type === 'file' || isFileValue(val);
-                    const isLong = isRepeat || f.type === 'textarea' || (typeof val === 'string' && !isFile && val.length > 40);
-                    return (
-                      <div key={f.name} className={isLong ? 'col-span-full' : ''}>
-                        <dt className="text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{f.label}</dt>
-                        <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3.5 py-2.5 rounded-xl break-words min-h-[42px]">
-                          {isRepeat ? (
-                            <RepeatGroupDisplay field={f} value={val} compact />
-                          ) : isFile && val ? (
-                            renderFileLinks(val, lang)
-                          ) : val != null && val !== '' ? (
-                            String(val)
-                          ) : (
-                            <span className="text-warmgray-300">—</span>
-                          )}
-                        </dd>
-                      </div>
-                    );
-                  })}
-                </dl>
-              </div>
-
-              {/* Settlement data if present */}
-              {app.settlement_data && app.settlement_schema && (
-                <div>
-                  <p className="section-title mb-4">{lang === 'en' ? 'Settlement Content' : '精算内容'}</p>
-                  <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
-                    {(app.settlement_schema.fields ?? []).map((f: any) => {
-                      const val = app.settlement_data![f.name];
-                      const isRepeat = f.type === 'repeat_group';
-                      const isFile = f.type === 'file' || isFileValue(val);
-                      const isLong = isRepeat || f.type === 'textarea' || (typeof val === 'string' && !isFile && val.length > 40);
-                      return (
-                        <div key={f.name} className={isLong ? 'col-span-full' : ''}>
-                          <dt className="text-[11px] font-bold uppercase tracking-widest text-warmgray-400 mb-1">{f.label}</dt>
-                          <dd className="text-sm font-medium text-warmgray-800 bg-white/60 border border-white/80 px-3.5 py-2.5 rounded-xl break-words min-h-[42px]">
-                            {isRepeat ? (
-                              <RepeatGroupDisplay field={f} value={val} compact />
-                            ) : isFile && val ? (
-                              renderFileLinks(val, lang)
-                            ) : val != null && val !== '' ? (
-                              String(val)
-                            ) : (
-                              <span className="text-warmgray-300">—</span>
-                            )}
-                          </dd>
-                        </div>
-                      );
-                    })}
-                  </dl>
-                </div>
-              )}
-
-              {/* Approval timeline */}
-              <div>
-                <p className="section-title mb-4">{lang === 'en' ? 'Approval Timeline' : '承認フロー'}</p>
-                <div className="space-y-2">
-                  {app.steps.map((step, i) => {
-                    const st = STEP_STATUS[step.status] ?? { label: step.status, cls: 'text-warmgray-500' };
-                    return (
-                      <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-white/40 border border-white/60">
-                        {/* Step number */}
-                        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                          step.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' :
-                          step.status === 'REJECTED' ? 'bg-red-100 text-red-600' :
-                          step.status === 'RETURNED' ? 'bg-amber-100 text-amber-700' :
-                          step.status === 'PENDING'  ? 'bg-ringo-100 text-ringo-700 ring-2 ring-ringo-300' :
-                          'bg-surface-100 text-warmgray-400'
-                        }`}>
-                          {step.status === 'APPROVED' ? '✓' : step.status === 'REJECTED' ? '✕' : step.status === 'RETURNED' ? '↩' : step.step_order}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-xs font-semibold text-warmgray-700">{step.label}</span>
-                            {step.stage === 'SETTLEMENT' && (
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700">{lang === 'en' ? 'Settlement' : '精算'}</span>
-                            )}
-                            <span className={`text-[11px] font-semibold ml-auto ${st.cls}`}>{st.label}</span>
-                          </div>
-                          {step.approver_name && (
-                            <p className="text-[11px] text-warmgray-400 mt-0.5">{step.approver_name}</p>
-                          )}
-                          {step.acted_at && (
-                            <p className="text-[11px] text-warmgray-400">
-                              {new Date(step.acted_at).toLocaleDateString(dateLocale)} {new Date(step.acted_at).toLocaleTimeString(dateLocale, { hour: '2-digit', minute: '2-digit' })}
-                            </p>
-                          )}
-                          {step.comment && (
-                            <div className="mt-1 text-xs bg-white/60 rounded-lg px-2.5 py-1.5 border border-white/80 min-w-0 overflow-hidden">
-                              <CollapsibleComment text={step.comment} className="text-warmgray-600 italic" />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -315,13 +68,11 @@ const APP_STATUS_LABEL: Record<string, { ja: string; en: string }> = {
 export default function ApprovalHistory() {
   const { t, lang } = useLang();
   const { isAdmin } = useAuth();
+  const navigate = useNavigate();
   const dateLocale = lang === 'en' ? 'en-US' : 'ja-JP';
 
   // Company-wide toggle (admin only) — query not sent until toggled
   const [systemView, setSystemView] = useState(false);
-
-  // Detail panel
-  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // Filters
   const [stage, setStage]           = useState('ALL');
@@ -415,13 +166,6 @@ export default function ApprovalHistory() {
 
   return (
     <Layout title={t('title_approval_history')}>
-      {selectedId && (
-        <DetailPanel
-          applicationId={selectedId}
-          onClose={() => setSelectedId(null)}
-          lang={lang}
-        />
-      )}
       <div className="max-w-[1800px] mx-auto space-y-6">
 
         {/* Header */}
@@ -662,7 +406,7 @@ export default function ApprovalHistory() {
                     <div
                       key={item.step_id}
                       className="rounded-2xl border border-white/50 bg-white/40 backdrop-blur-sm px-4 py-3.5 space-y-2.5 cursor-pointer active:bg-white/60 transition-colors animate-fade-up"
-                      onClick={() => setSelectedId(item.application_id)}
+                      onClick={() => navigate(`/applications/${item.application_id}`)}
                     >
                       {/* Row 1: template + date */}
                       <div className="flex items-start justify-between gap-2">
@@ -732,7 +476,7 @@ export default function ApprovalHistory() {
                         <tr
                           key={item.step_id}
                           className="cursor-pointer [&>td]:align-top animate-fade-in"
-                          onClick={() => setSelectedId(item.application_id)}
+                          onClick={() => navigate(`/applications/${item.application_id}`)}
                         >
                           <td className="align-top">
                             <div className="font-semibold text-warmgray-800 text-sm leading-snug line-clamp-2">{item.template_name}</div>
@@ -797,12 +541,12 @@ export default function ApprovalHistory() {
                             onClick={(e) => e.stopPropagation()}
                             className="sticky right-0 bg-[#FBF9F6] shadow-[-8px_0_8px_-6px_rgba(60,40,20,0.10)]"
                           >
-                            <button
-                              className="btn-ghost btn-sm text-ringo-500 hover:text-ringo-600 whitespace-nowrap"
-                              onClick={() => setSelectedId(item.application_id)}
+                            <Link
+                              to={`/applications/${item.application_id}`}
+                              className="btn-ghost btn-sm text-ringo-500 hover:text-ringo-600 whitespace-nowrap inline-flex"
                             >
                               {lang === 'en' ? 'View →' : '詳細 →'}
-                            </button>
+                            </Link>
                           </td>
                         </tr>
                       );

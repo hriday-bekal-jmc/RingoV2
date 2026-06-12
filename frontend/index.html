@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja">
+<html lang="ja" style="background:#FBF8F4">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -7,10 +7,182 @@
     <title>RINGO</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <!--
+      Fonts load ASYNC (media="print" → flips to "all" onload) so the Google
+      Fonts CSS never blocks first paint. Text renders instantly with the
+      system fallback and swaps in (display=swap) when the webfont arrives.
+    -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
+    />
+    <noscript>
+      <link
+        href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@400;500;600;700&display=swap"
+        rel="stylesheet"
+      />
+    </noscript>
+    <script>
+      // Kick off the session check IN PARALLEL with the JS bundle download +
+      // parse. AuthContext consumes this promise on first load instead of
+      // issuing its own request — cuts one full round-trip off cold start.
+      // Shape: { ok, body } when the server answered; null on network error
+      // (→ AuthContext falls back to its normal fetch path).
+      window.__ME__ = fetch('/api/auth/me', { credentials: 'same-origin' })
+        .then(function (r) {
+          return r
+            .json()
+            .then(function (body) { return { ok: r.ok, body: body }; })
+            .catch(function () { return { ok: false, body: null }; });
+        })
+        .catch(function () { return null; });
+    </script>
   </head>
   <body class="bg-gray-50">
-    <div id="root"></div>
+    <div id="root">
+      <!--
+        Boot splash — pure HTML/CSS, paints before any JS parses.
+        Shows a skeleton layout immediately. Logo pulse fades in after 3.5s
+        for very slow loads. React's first render replaces #root children.
+      -->
+      <style>
+        .boot-splash {
+          position: fixed; inset: 0; background: #FBF8F4; overflow: hidden;
+        }
+
+        /* ── Shimmer ── */
+        @keyframes shimmer {
+          from { background-position: -600px 0; }
+          to   { background-position: 600px 0;  }
+        }
+        .sh {
+          background: linear-gradient(90deg,#EDE8E3 25%,#F7F2EE 50%,#EDE8E3 75%);
+          background-size: 1200px 100%;
+          animation: shimmer 1.7s ease-in-out infinite;
+        }
+
+        /* ── Desktop skeleton ── */
+        .boot-desktop {
+          display: none; width: 100%; height: 100%; flex-direction: row;
+        }
+        .boot-sidebar {
+          width: 208px; flex-shrink: 0; height: 100%;
+          background: linear-gradient(160deg,#b82820 0%,#c93d2f 55%,#d44535 100%);
+          padding: 18px 14px 14px; display: flex; flex-direction: column; gap: 6px;
+        }
+        .boot-sb-logo {
+          width: 38px; height: 38px; border-radius: 11px;
+          background: rgba(255,255,255,0.28); margin-bottom: 18px; flex-shrink: 0;
+        }
+        .boot-sb-nav {
+          height: 34px; border-radius: 9px; background: rgba(255,255,255,0.16);
+        }
+        .boot-content {
+          flex: 1; min-width: 0; height: 100%; padding: 20px 24px;
+          display: flex; flex-direction: column; gap: 16px; overflow: hidden;
+        }
+        .boot-topbar  { height: 38px; border-radius: 11px; }
+        .boot-tiles   { display: flex; gap: 12px; }
+        .boot-tile    { height: 78px; flex: 1; border-radius: 16px; }
+        .boot-cols    { display: flex; gap: 16px; flex: 1; min-height: 0; }
+        .boot-col-l   { flex: 3; border-radius: 20px; }
+        .boot-col-r   { flex: 2; border-radius: 20px; }
+
+        /* ── Mobile skeleton ── */
+        .boot-mobile {
+          display: flex; width: 100%; flex-direction: column;
+        }
+        .boot-mob-bar {
+          height: 54px; width: 100%; border-radius: 0;
+          background: linear-gradient(90deg,#b82820,#d44535);
+        }
+        .boot-mob-pills {
+          display: flex; gap: 10px; padding: 14px 16px 0;
+        }
+        .boot-mob-pill { height: 50px; flex: 1; border-radius: 14px; }
+        .boot-mob-card {
+          height: 96px; margin: 12px 16px 0; border-radius: 16px;
+        }
+
+        /* Responsive */
+        @media (min-width: 768px) {
+          .boot-desktop { display: flex; }
+          .boot-mobile  { display: none;  }
+        }
+
+        /* Skeleton fades to ghost when logo takes over */
+        .boot-desktop, .boot-mobile {
+          animation: boot-skel-fade 0.5s ease 3.5s forwards;
+        }
+        @keyframes boot-skel-fade { to { opacity: 0.12; } }
+
+        /* ── Logo pulse fallback (visible only on very slow loads) ── */
+        .boot-pulse {
+          position: absolute; inset: 0; display: flex; flex-direction: column;
+          align-items: center; justify-content: center; gap: 14px;
+          opacity: 0; pointer-events: none;
+          animation: boot-logo-in 0.5s ease 3.5s forwards;
+        }
+        .boot-pulse-mark {
+          width: 56px; height: 56px; border-radius: 16px;
+          background: linear-gradient(135deg,#b82820 0%,#ed3a33 60%,#f85850 100%);
+          animation: boot-pulse-anim 1.1s ease-in-out 3.5s infinite;
+        }
+        .boot-pulse-label {
+          font: 600 11px/1 system-ui,sans-serif; letter-spacing: 0.18em;
+          color: #b9aa9e; text-transform: uppercase;
+          opacity: 0; animation: boot-logo-in 0.5s ease 3.5s forwards;
+        }
+        @keyframes boot-logo-in    { to { opacity: 1; } }
+        @keyframes boot-pulse-anim {
+          0%,100% { transform: scale(1);    opacity: 1;   }
+          50%     { transform: scale(0.88); opacity: 0.7; }
+        }
+      </style>
+
+      <div class="boot-splash">
+        <!-- Desktop layout skeleton -->
+        <div class="boot-desktop">
+          <div class="boot-sidebar">
+            <div class="boot-sb-logo"></div>
+            <div class="boot-sb-nav"></div>
+            <div class="boot-sb-nav"></div>
+            <div class="boot-sb-nav"></div>
+            <div class="boot-sb-nav"></div>
+          </div>
+          <div class="boot-content">
+            <div class="boot-topbar sh"></div>
+            <div class="boot-tiles">
+              <div class="boot-tile sh"></div>
+              <div class="boot-tile sh"></div>
+              <div class="boot-tile sh"></div>
+              <div class="boot-tile sh"></div>
+            </div>
+            <div class="boot-cols">
+              <div class="boot-col-l sh"></div>
+              <div class="boot-col-r sh"></div>
+            </div>
+          </div>
+        </div>
+        <!-- Mobile layout skeleton -->
+        <div class="boot-mobile">
+          <div class="boot-mob-bar"></div>
+          <div class="boot-mob-pills">
+            <div class="boot-mob-pill sh"></div>
+            <div class="boot-mob-pill sh"></div>
+          </div>
+          <div class="boot-mob-card sh"></div>
+          <div class="boot-mob-card sh"></div>
+        </div>
+        <!-- Logo pulse fallback for very slow loads (3.5s+ delay) -->
+        <div class="boot-pulse">
+          <div class="boot-pulse-mark"></div>
+          <div class="boot-pulse-label">RINGO</div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

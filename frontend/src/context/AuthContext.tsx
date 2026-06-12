@@ -52,6 +52,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchMe = useCallback(async (isFirstLoad = false) => {
     try {
+      // Cold start: index.html kicks off /auth/me in parallel with the JS
+      // bundle (window.__ME__). Consume it once instead of re-fetching —
+      // saves a full round-trip. null = network error → normal fetch path.
+      type PreMe = { ok: boolean; body: { user?: User | null } | null } | null;
+      const pre = isFirstLoad
+        ? (window as unknown as { __ME__?: Promise<PreMe> }).__ME__
+        : undefined;
+      if (pre) {
+        (window as unknown as { __ME__?: Promise<PreMe> }).__ME__ = undefined;
+        const early = await pre;
+        if (early !== null) {
+          const fresh: User | null = early.ok ? (early.body?.user ?? null) : null;
+          fingerprintRef.current = `${fresh?.role ?? ''}|${fresh?.is_admin ? '1' : '0'}|${fresh?.department_id ?? ''}`;
+          setUser(fresh);
+          return;
+        }
+        // Network error on the early fetch — fall through to apiClient below.
+      }
+
       const res = await apiClient.get('/auth/me');
       const fresh: User | null = res.data.user ?? null;
       const fp = `${fresh?.role ?? ''}|${fresh?.is_admin ? '1' : '0'}|${fresh?.department_id ?? ''}`;
@@ -104,6 +123,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     await apiClient.post('/auth/logout').catch(() => {});
+    queryClient.clear();
+    localStorage.removeItem('ringo_rq_cache');
     setUser(null);
     window.location.href = '/login';
   };
