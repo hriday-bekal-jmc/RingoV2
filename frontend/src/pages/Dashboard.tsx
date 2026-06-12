@@ -24,6 +24,7 @@ interface DashboardSummary {
     DRAFT: number; PENDING_APPROVAL: number; RETURNED: number; APPROVED: number;
     PENDING_SETTLEMENT: number; SETTLEMENT_APPROVED: number; COMPLETED: number; REJECTED: number;
   };
+  settlement_returned?: number;
   recent_apps: Array<{ id: string; template_code: string; template_name: string; template_title_en?: string | null; status: string; created_at: string }>;
   pending_approvals?: { items: PendingItem[]; total: number; proxy_total: number };
 }
@@ -244,7 +245,8 @@ function UnsettledDrawer({ onClose }: { onClose: () => void }) {
 
   const { data, isLoading } = useQuery<{ items: UnsettledApp[] }>({
     queryKey: ['unsettledApps'],
-    queryFn: async () => (await apiClient.get('/applications?status=APPROVED&limit=50')).data,
+    // UNSETTLED = APPROVED (awaiting first settlement) + settlement-phase returns (edit & resend).
+    queryFn: async () => (await apiClient.get('/applications?status=UNSETTLED&limit=50')).data,
     staleTime: 30_000,
   });
 
@@ -275,16 +277,30 @@ function UnsettledDrawer({ onClose }: { onClose: () => void }) {
                 const nums = app.row_preview?.numbers ?? [];
                 const mainNum = nums[0]?.value;
                 const subNum = nums[1]?.value;
+                // Settlement-phase return → edit-in-place + resend (opens detail → SettlementReturnEditor).
+                // APPROVED → first-time settlement entry (settlement page).
+                const isReturned = app.status === 'RETURNED';
                 return (
-                  <li key={app.id} className="animate-fade-up px-5 py-4" style={{ animationDelay: `${Math.min(i, 10) * 30}ms` }}>
+                  <li
+                    key={app.id}
+                    className="animate-fade-up px-5 py-4 cursor-pointer hover:bg-white/40 transition-colors"
+                    style={{ animationDelay: `${Math.min(i, 10) * 30}ms` }}
+                    onClick={() => { onClose(); navigate(`/applications/${app.id}`); }}
+                  >
                     <div className="flex items-start gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
                           <p className="text-sm font-bold text-warmgray-800 truncate">
                             {templateLabel(app.template_code, lang, app.template_name, app.template_title_en)}
                           </p>
-                          <span className="badge-approved">{lang === 'en' ? 'Approved' : '承認済み'}</span>
-                          <span className="badge-mustard">{lang === 'en' ? 'Awaiting settlement' : '精算待ち'}</span>
+                          {isReturned ? (
+                            <span className="badge-returned">↩ {lang === 'en' ? 'Settlement returned' : '精算差し戻し'}</span>
+                          ) : (
+                            <>
+                              <span className="badge-approved">{lang === 'en' ? 'Approved' : '承認済み'}</span>
+                              <span className="badge-mustard">{lang === 'en' ? 'Awaiting settlement' : '精算待ち'}</span>
+                            </>
+                          )}
                         </div>
                         {app.row_preview?.text && (
                           <p className="text-[11px] text-warmgray-600 truncate font-medium">
@@ -295,15 +311,24 @@ function UnsettledDrawer({ onClose }: { onClose: () => void }) {
                           {app.application_number ?? '—'} · {new Date(app.created_at).toLocaleDateString(dateLocale)}
                         </p>
                       </div>
-                      <div className="text-right shrink-0 space-y-0.5">
+                      <div className="text-right shrink-0 space-y-0.5" onClick={(e) => e.stopPropagation()}>
                         {mainNum != null && <p className="text-sm font-bold text-warmgray-800 tabular-nums">{mainNum.toLocaleString()}</p>}
                         {subNum != null && <p className="text-[11px] text-warmgray-400 tabular-nums">{subNum.toLocaleString()}</p>}
-                        <button
-                          onClick={() => { onClose(); navigate(`/applications/${app.id}/settlement`); }}
-                          className="mt-1 px-3 py-1 rounded-lg bg-teal-500 hover:bg-teal-600 text-white text-[11px] font-bold transition-colors"
-                        >
-                          💴 {lang === 'en' ? 'Submit' : '精算入力'}
-                        </button>
+                        {isReturned ? (
+                          <button
+                            onClick={() => { onClose(); navigate(`/applications/${app.id}`); }}
+                            className="mt-1 px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold transition-colors whitespace-nowrap"
+                          >
+                            ↩ {lang === 'en' ? 'Correct & resend' : '訂正して再送信'}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => { onClose(); navigate(`/applications/${app.id}/settlement`); }}
+                            className="mt-1 px-3 py-1 rounded-lg bg-teal-500 hover:bg-teal-600 text-white text-[11px] font-bold transition-colors"
+                          >
+                            💴 {lang === 'en' ? 'Submit' : '精算入力'}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </li>
@@ -654,8 +679,11 @@ export default function Dashboard() {
   const pendingApprovalsTotal = summary?.pending_approvals?.total ?? 0;
   const scheduledReviewTotal  = summary?.pending_approvals?.proxy_total ?? 0;
   const draftCount            = counts?.DRAFT ?? 0;
-  const returnedCount         = counts?.RETURNED ?? 0;
-  const approvedCount         = counts?.APPROVED ?? 0;  // awaiting settlement
+  // Settlement-phase returns are surfaced in the unsettled area (edit & resend),
+  // not the ringi 差し戻し bucket. Split the raw RETURNED count accordingly.
+  const settlementReturned    = summary?.settlement_returned ?? 0;
+  const returnedCount         = Math.max(0, (counts?.RETURNED ?? 0) - settlementReturned); // ringi-only
+  const approvedCount         = (counts?.APPROVED ?? 0) + settlementReturned;  // awaiting settlement + returns to fix
   const pendingCount          = counts?.PENDING_APPROVAL ?? 0;
   const settlementApprovedCount = counts?.SETTLEMENT_APPROVED ?? 0;
   const completedCount        = counts?.COMPLETED ?? 0;

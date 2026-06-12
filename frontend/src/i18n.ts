@@ -213,6 +213,8 @@ const dict = {
     round_original:        '初回申請',
     round_resubmit:        '再提出 #',
     btn_resubmit:          '修正して再提出する',
+    btn_correct_resend:    '訂正して再送信',
+    unsettled_returned_badge: '精算差し戻し',
 
     // ApplicationDetail
     detail_no_number:      '申請番号未発行',
@@ -575,6 +577,8 @@ const dict = {
     round_original:        'Initial Submission',
     round_resubmit:        'Resubmission #',
     btn_resubmit:          'Edit & Resubmit',
+    btn_correct_resend:    'Correct & resend',
+    unsettled_returned_badge: 'Settlement returned',
 
     // ApplicationDetail
     detail_no_number:      'No number yet',

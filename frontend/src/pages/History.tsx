@@ -34,6 +34,9 @@ interface Application {
   total_steps?: number;
   row_preview?: RowPreview | null;
   archived_at?: string | null;
+  /** RETURNED app whose returned step was in the SETTLEMENT phase → belongs in
+      the settlement-pending bucket (edit & resend), not the ringi返し戻し bucket. */
+  settlement_returned?: boolean;
 }
 
 function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
@@ -136,10 +139,18 @@ export default function History() {
   const showLoader = useDelayedLoading(isLoading);
 
   const applications = data?.pages.flatMap(p => p.items) ?? [];
-  // Client-side filter — no re-fetch on tab switch
+  // Client-side filter — no re-fetch on tab switch.
+  // Settlement-phase returns (status RETURNED + settlement_returned) belong in the
+  // PENDING_SETTLEMENT bucket (edit & resend), NOT the ringi返し戻し bucket.
+  const matchesFilter = (a: Application, f: string): boolean => {
+    if (f === 'ALL') return true;
+    if (f === 'PENDING_SETTLEMENT') return a.status === 'PENDING_SETTLEMENT' || !!a.settlement_returned;
+    if (f === 'RETURNED')           return a.status === 'RETURNED' && !a.settlement_returned;
+    return a.status === f;
+  };
   const sorted = statusFilter === 'ALL'
     ? applications
-    : applications.filter(a => a.status === statusFilter);
+    : applications.filter(a => matchesFilter(a, statusFilter));
 
   // Auto-fetch next pages when active filter yields too few visible results.
   // Keeps fetching (same ALL query, next page) until ≥8 filtered items are
@@ -320,6 +331,7 @@ export default function History() {
             */}
             <ul key={statusFilter} className="divide-y divide-white/30">
               {sorted.map((app, idx) => {
+                const isSettlementReturned = !!app.settlement_returned;
                 const cls = STATUS_CLS[app.status] ?? 'badge-draft';
                 const label = STATUS_LABEL[app.status] ?? app.status;
                 const isDraft = app.status === 'DRAFT';
@@ -364,7 +376,9 @@ export default function History() {
                           {templateLabel(app.template_code, lang, app.template_name, app.template_title_en)}
                         </p>
                         <PatternBadge patternId={app.pattern_id} />
-                        <span className={cls}>{label}</span>
+                        {isSettlementReturned
+                          ? <span className="badge-returned">↩ {t('unsettled_returned_badge')}</span>
+                          : <span className={cls}>{label}</span>}
                         {phaseBadge && (
                           <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${phaseBadge.cls}`}>
                             {phaseBadge.text}
@@ -456,6 +470,14 @@ export default function History() {
                           onClick={(e) => { e.stopPropagation(); navigate(`/applications/${app.id}/settlement`); }}
                         >
                           💴 {t('btn_settle')}
+                        </button>
+                      )}
+                      {isSettlementReturned && (
+                        <button
+                          className="btn-primary text-xs px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 border-amber-500 hover:border-amber-600 whitespace-nowrap"
+                          onClick={(e) => { e.stopPropagation(); navigate(`/applications/${app.id}`); }}
+                        >
+                          ↩ {t('btn_correct_resend')}
                         </button>
                       )}
                     </div>

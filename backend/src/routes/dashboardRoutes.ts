@@ -40,6 +40,11 @@ interface StatusCounts {
 
 interface DashboardSummary {
   status_counts: StatusCounts;
+  /** RETURNED apps whose returned step is in the SETTLEMENT phase. These are
+      surfaced in the "unsettled" area (edit + resend), NOT the ringi返し戻し
+      bucket. Lets the frontend split: unsettled = APPROVED + this; ringi
+      returned tile = RETURNED − this. */
+  settlement_returned: number;
   recent_apps: Array<{
     id:                  string;
     application_number:  string | null;
@@ -94,6 +99,23 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
          WHERE applicant_id = $1
            AND archived_at IS NULL
          GROUP BY status`,
+        [userId],
+    );
+
+    // 1b. Settlement-phase returns — RETURNED apps whose returned step is in
+    //     SETTLEMENT. Surfaced in the unsettled area, not the ringi返し戻し bucket.
+    const settleReturnedRes = await query(
+        `SELECT COUNT(*)::int AS n
+         FROM applications a
+         WHERE a.applicant_id = $1
+           AND a.archived_at IS NULL
+           AND a.status = 'RETURNED'
+           AND EXISTS (
+             SELECT 1 FROM approval_steps s
+             WHERE s.application_id = a.id
+               AND s.stage = 'SETTLEMENT'
+               AND s.status = 'RETURNED'
+           )`,
         [userId],
     );
 
@@ -205,6 +227,7 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
 
     const summary: DashboardSummary = {
       status_counts,
+      settlement_returned: Number((settleReturnedRes.rows[0] as { n: number })?.n ?? 0),
       recent_apps: recentRes.rows.map((r: any) => ({
         id:                 r.id,
         application_number: r.application_number,

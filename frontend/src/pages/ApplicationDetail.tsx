@@ -355,7 +355,7 @@ function SettlementReturnEditor({ app, onSuccess }: { app: ApplicationDetail; on
           isSettlementPhase={true}
           onSubmit={handleSubmit}
           disabled={resubmitSettlement.isPending}
-          submitLabel={t('btn_resubmit')}
+          submitLabel={t('btn_correct_resend')}
         />
       )}
     </div>

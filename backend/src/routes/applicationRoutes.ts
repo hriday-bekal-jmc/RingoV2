@@ -128,12 +128,25 @@ async function finalizeStageWithoutApprovalSteps(
   stage: ApprovalStage,
 ): Promise<{ id: string; status: string; application_number: string | null }> {
   const appNumber = await nextApplicationNumber(client, appId);
-  const status = stage === 'SETTLEMENT' ? 'SETTLEMENT_APPROVED' : 'APPROVED';
+  let status: string;
+  if (stage === 'SETTLEMENT') {
+    status = 'SETTLEMENT_APPROVED';
+  } else {
+    // Pattern 1 = ringi-only: no settlement phase → complete immediately
+    const ptRes = await client.query(
+      `SELECT ft.pattern_id FROM applications a JOIN form_templates ft ON ft.id = a.template_id WHERE a.id = $1`,
+      [appId],
+    );
+    const patternId: number = ptRes.rows[0]?.pattern_id ?? 1;
+    status = patternId === 1 ? 'COMPLETED' : 'APPROVED';
+  }
+  const completedNow = status === 'COMPLETED';
   const appRes = await client.query(
     `UPDATE applications
      SET status = $2,
          application_number = COALESCE(application_number, $3),
          updated_at = CURRENT_TIMESTAMP
+         ${completedNow ? ', completed_at = CURRENT_TIMESTAMP' : ''}
      WHERE id = $1
      RETURNING id, status, application_number`,
     [appId, status, appNumber],
@@ -1207,7 +1220,15 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
              AND stage = ps.stage
              AND step_order / 100 = ps.batch
              AND status != 'CANCELLED'
-         ), 0) AS total_steps
+         ), 0) AS total_steps,
+         -- settlement_returned: RETURNED app whose returned step is in the
+         -- SETTLEMENT phase. Frontend routes these to the settlement-pending
+         -- bucket (edit & resend), not the ringi返し戻し bucket.
+         (a.status = 'RETURNED' AND EXISTS (
+            SELECT 1 FROM approval_steps sr
+            WHERE sr.application_id = a.id
+              AND sr.stage = 'SETTLEMENT' AND sr.status = 'RETURNED'
+         )) AS settlement_returned
        FROM applications a
        JOIN form_templates t ON a.template_id = t.id
        LEFT JOIN LATERAL (
@@ -1217,7 +1238,27 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
          ORDER BY s.step_order ASC LIMIT 1
        ) ps ON TRUE
        WHERE a.applicant_id = $1
-         AND ($2 = 'ALL' OR a.status = $2)
+         AND (
+           $2 = 'ALL'
+           -- UNSETTLED (virtual): pattern-3 ringi-approved awaiting settlement
+           -- (APPROVED) + settlement-phase returns (edit & resend in place).
+           OR ($2 = 'UNSETTLED' AND (
+                 a.status = 'APPROVED'
+                 OR (a.status = 'RETURNED' AND EXISTS (
+                       SELECT 1 FROM approval_steps s
+                       WHERE s.application_id = a.id
+                         AND s.stage = 'SETTLEMENT' AND s.status = 'RETURNED'
+                 ))
+              ))
+           -- RETURNED bucket = ringi returns ONLY. Settlement returns live in
+           -- the unsettled area, not here.
+           OR ($2 = 'RETURNED' AND a.status = 'RETURNED' AND NOT EXISTS (
+                 SELECT 1 FROM approval_steps s
+                 WHERE s.application_id = a.id
+                   AND s.stage = 'SETTLEMENT' AND s.status = 'RETURNED'
+              ))
+           OR ($2 NOT IN ('ALL','UNSETTLED','RETURNED') AND a.status = $2)
+         )
          AND (
            $7 = 'include'
            OR ($7 = 'exclude' AND a.archived_at IS NULL)

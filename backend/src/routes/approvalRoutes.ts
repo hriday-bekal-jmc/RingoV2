@@ -360,14 +360,15 @@ async function processSingleApprove(
     } else {
       const year = new Date().getFullYear();
       const tmplRes = await client.query(
-        `SELECT ft.app_number_prefix, ft.app_number_digits
+        `SELECT ft.app_number_prefix, ft.app_number_digits, ft.pattern_id
          FROM applications a
          JOIN form_templates ft ON ft.id = a.template_id
          WHERE a.id = $1`,
         [appId],
       );
-      const prefix: string = tmplRes.rows[0]?.app_number_prefix ?? 'RNG';
-      const digits: number  = tmplRes.rows[0]?.app_number_digits  ?? 6;
+      const prefix: string    = tmplRes.rows[0]?.app_number_prefix ?? 'RNG';
+      const digits: number    = tmplRes.rows[0]?.app_number_digits  ?? 6;
+      const patternId: number = tmplRes.rows[0]?.pattern_id         ?? 1;
       const seqRes = await client.query(
         `INSERT INTO application_number_sequences (template_id, year, prefix, last_seq)
          SELECT a.template_id, $2, $3, 1
@@ -378,11 +379,17 @@ async function processSingleApprove(
         [appId, year, prefix],
       );
       const appNumber = `${prefix}-${year}-${String(seqRes.rows[0].last_seq).padStart(digits, '0')}`;
-      const newStatus = currentStep.stage === 'SETTLEMENT' ? 'SETTLEMENT_APPROVED' : 'APPROVED';
+      // Pattern 1 = ringi-only: RINGI approval done → COMPLETED immediately (no settlement phase)
+      // Pattern 3 = ringi+settlement: RINGI approval done → APPROVED (applicant starts settlement next)
+      const newStatus = currentStep.stage === 'SETTLEMENT'
+        ? 'SETTLEMENT_APPROVED'
+        : (patternId === 1 ? 'COMPLETED' : 'APPROVED');
+      const completedNow = newStatus === 'COMPLETED';
       const appRes = await client.query(
         `UPDATE applications
          SET status = $2,
              application_number = COALESCE(application_number, $3)
+             ${completedNow ? ', completed_at = CURRENT_TIMESTAMP' : ''}
          WHERE id = $1
          RETURNING id, status, application_number`,
         [appId, newStatus, appNumber],
