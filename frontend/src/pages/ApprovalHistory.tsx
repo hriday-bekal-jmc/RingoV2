@@ -83,6 +83,7 @@ export default function ApprovalHistory() {
   const [keyword, setKeyword]             = useState('');
   const [keywordInput, setKeywordInput]   = useState('');
   const [completion, setCompletion]       = useState('ALL');
+  const [actionType, setActionType]       = useState('ALL');
   // System-view only: filter by approver name
   const [approver, setApprover]           = useState('');
   const [approverInput, setApproverInput] = useState('');
@@ -103,10 +104,11 @@ export default function ApprovalHistory() {
     if (applicant)              p.set('applicant', applicant);
     if (keyword)                p.set('keyword', keyword);
     if (completion !== 'ALL')   p.set('completion', completion);
+    if (actionType !== 'ALL')   p.set('action_type', actionType);
     if (systemView)             p.set('all', 'true');
     if (systemView && approver) p.set('approver', approver);
     return p.toString();
-  }, [templateId, dateFrom, dateTo, applicant, keyword, completion, systemView, approver]);
+  }, [templateId, dateFrom, dateTo, applicant, keyword, completion, actionType, systemView, approver]);
 
   const PAGE = 25;
   const {
@@ -153,7 +155,7 @@ export default function ApprovalHistory() {
   ];
 
   function clearFilters() {
-    setTemplateId('ALL'); setCompletion('ALL');
+    setTemplateId('ALL'); setCompletion('ALL'); setActionType('ALL');
     setDateFrom(''); setDateTo('');
     setApplicant(''); setApplicantInput('');
     setKeyword(''); setKeywordInput('');
@@ -294,6 +296,20 @@ export default function ApprovalHistory() {
             <div>
               <label className="label">{lang === 'en' ? 'Status' : '未完了・完了'}</label>
               <CustomSelect options={completionOptions} value={completion} onChange={setCompletion} />
+            </div>
+
+            {/* 承認種別 (action_type filter) */}
+            <div>
+              <label className="label">{lang === 'en' ? 'Action type' : '承認種別'}</label>
+              <CustomSelect
+                options={[
+                  { value: 'ALL',     label: lang === 'en' ? 'All'     : '全て' },
+                  { value: 'APPROVE', label: lang === 'en' ? 'Approve' : '承認' },
+                  { value: 'CONFIRM', label: lang === 'en' ? 'Confirm' : '回付（確認）' },
+                ]}
+                value={actionType}
+                onChange={setActionType}
+              />
             </div>
 
             {/* Approver search — system view only */}
@@ -455,6 +471,11 @@ export default function ApprovalHistory() {
                         <span className={`${act.badge} text-[10px]`}>
                           {act.icon} {lang === 'en' ? act.label_en : act.label_ja}
                         </span>
+                        {item.action_type === 'CONFIRM' && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+                            {lang === 'en' ? 'Confirm' : '確認'}
+                          </span>
+                        )}
                         <span className={`${APP_STATUS_BADGE[item.app_status] ?? 'badge-draft'} text-[10px] ml-auto`}>
                           {lang === 'en' ? (appSt?.en ?? item.app_status) : (appSt?.ja ?? item.app_status)}
                         </span>
@@ -525,9 +546,16 @@ export default function ApprovalHistory() {
                             )}
                           </td>
                           <td className="align-top">
-                            <span className={`${act.badge} whitespace-nowrap`}>
-                              {act.icon} {lang === 'en' ? act.label_en : act.label_ja}
-                            </span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={`${act.badge} whitespace-nowrap`}>
+                                {act.icon} {lang === 'en' ? act.label_en : act.label_ja}
+                              </span>
+                              {item.action_type === 'CONFIRM' && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 whitespace-nowrap">
+                                  {lang === 'en' ? 'Confirm' : '確認'}
+                                </span>
+                              )}
+                            </div>
                             <div className="text-[11px] text-warmgray-400 tabular-nums whitespace-nowrap mt-1">
                               {new Date(item.acted_at).toLocaleDateString(dateLocale)} {new Date(item.acted_at).toLocaleTimeString(dateLocale, { hour: '2-digit', minute: '2-digit' })}
                             </div>

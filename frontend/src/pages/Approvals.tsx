@@ -16,7 +16,6 @@ import { Sk } from '../components/common/Skeleton';
 import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
 import TransportationDetail from '../components/forms/TransportationDetail';
 import { FieldValueContent, isLongField } from '../components/forms/FieldValueDisplay';
-import CollapsibleComment from '../components/common/CollapsibleComment';
 import UserAvatar from '../components/common/UserAvatar';
 
 // File URLs are same-origin (vite proxy /api in dev, reverse proxy in prod)
@@ -61,6 +60,7 @@ interface Application {
 }
 
 import StepBar from '../components/common/StepBar';
+import RouteTimeline from '../components/common/RouteTimeline';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -215,41 +215,6 @@ function AppDetailPanel({ appId, onClose, tFn, lang }: {
     queryFn: async () => (await apiClient.get(`/applications/${appId}`)).data,
     staleTime: 60_000,
   });
-
-  // Timeline step dot colour
-  const stepDotCls = (status: string) =>
-    `absolute -left-[11px] top-0 w-5 h-5 rounded-full border-4 border-white/60 shadow-sm ${
-      status === 'APPROVED'            ? 'bg-emerald-500' :
-      status === 'REJECTED'            ? 'bg-ringo-500'   :
-      status === 'RETURNED'            ? 'bg-amber-500'   :
-      status === 'PENDING'             ? 'bg-mustard-500 ring-2 ring-mustard-300 animate-pulse' :
-      'bg-warmgray-300'
-    }`;
-
-  const renderTimelineStep = (step: AppDetailData['steps'][number], i: number) => (
-    <div key={`${step.stage}-${step.step_order}-${i}`} className="relative pl-6">
-      <div className={stepDotCls(step.status)} />
-      <div className="-mt-1">
-        <p className="font-bold text-sm text-warmgray-800 leading-snug">{step.label || `ステップ${step.step_order}`}</p>
-        <p className="text-xs text-warmgray-500 mt-0.5">{step.approver_name || tFn('detail_unassigned')}</p>
-        {step.acted_at && (
-          <p className="text-[10px] text-warmgray-400 mt-0.5">
-            {new Date(step.acted_at).toLocaleString(dateLocale)}
-          </p>
-        )}
-        {step.comment && (
-          <div className={`mt-2 text-xs px-2.5 py-2 rounded-lg min-w-0 overflow-hidden ${
-            step.status === 'RETURNED'
-              ? 'bg-amber-50 border border-amber-200 text-amber-800'
-              : 'bg-white/60 border border-white/80 text-warmgray-700'
-          }`}>
-            <span className="font-bold">{tFn('detail_comment')}:</span>
-            <CollapsibleComment text={step.comment} className="mt-0.5" />
-          </div>
-        )}
-      </div>
-    </div>
-  );
 
   // Styled field box (matches ApplicationDetail.tsx)
   const renderFields = (formData: Record<string, unknown>, schema: { fields: FormField[] } | null | undefined) => {
@@ -422,26 +387,30 @@ function AppDetailPanel({ appId, onClose, tFn, lang }: {
                   {ringiSteps.length > 0 && (
                     <div className="card pt-5 pb-3">
                       {hasSettlement && (
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-ringo-400 mb-4 ml-4">{tFn('phase_ringi')}</p>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-ringo-400 mb-3 ml-1">{tFn('phase_ringi')}</p>
                       )}
-                      <div className="relative border-l-2 border-ringo-200 ml-4 space-y-6 pb-2">
-                        {ringiSteps
+                      <RouteTimeline
+                        steps={ringiSteps
                           .filter(s => s.status !== 'CANCELLED')
                           .sort((a, b) => a.step_order - b.step_order)
-                          .map((s, i) => renderTimelineStep(s, i))}
-                      </div>
+                          .map(s => ({ ...s, approver_name: s.approver_name ?? undefined }))}
+                        currentStep={ringiSteps.find(s => s.status === 'PENDING')?.step_order}
+                        accent="ringo"
+                      />
                     </div>
                   )}
 
                   {/* SETTLEMENT steps */}
                   {settleSteps.length > 0 && (
                     <div className="card pt-5 pb-3">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-teal-500 mb-4 ml-4">{tFn('phase_settlement')}</p>
-                      <div className="relative border-l-2 border-teal-200 ml-4 space-y-6 pb-2">
-                        {settleSteps
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-teal-500 mb-3 ml-1">{tFn('phase_settlement')}</p>
+                      <RouteTimeline
+                        steps={settleSteps
                           .sort((a, b) => a.step_order - b.step_order)
-                          .map((s, i) => renderTimelineStep(s, i))}
-                      </div>
+                          .map(s => ({ ...s, approver_name: s.approver_name ?? undefined }))}
+                        currentStep={settleSteps.find(s => s.status === 'PENDING')?.step_order}
+                        accent="teal"
+                      />
                     </div>
                   )}
                 </div>
@@ -554,9 +523,26 @@ function DetailModal({ app, onClose, onAction, isMutating, proxyMode = false }: 
             </button>
           </div>
 
-          {/* Step progress */}
+          {/* Step progress — route timeline with names (collapses when > 5 steps) */}
           <div className="mt-4">
-            <StepBar current={Number(app.current_step)} total={Number(app.total_steps)} />
+            {detail?.steps && detail.steps.length > 0 ? (() => {
+              const stageSteps = detail.steps
+                .filter((s) => app.current_stage === 'SETTLEMENT' ? s.stage === 'SETTLEMENT' : (s.stage === 'RINGI' || !s.stage))
+                .filter((s) => s.status !== 'CANCELLED')
+                .sort((a, b) => a.step_order - b.step_order)
+                .map((s) => ({ ...s, approver_name: s.approver_name ?? undefined }));
+              const pendingStep = stageSteps.find((s) => s.status === 'PENDING');
+              const currentStepOrder = pendingStep?.step_order;
+              return (
+                <RouteTimeline
+                  steps={stageSteps}
+                  currentStep={currentStepOrder}
+                  accent={app.current_stage === 'SETTLEMENT' ? 'teal' : 'ringo'}
+                />
+              );
+            })() : (
+              <StepBar current={Number(app.current_step)} total={Number(app.total_steps)} />
+            )}
             {app.current_step_label && (
               <p className="text-[11px] text-warmgray-400 mt-2">{t('approvals_current_lbl')}: {app.current_step_label}</p>
             )}
@@ -720,11 +706,13 @@ export default function Approvals() {
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
   const [systemView, setSystemView] = useState(searchParams.get('system') === '1');
   const [proxyView, setProxyView] = useState(searchParams.get('proxy') === '1');
+  const [confirmFilter, setConfirmFilter] = useState(searchParams.get('action') === 'confirm');
 
   // Sync view tabs when URL params change
   useEffect(() => {
     if (searchParams.get('proxy') === '1') setProxyView(true);
     if (searchParams.get('system') === '1') setSystemView(true);
+    if (searchParams.get('action') === 'confirm') setConfirmFilter(true);
   }, [searchParams]);
   const [selectedProxyApp, setSelectedProxyApp] = useState<Application | null>(null);
   // ── Selection / bulk-approve state ────────────────────────────────────────
@@ -761,8 +749,11 @@ export default function Approvals() {
 
   const showLoader = useDelayedLoading(isLoading);
 
-  const applications = data?.pages.flatMap(p => p.items) ?? [];
-  const totalCount = data?.pages[0]?.total ?? applications.length;
+  const allApplications = data?.pages.flatMap(p => p.items) ?? [];
+  const applications = confirmFilter
+    ? allApplications.filter(a => a.current_step_action === 'CONFIRM')
+    : allApplications;
+  const totalCount = data?.pages[0]?.total ?? allApplications.length;
 
   // ── Proxy approval queue ───────────────────────────────────────────────────
   const {
@@ -958,22 +949,35 @@ export default function Approvals() {
                 </button>
               )}
             </div>
-            {/* Approval / Proxy tabs */}
+            {/* Approval / Confirm / Proxy tabs */}
             <div className="flex items-center gap-1">
               <button
-                onClick={() => { setProxyView(false); setSelectedProxyApp(null); exitSelectionMode(); }}
+                onClick={() => { setProxyView(false); setConfirmFilter(false); setSelectedProxyApp(null); exitSelectionMode(); }}
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all duration-150 ${
-                  !proxyView
+                  !proxyView && !confirmFilter
                     ? 'bg-ringo-500 text-white border-ringo-500 shadow-sm'
                     : 'bg-white/60 text-warmgray-500 border-white/80 hover:bg-white/90'
                 }`}
               >
                 {lang === 'en' ? 'Approval' : '承認'}
-                {totalCount > 0 && <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${!proxyView ? 'bg-white/30' : 'bg-ringo-100 text-ringo-600'}`}>{totalCount}</span>}
+                {totalCount > 0 && !confirmFilter && <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${!proxyView && !confirmFilter ? 'bg-white/30' : 'bg-ringo-100 text-ringo-600'}`}>{totalCount}</span>}
               </button>
               {!systemView && (
                 <button
-                  onClick={() => { setProxyView(true); setSelectedApp(null); exitSelectionMode(); }}
+                  onClick={() => { setProxyView(false); setConfirmFilter(true); setSelectedApp(null); exitSelectionMode(); }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all duration-150 ${
+                    confirmFilter && !proxyView
+                      ? 'bg-amber-500 text-white border-amber-500 shadow-sm'
+                      : 'bg-white/60 text-warmgray-500 border-white/80 hover:bg-white/90'
+                  }`}
+                >
+                  {lang === 'en' ? 'Confirm' : '回付'}
+                  {applications.length > 0 && confirmFilter && <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] bg-white/30">{applications.length}</span>}
+                </button>
+              )}
+              {!systemView && (
+                <button
+                  onClick={() => { setProxyView(true); setConfirmFilter(false); setSelectedApp(null); exitSelectionMode(); }}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all duration-150 ${
                     proxyView
                       ? 'bg-violet-600 text-white border-violet-600 shadow-sm'
@@ -1102,6 +1106,9 @@ export default function Approvals() {
                             {app.current_stage === 'SETTLEMENT' && (
                               <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700">{t('approvals_settlement_badge')}</span>
                             )}
+                            {app.current_step_action === 'CONFIRM' && (
+                              <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">{lang === 'en' ? 'Confirm' : '確認'}</span>
+                            )}
                           </div>
                           {app.row_preview?.text && (
                             <p className="text-[11px] text-warmgray-600 mt-0.5 truncate font-medium md:max-w-[200px]">
@@ -1124,13 +1131,23 @@ export default function Approvals() {
                     <td data-label={t('approvals_col_step')}>
                       <div className="md:text-left text-right">
                         <div className="flex items-center gap-1.5 md:justify-start justify-end">
-                          {Array.from({ length: Number(app.total_steps) }).map((_, idx) => {
-                            const n = idx + 1;
-                            const cur = Number(app.current_step);
-                            return (
-                              <span key={idx} className={`w-2 h-2 rounded-full ${n < cur ? 'bg-emerald-400' : n === cur ? 'bg-ringo-500 ring-2 ring-ringo-200' : 'bg-surface-200'}`} />
-                            );
-                          })}
+                          {(() => {
+                            const cur = Number(app.current_step); const total = Number(app.total_steps);
+                            const MAX_DOTS = 7;
+                            if (total <= MAX_DOTS) {
+                              return Array.from({ length: total }).map((_, idx) => {
+                                const n = idx + 1;
+                                return <span key={n} className={`w-2 h-2 rounded-full ${n < cur ? 'bg-emerald-400' : n === cur ? 'bg-ringo-500 ring-2 ring-ringo-200' : 'bg-surface-200'}`} />;
+                              });
+                            }
+                            const dots: React.ReactNode[] = [];
+                            for (let i = 1; i <= 3; i++) {
+                              dots.push(<span key={i} className={`w-2 h-2 rounded-full ${i < cur ? 'bg-emerald-400' : i === cur ? 'bg-ringo-500 ring-2 ring-ringo-200' : 'bg-surface-200'}`} />);
+                            }
+                            dots.push(<span key="ell" className="text-[9px] text-warmgray-300 leading-none">···</span>);
+                            dots.push(<span key={total} className={`w-2 h-2 rounded-full ${total < cur ? 'bg-emerald-400' : total === cur ? 'bg-ringo-500 ring-2 ring-ringo-200' : 'bg-surface-200'}`} />);
+                            return dots;
+                          })()}
                           <span className="text-[10px] text-warmgray-400 ml-1">{app.current_step}/{app.total_steps}</span>
                         </div>
                         {app.current_step_label && (
@@ -1243,13 +1260,23 @@ export default function Approvals() {
                       <td data-label={t('approvals_col_step')}>
                         <div className="md:text-left text-right">
                           <div className="flex items-center gap-1.5 md:justify-start justify-end">
-                            {Array.from({ length: Number(app.total_steps) }).map((_, idx) => {
-                              const n = idx + 1;
-                              const cur = Number(app.current_step);
-                              return (
-                                <span key={idx} className={`w-2 h-2 rounded-full ${n < cur ? 'bg-emerald-400' : n === cur ? 'bg-amber-400 ring-2 ring-amber-200' : 'bg-violet-200'}`} />
-                              );
-                            })}
+                            {(() => {
+                              const cur = Number(app.current_step); const total = Number(app.total_steps);
+                              const MAX_DOTS = 7;
+                              if (total <= MAX_DOTS) {
+                                return Array.from({ length: total }).map((_, idx) => {
+                                  const n = idx + 1;
+                                  return <span key={n} className={`w-2 h-2 rounded-full ${n < cur ? 'bg-emerald-400' : n === cur ? 'bg-amber-400 ring-2 ring-amber-200' : 'bg-violet-200'}`} />;
+                                });
+                              }
+                              const dots: React.ReactNode[] = [];
+                              for (let i = 1; i <= 3; i++) {
+                                dots.push(<span key={i} className={`w-2 h-2 rounded-full ${i < cur ? 'bg-emerald-400' : i === cur ? 'bg-amber-400 ring-2 ring-amber-200' : 'bg-violet-200'}`} />);
+                              }
+                              dots.push(<span key="ell" className="text-[9px] text-warmgray-300 leading-none">···</span>);
+                              dots.push(<span key={total} className={`w-2 h-2 rounded-full ${total < cur ? 'bg-emerald-400' : total === cur ? 'bg-amber-400 ring-2 ring-amber-200' : 'bg-violet-200'}`} />);
+                              return dots;
+                            })()}
                             <span className="text-[10px] text-warmgray-400 ml-1">{app.current_step}/{app.total_steps}</span>
                           </div>
                           {app.current_approver_name && (

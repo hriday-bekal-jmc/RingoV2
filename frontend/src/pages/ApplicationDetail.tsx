@@ -502,6 +502,10 @@ export default function ApplicationDetail() {
 
   const showLoader = useDelayedLoading(isLoading);
 
+  // Timeline collapse state — expanded = show all, collapsed = show ±2 around current PENDING
+  const [expandedRingi, setExpandedRingi] = useState(false);
+  const [expandedSettle, setExpandedSettle] = useState(false);
+
   // Approval actions (visible when current user is a pending approver)
   const [approvalComment, setApprovalComment] = useState('');
   const [approvalAction, setApprovalAction] = useState<'approve' | 'return' | 'reject' | null>(null);
@@ -615,18 +619,43 @@ export default function ApplicationDetail() {
     </div>
   );
 
-  // Render steps with round dividers (round = floor(step_order / 100))
-  // Round 0 = original submission, round 1+ = resubmissions
-  const renderStepsWithDividers = (steps: Step[]) => {
+  // Render steps with round dividers + collapse around current PENDING step
+  const WINDOW = 2; // steps to show before/after current
+  const renderStepsWithDividers = (steps: Step[], expanded: boolean, onToggle: () => void) => {
     const sorted = [...steps].sort((a, b) => a.step_order - b.step_order);
+    const pendingIdx = sorted.findIndex((s) => s.status === 'PENDING');
+    const focusIdx = pendingIdx >= 0 ? pendingIdx : sorted.length - 1;
+    const shouldCollapse = !expanded && sorted.length > WINDOW * 2 + 1;
+
+    // Determine which indices are visible when collapsed
+    const visibleSet = new Set<number>();
+    if (shouldCollapse) {
+      for (let i = Math.max(0, focusIdx - WINDOW); i <= Math.min(sorted.length - 1, focusIdx + WINDOW); i++) {
+        visibleSet.add(i);
+      }
+    }
+
     const nodes: React.ReactNode[] = [];
     let prevRound = -1;
 
-    sorted.forEach((step) => {
+    // Hidden count above the window
+    const hiddenAbove = shouldCollapse ? Math.max(0, focusIdx - WINDOW) : 0;
+    const hiddenBelow = shouldCollapse ? Math.max(0, sorted.length - 1 - (focusIdx + WINDOW)) : 0;
+
+    if (shouldCollapse && hiddenAbove > 0) {
+      nodes.push(
+        <button key="expand-above" onClick={onToggle}
+          className="w-full text-left pl-6 py-1 text-[10px] font-semibold text-warmgray-400 hover:text-ringo-500 transition-colors">
+          ▲ {lang === 'en' ? `Show ${hiddenAbove} more above` : `上に${hiddenAbove}件`}
+        </button>
+      );
+    }
+
+    sorted.forEach((step, i) => {
+      if (shouldCollapse && !visibleSet.has(i)) return;
       const round = Math.floor(step.step_order / 100);
       if (round !== prevRound) {
         if (prevRound >= 0) {
-          // Insert divider between rounds
           nodes.push(
             <div key={`divider-${round}`} className="relative pl-6 my-2">
               <div className="absolute -left-[1px] top-0 bottom-0 border-l-2 border-dashed border-amber-300" />
@@ -643,6 +672,25 @@ export default function ApplicationDetail() {
       }
       nodes.push(renderStep(step));
     });
+
+    if (shouldCollapse && hiddenBelow > 0) {
+      nodes.push(
+        <button key="expand-below" onClick={onToggle}
+          className="w-full text-left pl-6 py-1 text-[10px] font-semibold text-warmgray-400 hover:text-ringo-500 transition-colors">
+          ▼ {lang === 'en' ? `Show ${hiddenBelow} more below` : `下に${hiddenBelow}件`}
+        </button>
+      );
+    }
+
+    if (!shouldCollapse && sorted.length > WINDOW * 2 + 1) {
+      nodes.push(
+        <button key="collapse" onClick={onToggle}
+          className="w-full text-left pl-6 py-1 text-[10px] font-semibold text-warmgray-400 hover:text-ringo-500 transition-colors">
+          ▲ {lang === 'en' ? 'Collapse' : '折りたたむ'}
+        </button>
+      );
+    }
+
     return nodes;
   };
 
@@ -730,7 +778,7 @@ export default function ApplicationDetail() {
                 <p className="text-[10px] font-bold uppercase tracking-widest text-ringo-400 mb-4 ml-4">{t('phase_ringi')}</p>
               )}
               <div className="relative border-l-2 border-ringo-200 ml-4 space-y-8 pb-4">
-                {renderStepsWithDividers(ringiSteps)}
+                {renderStepsWithDividers(ringiSteps, expandedRingi, () => setExpandedRingi(e => !e))}
               </div>
             </div>
 
@@ -738,7 +786,7 @@ export default function ApplicationDetail() {
               <div className="card pt-6 pb-2">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-teal-500 mb-4 ml-4">{t('phase_settlement')}</p>
                 <div className="relative border-l-2 border-teal-200 ml-4 space-y-8 pb-4">
-                  {renderStepsWithDividers(settleSteps)}
+                  {renderStepsWithDividers(settleSteps, expandedSettle, () => setExpandedSettle(e => !e))}
                 </div>
               </div>
             )}
@@ -891,7 +939,7 @@ export default function ApplicationDetail() {
                 <p className="text-[10px] font-bold uppercase tracking-widest text-ringo-400 mb-4 ml-4">{t('phase_ringi')}</p>
               )}
               <div className="relative border-l-2 border-ringo-200 ml-4 space-y-8 pb-4">
-                {renderStepsWithDividers(ringiSteps)}
+                {renderStepsWithDividers(ringiSteps, expandedRingi, () => setExpandedRingi(e => !e))}
               </div>
             </div>
           )}
@@ -901,7 +949,7 @@ export default function ApplicationDetail() {
             <div className="card pt-6 pb-2">
               <p className="text-[10px] font-bold uppercase tracking-widest text-teal-500 mb-4 ml-4">{t('phase_settlement')}</p>
               <div className="relative border-l-2 border-teal-200 ml-4 space-y-8 pb-4">
-                {renderStepsWithDividers(settleSteps)}
+                {renderStepsWithDividers(settleSteps, expandedSettle, () => setExpandedSettle(e => !e))}
               </div>
             </div>
           )}

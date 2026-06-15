@@ -66,11 +66,14 @@ interface DashboardSummary {
       template_name:    string;
       applicant_name:   string;
       created_at:       string;
+      action_type:      string;
     }>;
     total: number;
     /** Apps where the user is a downstream (WAITING, higher step_order)
         approver — can preview but not yet act. "Scheduled for review". */
     proxy_total: number;
+    /** PENDING steps where action_type = 'CONFIRM' — needs circulation sign-off. */
+    confirm_count: number;
   };
 }
 
@@ -175,7 +178,7 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
                s.id, s.application_id, a.application_number,
                t.title_ja AS template_name, t.title AS template_title_en,
                u.full_name AS applicant_name,
-               s.created_at,
+               s.created_at, s.action_type,
                COUNT(*) OVER() AS _total
              FROM approval_steps s
              JOIN applications a   ON a.id = s.application_id
@@ -189,6 +192,19 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
             [userId],
           )
       : { rows: [] as Array<Record<string, unknown>> };
+
+    const confirmCountRes = canApprove
+      ? await query(
+            `SELECT COUNT(*)::int AS confirm_count
+             FROM approval_steps s
+             JOIN applications a ON a.id = s.application_id
+             WHERE s.approver_id = $1
+               AND s.status = 'PENDING'
+               AND s.action_type = 'CONFIRM'
+               AND a.archived_at IS NULL`,
+            [userId],
+          )
+      : { rows: [{ confirm_count: 0 }] as Array<Record<string, unknown>> };
 
     // 3b. "Scheduled for review" count — apps where the user is a downstream
     // (WAITING, higher step_order) approver: can preview but not yet act.
@@ -254,9 +270,11 @@ router.get('/summary', async (req: Request, res: Response): Promise<void> => {
           template_name:      r.template_name,
           applicant_name:     r.applicant_name,
           created_at:         r.created_at,
+          action_type:        r.action_type ?? 'APPROVE',
         })),
         total,
-        proxy_total: Number((proxyRes.rows[0] as { proxy_total: number })?.proxy_total ?? 0),
+        proxy_total:   Number((proxyRes.rows[0] as { proxy_total: number })?.proxy_total ?? 0),
+        confirm_count: Number((confirmCountRes.rows[0] as { confirm_count: number })?.confirm_count ?? 0),
       };
     }
 

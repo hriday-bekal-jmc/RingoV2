@@ -32,7 +32,7 @@ interface DashboardSummary {
 interface PendingItem {
   id: string; application_id: string; application_number: string | null;
   template_name: string; template_title_en?: string | null; template_code: string;
-  applicant_name: string; created_at: string;
+  applicant_name: string; created_at: string; action_type?: string;
 }
 
 interface UnsettledApp {
@@ -50,6 +50,8 @@ const TILE_ACCENT: Record<string, { bg: string; icon: string }> = {
   'Proxy Approval':{ bg: 'from-violet-400 to-purple-500',  icon: '↔' },
   '承認履歴':      { bg: 'from-slate-400 to-slate-500',    icon: '📋' },
   'Approval History':{ bg: 'from-slate-400 to-slate-500',  icon: '📋' },
+  '回付予定':      { bg: 'from-amber-300 to-yellow-400',   icon: '🔁' },
+  'Confirm':       { bg: 'from-amber-300 to-yellow-400',   icon: '🔁' },
   // submit group
   '作成':          { bg: 'from-ringo-400 to-rose-500',     icon: '✏️' },
   'New':           { bg: 'from-ringo-400 to-rose-500',     icon: '✏️' },
@@ -356,6 +358,11 @@ function RecentAppsList({ apps, lang, dateLocale, t }: {
   apps: RecentApp[];
   lang: 'en' | 'ja'; dateLocale: string; t: (k: any) => string;
 }) {
+  const [phaseFilter, setPhaseFilter] = useState<'ALL' | 'RINGI' | 'SETTLEMENT'>('ALL');
+  const isSettlementPhase = (status: string) =>
+    status === 'PENDING_SETTLEMENT' || status === 'SETTLEMENT_APPROVED';
+  const filtered = phaseFilter === 'ALL' ? apps
+    : apps.filter(a => phaseFilter === 'SETTLEMENT' ? isSettlementPhase(a.status) : !isSettlementPhase(a.status));
   const STATUS_CLS: Record<string, string> = {
     DRAFT: 'badge-draft', PENDING_APPROVAL: 'badge-pending', APPROVED: 'badge-approved',
     REJECTED: 'badge-rejected', RETURNED: 'badge-returned',
@@ -384,8 +391,28 @@ function RecentAppsList({ apps, lang, dateLocale, t }: {
 
   return (
     <div className="card !p-0 overflow-hidden">
+      {/* Phase toggle */}
+      <div className="flex gap-1.5 px-4 pt-3 pb-2 border-b border-white/20">
+        {(['ALL', 'RINGI', 'SETTLEMENT'] as const).map((p) => {
+          const label = p === 'ALL'
+            ? (lang === 'en' ? 'All' : 'すべて')
+            : p === 'RINGI' ? '稟議' : '精算';
+          const isActive = phaseFilter === p;
+          const cls = isActive
+            ? p === 'RINGI'      ? 'bg-ringo-500 text-white'
+            : p === 'SETTLEMENT' ? 'bg-teal-500 text-white'
+            : 'bg-warmgray-800 text-white'
+            : 'bg-surface-100 text-warmgray-500 hover:bg-surface-200';
+          return (
+            <button key={p} onClick={() => setPhaseFilter(p)}
+              className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all duration-150 ${cls}`}>
+              {label}
+            </button>
+          );
+        })}
+      </div>
       <ul className="divide-y divide-white/30">
-        {apps.slice(0, 5).map((app, i) => {
+        {filtered.slice(0, 5).map((app, i) => {
           const phase = phaseBadge(app);
           const isPending = app.status === 'PENDING_APPROVAL' || app.status === 'PENDING_SETTLEMENT';
           return (
@@ -691,6 +718,7 @@ export default function Dashboard() {
   const counts = summary?.status_counts;
   const pendingApprovalsTotal = summary?.pending_approvals?.total ?? 0;
   const scheduledReviewTotal  = summary?.pending_approvals?.proxy_total ?? 0;
+  const confirmTotal          = summary?.pending_approvals?.confirm_count ?? 0;
   const draftCount            = counts?.DRAFT ?? 0;
   // Settlement-phase returns are surfaced in the unsettled area (edit & resend),
   // not the ringi 差し戻し bucket. Split the raw RETURNED count accordingly.
@@ -866,7 +894,10 @@ export default function Dashboard() {
                                 {item.application_number && <span className="ml-1.5 font-mono text-warmgray-300">#{item.application_number}</span>}
                               </p>
                             </div>
-                            <span className="badge-pending shrink-0">{lang === 'en' ? 'Pending' : '承認待ち'}</span>
+                            {item.action_type === 'CONFIRM'
+                              ? <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 ring-1 ring-amber-200/60">{lang === 'en' ? 'Confirm' : '確認'}</span>
+                              : <span className="badge-pending shrink-0">{lang === 'en' ? 'Pending' : '承認待ち'}</span>
+                            }
                             <svg className="w-3.5 h-3.5 text-warmgray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
                           </Link>
                         </li>
@@ -906,6 +937,7 @@ export default function Dashboard() {
                 {perms.canApprove && (
                   <Section icon="✅" title={lang === 'en' ? 'Approve' : '承認する'}>
                     <ActionTile label={lang === 'en' ? 'Pending' : '未処理'} count={pendingApprovalsTotal} onClick={() => setShowAllPending(true)} />
+                    <ActionTile label={lang === 'en' ? 'Confirm' : '回付予定'} count={confirmTotal} to="/approvals?action=confirm" />
                     <ActionTile label={lang === 'en' ? 'Proxy Approval' : '代理承認'} count={scheduledReviewTotal} to="/approvals?proxy=1" />
                   </Section>
                 )}

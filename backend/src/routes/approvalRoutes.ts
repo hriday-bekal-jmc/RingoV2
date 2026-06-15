@@ -731,7 +731,7 @@ router.post('/:id/reject', async (req: Request, res: Response): Promise<void> =>
 router.get('/history', async (req: Request, res: Response): Promise<void> => {
   const userId    = req.user!.id;
   const systemView = isAdminUser(req.user) && req.query.all === 'true';
-  const { template_id, date_from, date_to, applicant, approver, keyword, completion } = req.query as Record<string, string>;
+  const { template_id, date_from, date_to, applicant, approver, keyword, completion, action_type } = req.query as Record<string, string>;
   const cursor = decodeCursor(req.query.cursor);
 
   // Personal view: scope to acting user. System view: all actors.
@@ -775,6 +775,10 @@ router.get('/history', async (req: Request, res: Response): Promise<void> => {
     conditions.push(`a.status NOT IN ('COMPLETED', 'REJECTED')`);
   } else if (completion === 'COMPLETE') {
     conditions.push(`a.status IN ('COMPLETED', 'REJECTED')`);
+  }
+  if (action_type === 'CONFIRM' || action_type === 'APPROVE') {
+    conditions.push(`s.action_type = $${idx++}`);
+    params.push(action_type);
   }
   if (cursor) {
     conditions.push(`(s.acted_at, s.id) < ($${idx++}::timestamptz, $${idx++}::uuid)`);

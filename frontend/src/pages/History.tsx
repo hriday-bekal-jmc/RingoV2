@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
+import CustomSelect from '../components/forms/CustomSelect';
 import { useScrollEnd } from '../hooks/useScrollEnd';
 import { useDelayedLoading } from '../hooks/useDelayedLoading';
 import apiClient from '../services/apiClient';
@@ -61,7 +62,7 @@ const STATUS_CLS: Record<string, string> = {
   CANCELLED:          'badge-draft',
 };
 
-const ALL_STATUS_KEYS = ['ALL', 'DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PENDING_SETTLEMENT', 'SETTLEMENT_APPROVED', 'REJECTED', 'RETURNED', 'COMPLETED'];
+const ALL_STATUS_KEYS = ['ALL', 'DRAFT', 'PENDING_APPROVAL', 'RETURNED', 'PENDING_SETTLEMENT', 'SETTLEMENT_APPROVED', 'COMPLETED'];
 
 export default function History() {
   const [searchParams] = useSearchParams();
@@ -97,6 +98,30 @@ export default function History() {
   // Archived apps are excluded by default (kept out of hot queries). Opt-in
   // toggle re-fetches with include_archived so users can still view old apps.
   const [showArchived, setShowArchived] = useState(false);
+  const [phaseFilter, setPhaseFilter] = useState<'ALL' | 'RINGI' | 'SETTLEMENT'>('ALL');
+  const [templateCode, setTemplateCode] = useState('ALL');
+  const [keyword, setKeyword] = useState('');
+  const [keywordInput, setKeywordInput] = useState('');
+  const [completion, setCompletion] = useState('ALL');
+
+  const { data: templates } = useQuery<Array<{ id: string; code: string; title_ja: string; title: string | null }>>({
+    queryKey: ['templates'],
+    queryFn: async () => (await apiClient.get('/templates')).data,
+    staleTime: 5 * 60_000,
+  });
+  const templateOptions = [
+    { value: 'ALL', label: lang === 'en' ? 'All types' : 'すべての申請区分' },
+    ...(templates ?? []).map((t) => ({ value: t.code, label: t.title_ja })),
+  ];
+  const completionOptions = [
+    { value: 'ALL',        label: lang === 'en' ? 'All'              : 'すべて' },
+    { value: 'INCOMPLETE', label: lang === 'en' ? 'In Progress'      : '未完了（進行中）' },
+    { value: 'COMPLETE',   label: lang === 'en' ? 'Completed/Closed' : '完了・終了' },
+  ];
+  const hasExtraFilters = templateCode !== 'ALL' || keyword || completion !== 'ALL';
+  const clearExtraFilters = () => {
+    setTemplateCode('ALL'); setKeyword(''); setKeywordInput(''); setCompletion('ALL');
+  };
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -148,9 +173,32 @@ export default function History() {
     if (f === 'RETURNED')           return a.status === 'RETURNED' && !a.settlement_returned;
     return a.status === f;
   };
-  const sorted = statusFilter === 'ALL'
-    ? applications
-    : applications.filter(a => matchesFilter(a, statusFilter));
+  const matchesPhase = (a: Application, p: string): boolean => {
+    if (p === 'ALL') return true;
+    const isSettlement = a.status === 'PENDING_SETTLEMENT' || a.status === 'SETTLEMENT_APPROVED' || !!a.settlement_returned;
+    return p === 'SETTLEMENT' ? isSettlement : !isSettlement;
+  };
+  const COMPLETE_STATUSES = new Set(['APPROVED', 'COMPLETED', 'REJECTED', 'CANCELLED', 'SETTLEMENT_APPROVED']);
+  const matchesCompletion = (a: Application, c: string): boolean => {
+    if (c === 'ALL') return true;
+    const done = COMPLETE_STATUSES.has(a.status);
+    return c === 'COMPLETE' ? done : !done;
+  };
+  const kw = keyword.toLowerCase();
+  const matchesKeyword = (a: Application): boolean => {
+    if (!kw) return true;
+    return (
+      (a.template_name ?? '').toLowerCase().includes(kw) ||
+      (a.application_number ?? '').toLowerCase().includes(kw) ||
+      (a.row_preview?.text?.value ?? '').toLowerCase().includes(kw)
+    );
+  };
+  const sorted = applications
+    .filter(a => matchesFilter(a, statusFilter))
+    .filter(a => matchesPhase(a, phaseFilter))
+    .filter(a => templateCode === 'ALL' || a.template_code === templateCode)
+    .filter(a => matchesCompletion(a, completion))
+    .filter(a => matchesKeyword(a));
 
   // Auto-fetch next pages when active filter yields too few visible results.
   // Keeps fetching (same ALL query, next page) until ≥8 filtered items are
@@ -242,48 +290,121 @@ export default function History() {
               )}
             </p>
           </div>
-          <Link to="/dashboard" className="btn-outline text-xs">
+          <Link to="/applications/new" className="btn-outline text-xs">
             {t('history_new_app')}
           </Link>
         </div>
 
-        {/* Filter pills */}
-        <div className="animate-fade-up flex gap-2 flex-wrap items-center">
-          {ALL_STATUS_KEYS.map((s) => {
-            const isActive = statusFilter === s;
-            const label = s === 'ALL' ? t('history_filter_all') : (STATUS_LABEL[s] ?? s);
-            return (
+        {/* Filter panel */}
+        <div className="animate-fade-up card space-y-4 relative z-10">
+          <div className="flex items-center justify-between">
+            <p className="section-title mb-0">{lang === 'en' ? 'Filters' : '絞り込み'}</p>
+            <div className="flex items-center gap-2">
+              {hasExtraFilters && (
+                <button onClick={clearExtraFilters} className="btn-ghost btn-sm text-ringo-500 hover:text-ringo-600">
+                  ✕ {lang === 'en' ? 'Clear' : 'リセット'}
+                </button>
+              )}
+              {/* Archived toggle */}
               <button
-                key={s}
-                onClick={() => setStatusFilter(s)}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-150
-                  ${isActive
-                    ? 'bg-warmgray-800 text-white shadow-sm'
-                    : 'bg-white/60 text-warmgray-500 hover:bg-white/90 border border-white/80 backdrop-blur-sm'
-                  }`}
+                onClick={() => { if (!showArchived) setStatusFilter('ALL'); setShowArchived((v) => !v); }}
+                title={lang === 'en' ? 'Show archived applications' : 'アーカイブ済みを表示'}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-150
+                  ${showArchived ? 'bg-ringo-500 text-white shadow-sm' : 'bg-white/60 text-warmgray-500 hover:bg-white/90 border border-white/80'}`}
               >
-                {label}
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5C21.75 4.254 21.246 3.75 20.625 3.75H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+                </svg>
+                {lang === 'en' ? 'Archived' : 'アーカイブ'}
               </button>
-            );
-          })}
-          {/* Archived toggle — opt-in, refetches with include_archived */}
-          <button
-            onClick={() => {
-              if (!showArchived) setStatusFilter('ALL'); // entering archived view → clear any status pill
-              setShowArchived((v) => !v);
-            }}
-            title={lang === 'en' ? 'Show archived applications' : 'アーカイブ済みを表示'}
-            className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-150
-              ${showArchived
-                ? 'bg-ringo-500 text-white shadow-sm'
-                : 'bg-white/60 text-warmgray-500 hover:bg-white/90 border border-white/80 backdrop-blur-sm'
-              }`}
-          >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5C21.75 4.254 21.246 3.75 20.625 3.75H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
-            </svg>
-            {lang === 'en' ? 'Archived' : 'アーカイブ'}
-          </button>
+            </div>
+          </div>
+
+          {/* Row 1: phase + status pills */}
+          <div className="space-y-2">
+            {/* 申請区分（稟議・精算） */}
+            <div className="flex gap-1.5 flex-wrap items-center">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 w-16 shrink-0">
+                {lang === 'en' ? 'Phase' : 'フェーズ'}
+              </span>
+              {(['ALL', 'RINGI', 'SETTLEMENT'] as const).map((p) => {
+                const label = p === 'ALL' ? (lang === 'en' ? 'All' : 'すべて') : p === 'RINGI' ? '稟議' : '精算';
+                const isActive = phaseFilter === p;
+                const cls = isActive
+                  ? p === 'RINGI' ? 'bg-ringo-500 text-white shadow-sm'
+                  : p === 'SETTLEMENT' ? 'bg-teal-500 text-white shadow-sm'
+                  : 'bg-warmgray-800 text-white shadow-sm'
+                  : 'bg-white/60 text-warmgray-500 hover:bg-white/90 border border-white/80 backdrop-blur-sm';
+                return (
+                  <button key={p} onClick={() => setPhaseFilter(p)}
+                    className={`px-3 py-1 rounded-full text-xs font-semibold transition-all duration-150 ${cls}`}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            {/* ステータス */}
+            <div className="flex gap-1.5 flex-wrap items-center">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 w-16 shrink-0">
+                {lang === 'en' ? 'Status' : 'ステータス'}
+              </span>
+              {ALL_STATUS_KEYS.map((s) => {
+                const isActive = statusFilter === s;
+                const label = s === 'ALL' ? (lang === 'en' ? 'All' : 'すべて') : (STATUS_LABEL[s] ?? s);
+                return (
+                  <button key={s} onClick={() => setStatusFilter(s)}
+                    className={`px-3 py-1 rounded-full text-xs font-semibold transition-all duration-150
+                      ${isActive ? 'bg-warmgray-800 text-white shadow-sm' : 'bg-white/60 text-warmgray-500 hover:bg-white/90 border border-white/80 backdrop-blur-sm'}`}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Row 2: 申請区分 + キーワード + 未完了・完了 */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* 申請区分 */}
+            <div>
+              <label className="label">{lang === 'en' ? 'Application Type' : '申請区分'}</label>
+              <CustomSelect options={templateOptions} value={templateCode} onChange={setTemplateCode} />
+            </div>
+            {/* キーワード */}
+            <div>
+              <label className="label">{lang === 'en' ? 'Keyword' : 'キーワード'}</label>
+              <div className="relative">
+                <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-warmgray-400 pointer-events-none"
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M16.65 16.65A7.5 7.5 0 104.5 4.5a7.5 7.5 0 0012.15 12.15z" />
+                </svg>
+                <input className="input pl-8 pr-8"
+                  placeholder={lang === 'en' ? 'Form name, number…' : '申請名・申請番号で検索'}
+                  value={keywordInput}
+                  onChange={(e) => setKeywordInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') setKeyword(keywordInput.trim()); }}
+                />
+                {keywordInput && (
+                  <button className="absolute right-2 top-1/2 -translate-y-1/2 text-warmgray-400 hover:text-warmgray-600"
+                    onClick={() => { setKeywordInput(''); setKeyword(''); }}>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              {keywordInput.trim() !== keyword && keywordInput.trim() && (
+                <button className="text-[11px] text-ringo-500 hover:text-ringo-600 mt-1 px-0.5"
+                  onClick={() => setKeyword(keywordInput.trim())}>
+                  {lang === 'en' ? 'Press Enter to search →' : 'Enter で検索 →'}
+                </button>
+              )}
+            </div>
+            {/* 未完了・完了 */}
+            <div>
+              <label className="label">{lang === 'en' ? 'Progress' : '未完了（進行中）・完了'}</label>
+              <CustomSelect options={completionOptions} value={completion} onChange={setCompletion} />
+            </div>
+          </div>
         </div>
 
         {/* List */}
