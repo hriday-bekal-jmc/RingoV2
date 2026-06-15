@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { useInfiniteQuery, keepPreviousData } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, keepPreviousData } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { useScrollEnd } from '../hooks/useScrollEnd';
 import { useDelayedLoading } from '../hooks/useDelayedLoading';
@@ -87,6 +87,13 @@ export default function ApprovalHistory() {
   const [approver, setApprover]           = useState('');
   const [approverInput, setApproverInput] = useState('');
 
+  // All templates for dropdown — fetched once, independent of active filter
+  const { data: allTemplates } = useQuery<Array<{ id: string; title_ja: string }>>({
+    queryKey: ['templates'],
+    queryFn:  async () => (await apiClient.get('/templates')).data,
+    staleTime: 5 * 60_000,
+  });
+
   // Stable query string — primitive in queryKey guarantees fresh fetch on every change
   const queryString = useMemo(() => {
     const p = new URLSearchParams();
@@ -133,17 +140,11 @@ export default function ApprovalHistory() {
     hasNextPage ?? false,
   );
 
-  // Unique templates: accumulate from ALL loaded pages (not just latest)
   const templateOptions = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const item of items) {
-      if (!seen.has(item.template_id)) seen.set(item.template_id, item.template_name);
-    }
-    return [
-      { value: 'ALL', label: lang === 'en' ? 'All templates' : '全テンプレート' },
-      ...Array.from(seen.entries()).map(([v, l]) => ({ value: v, label: l })),
-    ];
-  }, [items, lang]);
+    const all = { value: 'ALL', label: lang === 'en' ? 'All templates' : '全テンプレート' };
+    if (!allTemplates?.length) return [all];
+    return [all, ...allTemplates.map(t => ({ value: t.id, label: t.title_ja }))];
+  }, [allTemplates, lang]);
 
   const completionOptions = [
     { value: 'ALL',        label: lang === 'en' ? 'All'         : '全て' },
