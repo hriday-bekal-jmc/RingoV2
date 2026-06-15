@@ -257,14 +257,13 @@ router.delete('/users/:id', async (req: Request, res: Response): Promise<void> =
       // deleted_name / deleted_email preserved nowhere — this is intentional (GDPR erasure).
       await query(
         `UPDATE users
-         SET deleted_at     = NOW(),
-             is_active      = FALSE,
-             token_version  = token_version + 1,
-             email          = 'deleted_' || id::text,
-             full_name      = '削除済みユーザー',
-             password_hash  = NULL,
-             avatar_url     = NULL,
-             gchat_webhook_url = NULL
+         SET deleted_at    = NOW(),
+             is_active     = FALSE,
+             token_version = token_version + 1,
+             email         = 'deleted_' || id::text,
+             full_name     = '削除済みユーザー',
+             password_hash = NULL,
+             avatar_url    = NULL
          WHERE id = $1`,
         [req.params.id],
       );
