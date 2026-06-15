@@ -99,16 +99,16 @@ async function seed(): Promise<void> {
       await client.query(`SELECT id FROM workflow_patterns WHERE code = 'PATTERN_3'`)
     ).rows[0].id as string;
 
-    const templateRow = await client.query(
+    // 002_seed_business_trip.sql owns the canonical BUSINESS_TRIP schema — don't overwrite it.
+    // Insert only if missing; on conflict just fetch existing id.
+    await client.query(
       `INSERT INTO form_templates (pattern_id, code, title, title_ja, schema_definition, settlement_schema, is_active)
        VALUES ($1, 'BUSINESS_TRIP', 'Business Trip', '出張伺い', $2::jsonb, $3::jsonb, TRUE)
-       ON CONFLICT (code) DO UPDATE SET
-         title_ja          = EXCLUDED.title_ja,
-         schema_definition = EXCLUDED.schema_definition,
-         settlement_schema = EXCLUDED.settlement_schema,
-         pattern_id        = EXCLUDED.pattern_id
-       RETURNING id`,
+       ON CONFLICT (code) DO NOTHING`,
       [patternId3, JSON.stringify(BUSINESS_TRIP_RINGI_SCHEMA), JSON.stringify(BUSINESS_TRIP_SETTLEMENT_SCHEMA)],
+    );
+    const templateRow = await client.query(
+      `SELECT id FROM form_templates WHERE code = 'BUSINESS_TRIP'`,
     );
     const templateId = templateRow.rows[0].id as string;
 
