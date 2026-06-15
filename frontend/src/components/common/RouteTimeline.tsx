@@ -258,9 +258,7 @@ export default function RouteTimeline({
           onClick={() => setExpanded(e => !e)}
           className="mt-1 text-[10px] text-ringo-400 hover:text-ringo-600 font-semibold transition-colors"
         >
-          {expanded
-            ? `▲ 折りたたむ`
-            : `▼ すべて表示 (${steps.length}ステップ)`}
+          {expanded ? `▲ 折りたたむ` : `▼ すべて表示 (${steps.length}ステップ)`}
         </button>
       )}
     </div>

@@ -26,7 +26,7 @@ interface DashboardSummary {
   };
   settlement_returned?: number;
   recent_apps: Array<{ id: string; template_code: string; template_name: string; template_title_en?: string | null; status: string; created_at: string }>;
-  pending_approvals?: { items: PendingItem[]; total: number; proxy_total: number };
+  pending_approvals?: { items: PendingItem[]; total: number; proxy_total: number; confirm_count?: number };
 }
 
 interface PendingItem {
@@ -115,11 +115,11 @@ function ActionTile({
   countTone?: 'alert' | 'muted';
 }) {
   const { bg, icon } = TILE_ACCENT[label] ?? DEFAULT_ACCENT;
-  const cls = `relative flex flex-col items-center gap-2 px-3 py-4 rounded-2xl border text-center select-none
-    transition-all duration-200 group
+  const cls = `relative flex flex-col items-center gap-1 px-2 py-2.5 rounded-xl border text-center select-none
+    transition-all duration-150 group
     ${disabled
       ? 'bg-warmgray-50/60 border-warmgray-100/60 cursor-default opacity-50'
-      : 'bg-white/90 border-warmgray-100/80 shadow-sm hover:shadow-md hover:bg-white hover:border-ringo-200/60 hover:-translate-y-1 cursor-pointer'
+      : 'bg-white/90 border-warmgray-100/80 shadow-sm hover:shadow-md hover:bg-white hover:border-ringo-200/60 cursor-pointer'
     }`;
 
   const badgeCls = countTone === 'muted'
@@ -129,14 +129,14 @@ function ActionTile({
   const inner = (
     <>
       {count !== undefined && count > 0 && (
-        <span className={`absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1.5 rounded-full text-[9px] font-bold flex items-center justify-center shadow-sm z-10 tabular-nums ${badgeCls}`}>
+        <span className={`absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[9px] font-bold flex items-center justify-center shadow-sm z-10 tabular-nums ${badgeCls}`}>
           {badgeText(count, countTone)}
         </span>
       )}
-      <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${bg} flex items-center justify-center text-lg shadow-md group-hover:scale-110 group-hover:shadow-lg transition-all duration-200 shrink-0`}>
+      <span className={`w-8 h-8 rounded-lg bg-gradient-to-br ${bg} flex items-center justify-center text-sm shadow-sm group-hover:shadow-md transition-all duration-150 shrink-0`}>
         {icon}
       </span>
-      <span className="text-[11px] font-semibold text-warmgray-600 group-hover:text-ringo-600 transition-colors leading-tight w-full">{label}</span>
+      <span className="text-[10px] font-semibold text-warmgray-600 group-hover:text-ringo-600 transition-colors leading-tight w-full">{label}</span>
     </>
   );
 
@@ -153,7 +153,7 @@ function Section({ icon, title, children }: { icon: string; title: string; child
         <h3 className="text-xs font-bold uppercase tracking-widest text-warmgray-400">{title}</h3>
         <div className="flex-1 h-px bg-warmgray-100/80" />
       </div>
-      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2.5">
+      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
         {children}
       </div>
     </div>
@@ -756,16 +756,15 @@ export default function Dashboard() {
   return (
     <Layout title={t('title_dashboard')}>
       {loading ? <RingoLoader.Block /> : (
-        <div className="max-w-[1800px] mx-auto space-y-8">
+        <div className="max-w-[1800px] mx-auto space-y-5">
 
           {/* Greeting */}
           <div className="flex items-start justify-between gap-4 animate-fade-up">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-warmgray-400 mb-1">{greeting}</p>
-              <h2 className="text-2xl font-bold text-warmgray-800">{firstName}さん 👋</h2>
-              <p className="text-sm text-warmgray-400 mt-1">
+              <p className="text-xs font-semibold text-warmgray-400 mb-0.5">
                 {new Date().toLocaleDateString(dateLocale, { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
               </p>
+              <h2 className="text-xl font-bold text-warmgray-800">{greeting}、{firstName}さん</h2>
             </div>
             {isAdmin && (
               <button
@@ -914,81 +913,153 @@ export default function Dashboard() {
                PERSONAL VIEW
             ════════════════════════════════════════════════════════════════ */
             <>
-              {/* Personal action tiles */}
-              <div className="card space-y-5 animate-fade-up">
-                <div className="flex items-center justify-between -mb-1">
-                  <span className="text-xs font-bold uppercase tracking-widest text-warmgray-400">{lang === 'en' ? 'Quick Actions' : 'クイックアクション'}</span>
-                  <button
-                    onClick={() => setShowSearch(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-ringo-50 border border-ringo-200/60 text-ringo-500 hover:bg-ringo-100 hover:text-ringo-600 transition-all duration-150 text-xs font-semibold"
-                    title={lang === 'en' ? 'Search' : '検索'}
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 105 11a6 6 0 0012 0z"/></svg>
-                    {lang === 'en' ? 'Search' : '検索'}
-                  </button>
-                </div>
-                <Section icon="📝" title={lang === 'en' ? 'Submit' : '申請する'}>
-                  <ActionTile label={lang === 'en' ? 'New' : '作成'} onClick={() => navigate('/applications/new')} />
-                  <ActionTile label={lang === 'en' ? 'Drafts' : '下書き'} count={draftCount} to="/history?filter=DRAFT" />
-                  <ActionTile label={lang === 'en' ? 'Returned' : '差し戻し'} count={returnedCount} to="/history?filter=RETURNED" />
-                  <ActionTile label={lang === 'en' ? 'In Progress' : '申請中'} count={pendingCount} to="/history?filter=PENDING_APPROVAL" />
-                  <ActionTile label={lang === 'en' ? 'Unsettled' : '未精算'} count={approvedCount} onClick={() => setShowUnsettled(true)} />
-                </Section>
-                {perms.canApprove && (
-                  <Section icon="✅" title={lang === 'en' ? 'Approve' : '承認する'}>
-                    <ActionTile label={lang === 'en' ? 'Pending' : '未処理'} count={pendingApprovalsTotal} onClick={() => setShowAllPending(true)} />
-                    <ActionTile label={lang === 'en' ? 'Confirm' : '回付予定'} count={confirmTotal} to="/approvals?action=confirm" />
-                    <ActionTile label={lang === 'en' ? 'Proxy Approval' : '代理承認'} count={scheduledReviewTotal} to="/approvals?proxy=1" />
-                  </Section>
-                )}
-                <Section icon="🔍" title={lang === 'en' ? 'Search' : '探す'}>
-                  <ActionTile label={lang === 'en' ? 'Search' : '検索'} onClick={() => setShowSearch(true)} />
-                  <ActionTile label={lang === 'en' ? 'Application History' : '申請履歴'} to="/history" />
-                  {perms.canApprove && (
-                    <ActionTile label={lang === 'en' ? 'Approval History' : '承認履歴'} to="/approval-history" />
+              {/* ── Alert bar — action required ─────────────────────────── */}
+              {(returnedCount > 0 || pendingApprovalsTotal > 0 || confirmTotal > 0) && (
+                <div className="animate-fade-up flex flex-wrap items-center gap-2 px-4 py-2.5 rounded-xl border border-amber-200/80 bg-amber-50/70 text-xs font-semibold">
+                  <span className="text-amber-700 shrink-0">{lang === 'en' ? '⚠ Action required' : '⚠ 要対応'}</span>
+                  {pendingApprovalsTotal > 0 && (
+                    <Link to="/approvals" className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white border border-amber-200 text-amber-800 hover:bg-amber-100 transition-colors">
+                      {lang === 'en' ? 'Approvals' : '承認待ち'} <span className="font-bold">{pendingApprovalsTotal}</span>
+                    </Link>
                   )}
-                </Section>
-                <Section icon="🏁" title={lang === 'en' ? 'Status' : '状態'}>
-                  <ActionTile label={lang === 'en' ? 'Settlement OK' : '精算承認済'} count={settlementApprovedCount} countTone="muted" to="/history?filter=SETTLEMENT_APPROVED" />
-                  <ActionTile label={lang === 'en' ? 'Completed' : '完了'} count={completedCount} countTone="muted" to="/history?filter=COMPLETED" />
-                  <ActionTile label={lang === 'en' ? 'Rejected' : '却下'} count={rejectedCount} countTone="muted" to="/history?filter=REJECTED" />
-                  <ActionTile label={lang === 'en' ? 'All' : 'すべて'} to="/history" />
-                </Section>
+                  {confirmTotal > 0 && (
+                    <Link to="/approvals?action=confirm" className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white border border-yellow-200 text-yellow-800 hover:bg-yellow-100 transition-colors">
+                      {lang === 'en' ? 'Confirm' : '回付確認'} <span className="font-bold">{confirmTotal}</span>
+                    </Link>
+                  )}
+                  {returnedCount > 0 && (
+                    <Link to="/history?filter=RETURNED" className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white border border-rose-200 text-rose-700 hover:bg-rose-100 transition-colors">
+                      {lang === 'en' ? '↩ Returned' : '↩ 差し戻し'} <span className="font-bold">{returnedCount}</span>
+                    </Link>
+                  )}
+                </div>
+              )}
+
+              {/* ── Main 2-column layout ────────────────────────────────── */}
+              <div className="grid lg:grid-cols-[3fr_2fr] gap-5 items-start">
+
+                {/* LEFT: Action tiles */}
+                <div className="space-y-4">
+                  <div className="card space-y-5 animate-fade-up">
+                    <div className="flex items-center justify-between -mb-1">
+                      <span className="text-xs font-bold uppercase tracking-widest text-warmgray-400">{lang === 'en' ? 'Quick Actions' : 'クイックアクション'}</span>
+                      <button
+                        onClick={() => setShowSearch(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-ringo-50 border border-ringo-200/60 text-ringo-500 hover:bg-ringo-100 hover:text-ringo-600 transition-all duration-150 text-xs font-semibold"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 105 11a6 6 0 0012 0z"/></svg>
+                        {lang === 'en' ? 'Search' : '検索'}
+                      </button>
+                    </div>
+                    <Section icon="📝" title={lang === 'en' ? 'Submit' : '申請する'}>
+                      <ActionTile label={lang === 'en' ? 'New' : '作成'} onClick={() => navigate('/applications/new')} />
+                      <ActionTile label={lang === 'en' ? 'Drafts' : '下書き'} count={draftCount} to="/history?filter=DRAFT" />
+                      <ActionTile label={lang === 'en' ? 'Returned' : '差し戻し'} count={returnedCount} to="/history?filter=RETURNED" />
+                      <ActionTile label={lang === 'en' ? 'In Progress' : '申請中'} count={pendingCount} to="/history?filter=PENDING_APPROVAL" />
+                      <ActionTile label={lang === 'en' ? 'Unsettled' : '未精算'} count={approvedCount} onClick={() => setShowUnsettled(true)} />
+                    </Section>
+                    {perms.canApprove && (
+                      <Section icon="✅" title={lang === 'en' ? 'Approve' : '承認する'}>
+                        <ActionTile label={lang === 'en' ? 'Pending' : '未処理'} count={pendingApprovalsTotal} onClick={() => setShowAllPending(true)} />
+                        <ActionTile label={lang === 'en' ? 'Confirm' : '回付予定'} count={confirmTotal} to="/approvals?action=confirm" />
+                        <ActionTile label={lang === 'en' ? 'Proxy Approval' : '代理承認'} count={scheduledReviewTotal} to="/approvals?proxy=1" />
+                      </Section>
+                    )}
+                    <Section icon="🔍" title={lang === 'en' ? 'Search' : '探す'}>
+                      <ActionTile label={lang === 'en' ? 'Search' : '検索'} onClick={() => setShowSearch(true)} />
+                      <ActionTile label={lang === 'en' ? 'Application History' : '申請履歴'} to="/history" />
+                      {perms.canApprove && (
+                        <ActionTile label={lang === 'en' ? 'Approval History' : '承認履歴'} to="/approval-history" />
+                      )}
+                    </Section>
+                    <Section icon="🏁" title={lang === 'en' ? 'Status' : '状態'}>
+                      <ActionTile label={lang === 'en' ? 'Settlement OK' : '精算承認済'} count={settlementApprovedCount} countTone="muted" to="/history?filter=SETTLEMENT_APPROVED" />
+                      <ActionTile label={lang === 'en' ? 'Completed' : '完了'} count={completedCount} countTone="muted" to="/history?filter=COMPLETED" />
+                      <ActionTile label={lang === 'en' ? 'Rejected' : '却下'} count={rejectedCount} countTone="muted" to="/history?filter=REJECTED" />
+                      <ActionTile label={lang === 'en' ? 'All' : 'すべて'} to="/history" />
+                    </Section>
+                  </div>
+
+                  {/* Recent forms — compact grid */}
+                  {recentTemplates.length > 0 && (
+                    <div className="animate-fade-up space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h3 className="section-title">{lang === 'en' ? 'Recently used forms' : 'よく使うフォーム'}</h3>
+                        <button onClick={() => navigate('/applications/new')} className="text-xs font-semibold text-ringo-500 hover:text-ringo-600 transition-colors">{lang === 'en' ? 'All forms →' : 'すべて見る →'}</button>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {recentTemplates.map((tmpl, i) => {
+                          const label = templateLabel(tmpl.code, lang, tmpl.title_ja, tmpl.title);
+                          const gradient = tmpl.gradient ?? DEFAULT_GRADIENTS[tmpl.code] ?? 'from-warmgray-400 to-warmgray-600';
+                          return (
+                            <button key={tmpl.id} onClick={() => navigate(`/applications/new/${tmpl.code}`)} className="card !p-4 text-left group hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-200 animate-fade-up" style={{ animationDelay: `${i * 60}ms` }}>
+                              <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center text-lg mb-3 border border-white/40`}>{tmpl.icon ?? '📄'}</div>
+                              <p className="text-xs font-bold text-warmgray-800 group-hover:text-ringo-600 transition-colors leading-tight line-clamp-2">{label}</p>
+                              <PatternBadge patternId={tmpl.pattern_id} size="sm" className="mt-1.5" />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* RIGHT: Live data */}
+                <div className="space-y-4">
+                  {/* Pending approvals — inline */}
+                  {perms.canApprove && pendingApprovalsTotal > 0 && (
+                    <div className="animate-fade-up space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h3 className="section-title">{lang === 'en' ? 'Pending approvals' : '承認待ち一覧'}</h3>
+                        <Link to="/approvals" className="text-xs font-semibold text-ringo-500 hover:text-ringo-600 transition-colors">{lang === 'en' ? `${pendingApprovalsTotal} total →` : `全${pendingApprovalsTotal}件 →`}</Link>
+                      </div>
+                      <div className="card !p-0 overflow-hidden">
+                        <ul className="divide-y divide-white/30">
+                          {(summary?.pending_approvals?.items ?? []).slice(0, 5).map((item: PendingItem, i: number) => (
+                            <li key={item.id} className="animate-fade-up" style={{ animationDelay: `${i * 30}ms` }}>
+                              <Link to={`/applications/${item.application_id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-white/40 transition-colors">
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-semibold text-warmgray-800 truncate">
+                                    {templateLabel(item.template_code, lang, item.template_name, item.template_title_en)}
+                                  </p>
+                                  <p className="text-[11px] text-warmgray-400 mt-0.5">
+                                    {item.applicant_name}
+                                    {item.application_number && <span className="ml-1.5 font-mono text-warmgray-300">#{item.application_number}</span>}
+                                  </p>
+                                </div>
+                                {item.action_type === 'CONFIRM'
+                                  ? <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 ring-1 ring-amber-200/60">{lang === 'en' ? 'Confirm' : '確認'}</span>
+                                  : <span className="badge-pending shrink-0 text-[10px]">{lang === 'en' ? 'Pending' : '承認待ち'}</span>
+                                }
+                                <svg className="w-3.5 h-3.5 text-warmgray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
+                              </Link>
+                            </li>
+                          ))}
+                        </ul>
+                        {pendingApprovalsTotal > 5 && (
+                          <div className="px-4 py-2.5 border-t border-white/30">
+                            <Link to="/approvals" className="text-xs text-ringo-500 font-semibold hover:text-ringo-600 transition-colors">
+                              {lang === 'en' ? `View all ${pendingApprovalsTotal} →` : `残り${pendingApprovalsTotal - 5}件を見る →`}
+                            </Link>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Recent applications */}
+                  {recentApps.length > 0 && (
+                    <div className="animate-fade-up space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h3 className="section-title">{lang === 'en' ? 'Recent applications' : '最近の申請'}</h3>
+                        <Link to="/history" className="text-xs font-semibold text-ringo-500 hover:text-ringo-600 transition-colors">{lang === 'en' ? 'All →' : 'すべて見る →'}</Link>
+                      </div>
+                      <RecentAppsList apps={recentApps} lang={lang} dateLocale={dateLocale} t={t} />
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* Recent forms */}
-              {recentTemplates.length > 0 && (
-                <div className="animate-fade-up space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="section-title">{lang === 'en' ? 'Recently used forms' : 'よく使うフォーム'}</h3>
-                    <button onClick={() => navigate('/applications/new')} className="text-xs font-semibold text-ringo-500 hover:text-ringo-600 transition-colors">{lang === 'en' ? 'All forms →' : 'すべて見る →'}</button>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {recentTemplates.map((tmpl, i) => {
-                      const label = templateLabel(tmpl.code, lang, tmpl.title_ja, tmpl.title);
-                      const gradient = tmpl.gradient ?? DEFAULT_GRADIENTS[tmpl.code] ?? 'from-warmgray-400 to-warmgray-600';
-                      return (
-                        <button key={tmpl.id} onClick={() => navigate(`/applications/new/${tmpl.code}`)} className="card !p-4 text-left group hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-200 animate-fade-up" style={{ animationDelay: `${i * 60}ms` }}>
-                          <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center text-lg mb-3 border border-white/40`}>{tmpl.icon ?? '📄'}</div>
-                          <p className="text-xs font-bold text-warmgray-800 group-hover:text-ringo-600 transition-colors leading-tight line-clamp-2">{label}</p>
-                          <PatternBadge patternId={tmpl.pattern_id} size="sm" className="mt-1.5" />
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Recent activity */}
-              {recentApps.length > 0 && (
-                <div className="animate-fade-up space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="section-title">{lang === 'en' ? 'Recent applications' : '最近の申請'}</h3>
-                    <Link to="/history" className="text-xs font-semibold text-ringo-500 hover:text-ringo-600 transition-colors">{lang === 'en' ? 'All →' : 'すべて見る →'}</Link>
-                  </div>
-                  <RecentAppsList apps={recentApps} lang={lang} dateLocale={dateLocale} t={t} />
-                </div>
-              )}
             </>
           )}
 

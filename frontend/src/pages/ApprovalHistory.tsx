@@ -213,7 +213,7 @@ export default function ApprovalHistory() {
             )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {/* 申請区分 */}
             <div>
               <label className="label">{lang === 'en' ? 'Application Type' : '申請区分'}</label>

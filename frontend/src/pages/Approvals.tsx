@@ -901,14 +901,14 @@ export default function Approvals() {
       <div className="max-w-[1800px] mx-auto space-y-6">
 
         {/* Header */}
-        <div className="animate-fade-up flex items-start justify-between gap-4">
+        <div className="animate-fade-up flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
           <div>
             <p className="section-title mb-0">{t('approvals_inbox')}</p>
             <h2 className="text-2xl font-bold text-warmgray-800 mt-1">{t('title_approvals')}</h2>
             <p className="text-sm text-warmgray-400 mt-1">{t('approvals_subtitle')}</p>
           </div>
           {/* Right: Mine | Select | Approval | Proxy */}
-          <div className="flex items-center gap-2 shrink-0 mt-1">
+          <div className="flex items-center gap-1.5 flex-wrap shrink-0 mt-1 justify-end">
             {/* Admin system-wide toggle */}
             {isAdmin && (
               <button

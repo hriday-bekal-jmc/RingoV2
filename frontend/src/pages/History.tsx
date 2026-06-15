@@ -324,7 +324,7 @@ export default function History() {
           <div className="space-y-2">
             {/* 申請区分（稟議・精算） */}
             <div className="flex gap-1.5 flex-wrap items-center">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 w-16 shrink-0">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 w-12 sm:w-16 shrink-0">
                 {lang === 'en' ? 'Phase' : 'フェーズ'}
               </span>
               {(['ALL', 'RINGI', 'SETTLEMENT'] as const).map((p) => {
@@ -337,15 +337,15 @@ export default function History() {
                   : 'bg-white/60 text-warmgray-500 hover:bg-white/90 border border-white/80 backdrop-blur-sm';
                 return (
                   <button key={p} onClick={() => setPhaseFilter(p)}
-                    className={`px-3 py-1 rounded-full text-xs font-semibold transition-all duration-150 ${cls}`}>
+                    className={`px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-[11px] sm:text-xs font-semibold transition-all duration-150 ${cls}`}>
                     {label}
                   </button>
                 );
               })}
             </div>
             {/* ステータス */}
-            <div className="flex gap-1.5 flex-wrap items-center">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 w-16 shrink-0">
+            <div className="flex gap-1 sm:gap-1.5 flex-wrap items-center">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 w-12 sm:w-16 shrink-0">
                 {lang === 'en' ? 'Status' : 'ステータス'}
               </span>
               {ALL_STATUS_KEYS.map((s) => {
@@ -353,7 +353,7 @@ export default function History() {
                 const label = s === 'ALL' ? (lang === 'en' ? 'All' : 'すべて') : (STATUS_LABEL[s] ?? s);
                 return (
                   <button key={s} onClick={() => setStatusFilter(s)}
-                    className={`px-3 py-1 rounded-full text-xs font-semibold transition-all duration-150
+                    className={`px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-[11px] sm:text-xs font-semibold transition-all duration-150
                       ${isActive ? 'bg-warmgray-800 text-white shadow-sm' : 'bg-white/60 text-warmgray-500 hover:bg-white/90 border border-white/80 backdrop-blur-sm'}`}>
                     {label}
                   </button>
@@ -363,7 +363,7 @@ export default function History() {
           </div>
 
           {/* Row 2: 申請区分 + キーワード + 未完了・完了 */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {/* 申請区分 */}
             <div>
               <label className="label">{lang === 'en' ? 'Application Type' : '申請区分'}</label>
@@ -560,7 +560,7 @@ export default function History() {
                     )}
 
                     {/* Actions */}
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 shrink-0 justify-end">
                       {isDraft && (
                         <>
                           <button

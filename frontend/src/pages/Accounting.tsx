@@ -485,14 +485,14 @@ export default function Accounting() {
       <div className="max-w-[1800px] mx-auto space-y-6">
 
         {/* Header */}
-        <div className="animate-fade-up flex items-end justify-between">
+        <div className="animate-fade-up flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
           <div>
             <p className="section-title mb-0">{t('title_accounting')}</p>
             <p className="text-sm text-warmgray-400 mt-1">{t('accounting_subtitle')}</p>
           </div>
           <button
             onClick={downloadCSV}
-            className="btn-outline text-xs flex items-center gap-1.5"
+            className="btn-outline text-xs flex items-center gap-1.5 self-start sm:self-auto"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -647,8 +647,8 @@ export default function Accounting() {
         {/* Table */}
         {showLoader ? (
           <div className="card !p-0 md:overflow-hidden">
-            <div className="md:overflow-x-auto">
-              <table className="table-base w-full">
+            <div className="overflow-x-auto">
+              <table className="table-base w-full min-w-[860px]">
                 <thead>
                   <tr>
                     <th className="w-8"><Sk.Box w="w-4" h="h-4" className="rounded" /></th>
@@ -705,8 +705,9 @@ export default function Accounting() {
             <p className="text-sm font-medium">{t('accounting_no_items')}</p>
           </div>
         ) : (
-          <div className={`card !p-0 overflow-hidden animate-fade-up transition-opacity duration-200 ${isFetching && !isFetchingNextPage ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
-            <table className="table-base w-full">
+          <div className={`card !p-0 md:overflow-hidden animate-fade-up transition-opacity duration-200 ${isFetching && !isFetchingNextPage ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
+            <div className="overflow-x-auto">
+            <table className="table-base w-full min-w-[860px]">
               <thead>
                 <tr>
                   <th className="w-8">
@@ -844,6 +845,7 @@ export default function Accounting() {
                   })}
                 </tbody>
             </table>
+            </div>{/* /overflow-x-auto */}
 
             {/* Sentinel — invisible; observer fires early via rootMargin */}
             <div ref={sentinelRef} className="h-px" />

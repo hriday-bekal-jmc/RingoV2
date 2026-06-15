@@ -42,6 +42,7 @@ export default function NewApplication() {
   const { t, lang } = useLang();
   const { toast, show: showToast, dismiss } = useToast();
   const [selectedRouteId, setSelectedRouteId] = useState<string>('');
+  const [routeExpanded, setRouteExpanded] = useState(false);
 
   const { data: template, isLoading: templateLoading, isError: templateError } = useQuery({
     queryKey: ['template', templateCode],
@@ -144,62 +145,74 @@ export default function NewApplication() {
             identical to other application flows. */}
         {template && (
           <div className="card space-y-4">
-            <div className="flex items-center justify-between">
+            {/* Collapsible header */}
+            <button
+              type="button"
+              className="flex items-center justify-between w-full text-left group"
+              onClick={() => setRouteExpanded(e => !e)}
+            >
               <div>
                 <p className="section-title mb-0">
                   {template.pattern_id === 2 ? (lang === 'ja' ? '精算承認ルート' : 'Settlement Route') : t('route_approval')}
                 </p>
-                {routePreview?.routes.find(r => r.id === selectedRouteId)?.name && (
-                  <p className="text-xs text-warmgray-500 mt-0.5">
-                    {routePreview?.routes.find(r => r.id === selectedRouteId)?.name}
+                {!routeExpanded && selectedRoute && (
+                  <p className="text-xs text-warmgray-400 mt-0.5">
+                    {selectedRoute.steps.length}{lang === 'ja' ? 'ステップ' : ' steps'} — {selectedRoute.name}
                   </p>
                 )}
               </div>
-              {routeLoading && (
-                <span className="text-xs text-warmgray-400 flex items-center gap-1">
-                  <svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+              <div className="flex items-center gap-2 shrink-0">
+                {routeLoading && (
+                  <svg className="animate-spin w-3 h-3 text-warmgray-400" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                   </svg>
-                  {t('route_loading')}
-                </span>
-              )}
-            </div>
-
-            {routePreview && !routePreview.department_has_route && (
-              <div className="flex items-start gap-2.5 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-                <span className="text-base">⚠️</span>
-                <p>
-                  {template.pattern_id === 2
-                    ? (lang === 'ja' ? 'この部署の精算承認ルートが設定されていません。管理者にお問い合わせください。' : 'No settlement approval route configured for your department. Contact your admin.')
-                    : t('route_no_route_warn')}
-                </p>
+                )}
+                <svg className={`w-4 h-4 text-warmgray-400 transition-transform duration-200 ${routeExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
               </div>
-            )}
+            </button>
 
-            {routePreview && routePreview.routes.length > 1 && (
-              <div className="space-y-1.5">
-                <label className="label">{t('route_select')}</label>
-                <CustomSelect
-                  options={routePreview.routes.map((r) => ({
-                    value: r.id,
-                    label: `${r.name}${r.is_default ? t('route_default_suffix') : ''}`,
-                  }))}
-                  value={selectedRouteId}
-                  onChange={setSelectedRouteId}
-                />
-              </div>
-            )}
+            {/* Expandable content */}
+            {routeExpanded && (
+              <div className="space-y-4">
+                {routePreview && !routePreview.department_has_route && (
+                  <div className="flex items-start gap-2.5 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                    <span className="text-base">⚠️</span>
+                    <p>
+                      {template.pattern_id === 2
+                        ? (lang === 'ja' ? 'この部署の精算承認ルートが設定されていません。管理者にお問い合わせください。' : 'No settlement approval route configured for your department. Contact your admin.')
+                        : t('route_no_route_warn')}
+                    </p>
+                  </div>
+                )}
 
-            {selectedRoute && (
-              <div className="bg-white/40 backdrop-blur-sm rounded-xl border border-white/60 p-4">
-                <RouteTimeline
-                  steps={selectedRoute.steps}
-                  originLabel={t('route_applicant_node')}
-                  doneLabel={t('route_done_node')}
-                  emptyMessage={t('route_no_steps')}
-                  accent={template.pattern_id === 2 ? 'teal' : 'ringo'}
-                />
+                {routePreview && routePreview.routes.length > 1 && (
+                  <div className="space-y-1.5">
+                    <label className="label">{t('route_select')}</label>
+                    <CustomSelect
+                      options={routePreview.routes.map((r) => ({
+                        value: r.id,
+                        label: `${r.name}${r.is_default ? t('route_default_suffix') : ''}`,
+                      }))}
+                      value={selectedRouteId}
+                      onChange={setSelectedRouteId}
+                    />
+                  </div>
+                )}
+
+                {selectedRoute && (
+                  <div className="bg-white/40 backdrop-blur-sm rounded-xl border border-white/60 p-4 overflow-x-auto">
+                    <RouteTimeline
+                      steps={selectedRoute.steps}
+                      originLabel={t('route_applicant_node')}
+                      doneLabel={t('route_done_node')}
+                      emptyMessage={t('route_no_steps')}
+                      accent={template.pattern_id === 2 ? 'teal' : 'ringo'}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>
