@@ -4,7 +4,7 @@
 -- This column is reserved for admin-initiated cancellations and the
 -- deferred hard-delete job introduced with the Drive audit.
 
-ALTER TABLE applications ADD COLUMN deleted_at TIMESTAMPTZ;
+ALTER TABLE applications ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 
-CREATE INDEX idx_apps_deleted_at ON applications(deleted_at)
+CREATE INDEX IF NOT EXISTS idx_apps_deleted_at ON applications(deleted_at)
   WHERE deleted_at IS NOT NULL;
