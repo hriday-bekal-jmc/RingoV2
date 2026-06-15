@@ -137,21 +137,29 @@ router.post('/login', authLimiter, async (req: Request, res: Response): Promise<
 
   try {
     const result = await query(
-      `SELECT u.id, u.full_name, u.email, u.role, u.is_admin, u.department_id, u.password_hash
-       FROM users u WHERE u.email = $1 AND u.is_active = TRUE`,
+      `SELECT u.id, u.full_name, u.email, u.role, u.is_admin, u.department_id,
+              u.password_hash, u.is_active, u.deleted_at
+       FROM users u WHERE u.email = $1`,
       [email.toLowerCase().trim()],
     );
+
     if (result.rows.length === 0) {
-      res.status(401).json({ error: 'メールまたはパスワードが正しくありません' }); return;
+      res.status(401).json({ error: 'メールアドレスまたはパスワードが正しくありません' }); return;
     }
 
-    const user = result.rows[0] as UserRow;
+    const user = result.rows[0] as UserRow & { is_active: boolean; deleted_at: string | null };
+
+    // Account exists but is disabled or hard-deleted — tell the user so they can contact admin.
+    if (!user.is_active || user.deleted_at) {
+      res.status(401).json({ error: 'このアカウントは無効化されています。管理者にお問い合わせください。' }); return;
+    }
+
     if (!user.password_hash) {
       res.status(401).json({ error: 'このアカウントはGoogleログインのみ対応しています' }); return;
     }
 
     const valid = await argon2.verify(user.password_hash, password);
-    if (!valid) { res.status(401).json({ error: 'メールまたはパスワードが正しくありません' }); return; }
+    if (!valid) { res.status(401).json({ error: 'メールアドレスまたはパスワードが正しくありません' }); return; }
 
     const token = await issueToken(user);
     await loadAuthProfile(user.id);

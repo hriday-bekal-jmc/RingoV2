@@ -253,9 +253,19 @@ router.delete('/users/:id', async (req: Request, res: Response): Promise<void> =
         });
         return;
       }
-      // Archive: keep all data intact, mark deleted so user vanishes from panel and can't log in
+      // Hard delete: anonymise PII so the email slot is freed for reuse, keep row for FK integrity.
+      // deleted_name / deleted_email preserved nowhere — this is intentional (GDPR erasure).
       await query(
-        `UPDATE users SET deleted_at = NOW(), is_active = FALSE, token_version = token_version + 1 WHERE id = $1`,
+        `UPDATE users
+         SET deleted_at     = NOW(),
+             is_active      = FALSE,
+             token_version  = token_version + 1,
+             email          = 'deleted_' || id::text,
+             full_name      = '削除済みユーザー',
+             password_hash  = NULL,
+             avatar_url     = NULL,
+             gchat_webhook_url = NULL
+         WHERE id = $1`,
         [req.params.id],
       );
     } else {
