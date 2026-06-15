@@ -19,6 +19,7 @@ import {
   invalidateAdminReferenceCache,
 } from '../services/adminReferenceCache';
 import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
+import { invalidateRoutePreviews } from './applicationRoutes';
 import { validateBody } from '../middlewares/validate';
 import {
   createUserSchema, type CreateUserBody,
@@ -371,6 +372,7 @@ router.post('/routes', validateBody(createRouteSchema), async (req: Request, res
       [template_id, department_id, name, stage ?? 'RINGI'],
     );
     void invalidateAdminReferenceCache('routes');
+    void invalidateRoutePreviews(template_id);
     res.status(201).json({ message: 'ルートを作成しました' });
   } catch (err) {
     console.error('[admin] route create failed:', err);
@@ -380,8 +382,10 @@ router.post('/routes', validateBody(createRouteSchema), async (req: Request, res
 
 router.delete('/routes/:id', async (req: Request, res: Response): Promise<void> => {
   try {
+    const r = await query(`SELECT template_id FROM approval_routes WHERE id = $1`, [req.params.id]);
     await query(`DELETE FROM approval_routes WHERE id = $1`, [req.params.id]);
     void invalidateAdminReferenceCache('routes');
+    if (r.rows[0]?.template_id) void invalidateRoutePreviews(r.rows[0].template_id as string);
     res.json({ message: 'ルートを削除しました' });
   } catch (err) {
     res.status(500).json({ error: 'ルートの削除に失敗しました' });
@@ -391,10 +395,10 @@ router.delete('/routes/:id', async (req: Request, res: Response): Promise<void> 
 router.post('/routes/:id/steps', validateBody(addRouteStepSchema), async (req: Request, res: Response): Promise<void> => {
   const { approver_id, label, action_type, insert_after } = req.body as AddRouteStepBody;
   try {
+    const r = await query(`SELECT template_id FROM approval_routes WHERE id = $1`, [req.params.id]);
     await withTransaction(async (client: pg.PoolClient) => {
       let order: number;
       if (insert_after !== undefined) {
-        // Shift all steps after the insertion point up by 1, then insert at insert_after + 1
         await client.query(
           `UPDATE approval_route_steps SET step_order = step_order + 1
            WHERE route_id = $1 AND step_order > $2`,
@@ -415,6 +419,7 @@ router.post('/routes/:id/steps', validateBody(addRouteStepSchema), async (req: R
       );
     });
     void invalidateAdminReferenceCache('routes');
+    if (r.rows[0]?.template_id) void invalidateRoutePreviews(r.rows[0].template_id as string);
     res.status(201).json({ message: 'ステップを追加しました' });
   } catch (err) {
     console.error('[admin] step add failed:', err);
@@ -424,8 +429,15 @@ router.post('/routes/:id/steps', validateBody(addRouteStepSchema), async (req: R
 
 router.delete('/route-steps/:id', async (req: Request, res: Response): Promise<void> => {
   try {
+    const r = await query(
+      `SELECT ar.template_id FROM approval_route_steps ars
+       JOIN approval_routes ar ON ar.id = ars.route_id
+       WHERE ars.id = $1`,
+      [req.params.id],
+    );
     await query(`DELETE FROM approval_route_steps WHERE id = $1`, [req.params.id]);
     void invalidateAdminReferenceCache('routes');
+    if (r.rows[0]?.template_id) void invalidateRoutePreviews(r.rows[0].template_id as string);
     res.json({ message: 'ステップを削除しました' });
   } catch (err) {
     res.status(500).json({ error: 'ステップの削除に失敗しました' });

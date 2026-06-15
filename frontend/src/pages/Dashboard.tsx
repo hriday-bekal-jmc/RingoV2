@@ -414,10 +414,23 @@ function RecentAppsList({ apps, lang, dateLocale, t }: {
                   {/* Row 3: step dots for pending, else app number + date */}
                   {isPending && app.current_step != null && app.total_steps ? (
                     <div className="flex items-center gap-1.5 mt-1">
-                      {Array.from({ length: app.total_steps }).map((_, idx) => {
-                        const n = idx + 1; const cur = app.current_step!;
-                        return <span key={idx} className={`w-2 h-2 rounded-full ${n < cur ? 'bg-emerald-400' : n === cur ? 'bg-ringo-500 ring-2 ring-ringo-200' : 'bg-surface-200'}`} />;
-                      })}
+                      {(() => {
+                        const cur = app.current_step!; const total = app.total_steps!;
+                        const MAX_DOTS = 7;
+                        if (total <= MAX_DOTS) {
+                          return Array.from({ length: total }).map((_, idx) => {
+                            const n = idx + 1;
+                            return <span key={n} className={`w-2 h-2 rounded-full ${n < cur ? 'bg-emerald-400' : n === cur ? 'bg-ringo-500 ring-2 ring-ringo-200' : 'bg-surface-200'}`} />;
+                          });
+                        }
+                        const dots: React.ReactNode[] = [];
+                        for (let i = 1; i <= 3; i++) {
+                          dots.push(<span key={i} className={`w-2 h-2 rounded-full ${i < cur ? 'bg-emerald-400' : i === cur ? 'bg-ringo-500 ring-2 ring-ringo-200' : 'bg-surface-200'}`} />);
+                        }
+                        dots.push(<span key="ell" className="text-[9px] text-warmgray-300 leading-none">···</span>);
+                        dots.push(<span key={total} className={`w-2 h-2 rounded-full ${total < cur ? 'bg-emerald-400' : total === cur ? 'bg-ringo-500 ring-2 ring-ringo-200' : 'bg-surface-200'}`} />);
+                        return dots;
+                      })()}
                       <span className="text-[10px] text-warmgray-400 ml-1">{app.current_step}/{app.total_steps}</span>
                     </div>
                   ) : (

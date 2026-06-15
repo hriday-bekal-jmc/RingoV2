@@ -9,10 +9,18 @@ import { insertOutboxEvent } from '../services/eventOutbox';
 import { deleteFilesForApplication } from '../services/fileCleanup';
 import { computeApplicationRecipients } from '../services/eventRecipients';
 import { invalidateDashboardCache }  from '../services/dashboardCache';
+import { getJsonCache, setJsonCache, invalidateCachePattern } from '../services/cache';
 import { notifyApplicationEvent }   from '../services/notificationService';
 import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
 import { extractRowPreview } from '../services/rowPreview';
 import { validateBody } from '../middlewares/validate';
+
+const ROUTE_PREVIEW_HARD_TTL = 7200; // 2 h — routes almost never change
+
+/** Called by adminRoutes when any route/step is mutated. */
+export async function invalidateRoutePreviews(templateId: string): Promise<void> {
+  await invalidateCachePattern(`route-preview:${templateId}:*`);
+}
 import {
   createApplicationSchema, type CreateApplicationBody,
   saveApplicationSchema, type SaveApplicationBody,
@@ -186,43 +194,66 @@ router.get('/route-preview', async (req: Request, res: Response): Promise<void> 
 
   const routeStage = stage === 'SETTLEMENT' ? 'SETTLEMENT' : 'RINGI';
 
-  try {
-    const routes = await query(
-      `SELECT r.id, r.name, r.is_default
-       FROM approval_routes r
-       WHERE r.template_id = $1
-         AND r.department_id = $2
-         AND r.stage = $3
-         AND r.is_active = TRUE
-       ORDER BY r.is_default DESC, r.name ASC`,
-      [template_id, department_id, routeStage],
-    );
+  interface CachedRoutePreview {
+    routeRows: Array<{ id: string; name: string; is_default: boolean }>;
+    stepRows:  Array<{ route_id: string; step_order: number; approver_id: string | null; label: string; action_type: string; approver_name: string | null; approver_role: string | null; approver_avatar: string | null }>;
+  }
 
-    if (routes.rows.length === 0) {
+  try {
+    const cacheKey = `route-preview:${template_id}:${department_id}:${routeStage}`;
+    let cached = await getJsonCache<CachedRoutePreview>(cacheKey);
+
+    let routeRows: CachedRoutePreview['routeRows'];
+    let stepRows:  CachedRoutePreview['stepRows'];
+
+    if (cached) {
+      ({ routeRows, stepRows } = cached);
+    } else {
+      const routes = await query(
+        `SELECT r.id, r.name, r.is_default
+         FROM approval_routes r
+         WHERE r.template_id = $1
+           AND r.department_id = $2
+           AND r.stage = $3
+           AND r.is_active = TRUE
+         ORDER BY r.is_default DESC, r.name ASC`,
+        [template_id, department_id, routeStage],
+      );
+
+      if (routes.rows.length === 0) {
+        res.json({ routes: [], department_has_route: false }); return;
+      }
+
+      const steps = await query(
+        `SELECT s.route_id, s.step_order, s.approver_id, s.label, s.action_type,
+                u.full_name AS approver_name, u.role AS approver_role,
+                u.avatar_url AS approver_avatar
+         FROM approval_route_steps s
+         LEFT JOIN users u ON s.approver_id = u.id
+         WHERE s.route_id = ANY($1::uuid[])
+         ORDER BY s.route_id, s.step_order`,
+        [routes.rows.map((r: { id: string }) => r.id)],
+      );
+
+      routeRows = routes.rows as CachedRoutePreview['routeRows'];
+      stepRows  = steps.rows  as CachedRoutePreview['stepRows'];
+      void setJsonCache(cacheKey, { routeRows, stepRows }, ROUTE_PREVIEW_HARD_TTL);
+    }
+
+    if (routeRows.length === 0) {
       res.json({ routes: [], department_has_route: false }); return;
     }
 
-    const steps = await query(
-      `SELECT s.route_id, s.step_order, s.approver_id, s.label, s.action_type,
-              u.full_name AS approver_name, u.role AS approver_role,
-              u.avatar_url AS approver_avatar
-       FROM approval_route_steps s
-       LEFT JOIN users u ON s.approver_id = u.id
-       WHERE s.route_id = ANY($1::uuid[])
-       ORDER BY s.route_id, s.step_order`,
-      [routes.rows.map((r: { id: string }) => r.id)],
-    );
-
-    const stepsByRoute = steps.rows.reduce<Record<string, unknown[]>>((acc, s) => {
-      const key = (s as { route_id: string }).route_id;
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(s);
+    const stepsByRoute = stepRows.reduce<Record<string, CachedRoutePreview['stepRows']>>((acc, s) => {
+      if (!acc[s.route_id]) acc[s.route_id] = [];
+      acc[s.route_id].push(s);
       return acc;
     }, {});
 
+    // Per-user filter: skip steps where applicant is already the approver (applied in-memory, not cached)
     const applicantId = req.user!.id;
-    const result = routes.rows.map((r: { id: string }) => {
-      const routeSteps = (stepsByRoute[r.id] || []) as Array<{ approver_id?: string | null }>;
+    const result = routeRows.map((r) => {
+      const routeSteps = stepsByRoute[r.id] || [];
       const ownStepIndex = routeSteps.findIndex((s) => s.approver_id === applicantId);
       return {
         ...r,
