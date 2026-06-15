@@ -91,12 +91,19 @@ SET
 
 WHERE code = 'BUSINESS_TRIP';
 
--- Sync active version snapshot
-UPDATE form_template_versions ftv
-SET
-  schema_definition = ft.schema_definition,
-  settlement_schema = ft.settlement_schema
-FROM form_templates ft
-WHERE ftv.template_id = ft.id
-  AND ft.code         = 'BUSINESS_TRIP'
-  AND ftv.is_active   = TRUE;
+-- Sync active version if table exists (created by 018; guard for fresh-DB runs)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'form_template_versions'
+  ) THEN
+    UPDATE form_template_versions ftv
+    SET schema_definition = ft.schema_definition,
+        settlement_schema = ft.settlement_schema
+    FROM form_templates ft
+    WHERE ftv.template_id = ft.id
+      AND ft.code         = 'BUSINESS_TRIP'
+      AND ftv.is_active   = TRUE;
+  END IF;
+END $$;

@@ -103,12 +103,21 @@ VALUES (
       title              = EXCLUDED.title,
       title_ja           = EXCLUDED.title_ja;
 
--- Patch active template version so new applications pick up the updated schema
--- (form_template_versions is what the app reads at submit time)
-UPDATE form_template_versions ftv
-SET schema_definition  = ft.schema_definition,
-    settlement_schema  = ft.settlement_schema
-FROM form_templates ft
-WHERE ft.code         = 'EXPENSE_CLAIM'
-  AND ftv.template_id = ft.id
-  AND ftv.is_active   = TRUE;
+-- Patch active template version if the versions table already exists.
+-- On a fresh DB this table is created by 018_form_template_versions.sql which
+-- runs after this file; the UPDATE is a no-op then but safe to skip entirely.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'form_template_versions'
+  ) THEN
+    UPDATE form_template_versions ftv
+    SET schema_definition = ft.schema_definition,
+        settlement_schema = ft.settlement_schema
+    FROM form_templates ft
+    WHERE ft.code         = 'EXPENSE_CLAIM'
+      AND ftv.template_id = ft.id
+      AND ftv.is_active   = TRUE;
+  END IF;
+END $$;
