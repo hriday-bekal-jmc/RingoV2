@@ -101,7 +101,7 @@ app.use('/api', (_req, res, next) => {
 });
 
 // ── Health check ──────────────────────────────────────────────────────────────
-app.get('/health', async (_req, res) => {
+const healthHandler: express.RequestHandler = async (_req, res) => {
   try {
     await pool.query('SELECT 1');
     const redisOk = redis.status === 'ready';
@@ -110,7 +110,10 @@ app.get('/health', async (_req, res) => {
     const message = err instanceof Error ? err.message : 'unknown';
     res.status(503).json({ status: 'degraded', error: message });
   }
-});
+};
+
+app.get('/health', healthHandler);
+app.get('/api/health', healthHandler);
 
 // NOTE: public /uploads mount removed — files now served via auth-gated
 //       GET /api/files/:id route (see fileRoutes). Receipts/images should
