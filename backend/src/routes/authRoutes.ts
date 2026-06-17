@@ -357,6 +357,13 @@ router.get('/google/callback', authLimiter, async (req: Request, res: Response):
         [name, normalizedEmail, google_sub, picture ?? null],
       );
     } else {
+      // Clear sub from any other row first (handles recreated accounts where old
+      // deleted row still holds the sub and would violate the unique constraint)
+      await query(
+        `UPDATE users SET google_oauth_sub = NULL, updated_at = NOW()
+         WHERE google_oauth_sub = $1 AND id != $2`,
+        [google_sub, userRes.rows[0].id],
+      );
       // Existing user — store latest Google picture URL but never overwrite a custom upload
       await query(
         `UPDATE users
