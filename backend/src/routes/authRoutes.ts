@@ -336,14 +336,14 @@ router.get('/google/callback', authLimiter, async (req: Request, res: Response):
 
     let userRes = await query(
       `SELECT id, full_name, email, role, is_admin, department_id, is_active, google_oauth_sub, avatar_version
-       FROM users WHERE google_oauth_sub = $1 AND is_active = TRUE AND deleted_at IS NULL LIMIT 1`,
+       FROM users WHERE google_oauth_sub = $1 AND is_active = TRUE LIMIT 1`,
       [google_sub],
     );
 
     if (userRes.rows.length === 0) {
       userRes = await query(
         `SELECT id, full_name, email, role, is_admin, department_id, is_active, google_oauth_sub, avatar_version
-         FROM users WHERE lower(email) = $1 AND is_active = TRUE AND deleted_at IS NULL LIMIT 1`,
+         FROM users WHERE lower(email) = $1 AND is_active = TRUE LIMIT 1`,
         [normalizedEmail],
       );
     }
