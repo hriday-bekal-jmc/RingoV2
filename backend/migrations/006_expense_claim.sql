@@ -31,16 +31,10 @@ VALUES (
              "label": "勘定科目", "label_en": "Account Category",
              "type": "select", "required": true,
              "options": [
-                 "交通費",
-                 "宿泊費",
-                 "飲食費（接待）",
-                 "消耗品費",
-                 "通信費",
                  "発送・通信費",
                  "備品・消耗品購入費",
                  "租税公課",
-                 "経費",
-                 "その他"
+                 "雑費"
              ]},
             {"name": "notes",
              "label": "備考", "label_en": "Notes",

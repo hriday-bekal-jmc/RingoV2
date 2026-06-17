@@ -848,6 +848,8 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
   // Inline confirm — track id of the row currently in confirm state
   const [confirmingRouteId, setConfirmingRouteId] = useState<string | null>(null);
   const [confirmingStepId,  setConfirmingStepId]  = useState<string | null>(null);
+  const [expandedRouteSteps, setExpandedRouteSteps] = useState<Set<string>>(new Set());
+  const MOBILE_STEP_COLLAPSE = 4;
   const [routeDeptFilter, setRouteDeptFilter] = useState('');
   const [routeTemplateFilter, setRouteTemplateFilter] = useState('');
   const [routeStageFilter, setRouteStageFilter] = useState('');
@@ -1083,68 +1085,88 @@ function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'erro
           <div className="bg-surface-50/60 rounded-2xl p-4">
 
             {/* ── Compact list (mobile / small screens up to md) ── */}
-            <div className="md:hidden space-y-0.5">
-              {/* Origin row */}
-              <div className="flex items-center gap-2.5 px-2 py-1.5">
-                <span className="w-6 h-6 rounded-full bg-surface-200 border-2 border-surface-300 flex items-center justify-center text-[10px] font-black text-warmgray-600 shrink-0">申</span>
-                <span className="text-xs text-warmgray-400">{lang === 'en' ? 'Applicant' : '申請者'}</span>
-              </div>
-              {route.steps.length === 0 ? (
-                <p className="text-xs text-warmgray-400 italic px-2 py-1">{t('admin_no_steps')}</p>
-              ) : (
-                route.steps.map((step, stepIdx) => {
-                  const prevOrder = stepIdx === 0 ? 0 : route.steps[stepIdx - 1].step_order;
-                  return (
-                    <div key={step.id}>
-                      {/* Insert-before row */}
-                      <div className="flex items-center gap-2 pl-3.5 py-0.5 group/insert">
-                        <div className="w-px h-3 bg-surface-300 mx-1.5" />
-                        <button
-                          className="hidden group-hover/insert:flex text-[9px] text-ringo-500 font-bold items-center gap-0.5"
-                          onClick={() => { setAddingStepToRoute(route.id); setInsertAfterOrder(prevOrder); }}
-                        >＋ 挿入</button>
-                      </div>
-                      {/* Step row */}
-                      <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg group/step">
-                        <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black shrink-0 ${
-                          step.action_type === 'CONFIRM' ? 'bg-amber-100 text-amber-700 ring-1 ring-amber-200' : 'bg-ringo-100 text-ringo-600 ring-1 ring-ringo-200'
-                        }`}>{stepIdx + 1}</span>
-                        <UserAvatar name={step.approver_name ?? String(step.step_order)} avatarUrl={step.approver_avatar} size={6} className="shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-warmgray-700 truncate">{step.approver_name ?? '(未割当)'}</p>
-                          {step.label && <p className="text-[9px] text-warmgray-400 truncate">{step.label}</p>}
+            {(() => {
+              const mobileExpanded = expandedRouteSteps.has(route.id);
+              const shouldCollapseMobile = !mobileExpanded && route.steps.length > MOBILE_STEP_COLLAPSE;
+              const visibleMobileSteps = shouldCollapseMobile ? route.steps.slice(0, MOBILE_STEP_COLLAPSE) : route.steps;
+              const hiddenMobileCount = shouldCollapseMobile ? route.steps.length - MOBILE_STEP_COLLAPSE : 0;
+              return (
+                <div className="md:hidden space-y-0.5">
+                  {/* Origin row */}
+                  <div className="flex items-center gap-2.5 px-2 py-1.5">
+                    <span className="w-6 h-6 rounded-full bg-surface-200 border-2 border-surface-300 flex items-center justify-center text-[10px] font-black text-warmgray-600 shrink-0">申</span>
+                    <span className="text-xs text-warmgray-400">{lang === 'en' ? 'Applicant' : '申請者'}</span>
+                  </div>
+                  {route.steps.length === 0 ? (
+                    <p className="text-xs text-warmgray-400 italic px-2 py-1">{t('admin_no_steps')}</p>
+                  ) : (
+                    visibleMobileSteps.map((step, stepIdx) => {
+                      const prevOrder = stepIdx === 0 ? 0 : route.steps[stepIdx - 1].step_order;
+                      return (
+                        <div key={step.id}>
+                          {/* Insert-before row */}
+                          <div className="flex items-center gap-2 pl-3.5 py-0.5 group/insert">
+                            <div className="w-px h-3 bg-surface-300 mx-1.5" />
+                            <button
+                              className="hidden group-hover/insert:flex text-[9px] text-ringo-500 font-bold items-center gap-0.5"
+                              onClick={() => { setAddingStepToRoute(route.id); setInsertAfterOrder(prevOrder); }}
+                            >＋ 挿入</button>
+                          </div>
+                          {/* Step row */}
+                          <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg group/step">
+                            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black shrink-0 ${
+                              step.action_type === 'CONFIRM' ? 'bg-amber-100 text-amber-700 ring-1 ring-amber-200' : 'bg-ringo-100 text-ringo-600 ring-1 ring-ringo-200'
+                            }`}>{stepIdx + 1}</span>
+                            <UserAvatar name={step.approver_name ?? String(step.step_order)} avatarUrl={step.approver_avatar} size={6} className="shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-warmgray-700 truncate">{step.approver_name ?? '(未割当)'}</p>
+                              {step.label && <p className="text-[9px] text-warmgray-400 truncate">{step.label}</p>}
+                            </div>
+                            {step.action_type === 'CONFIRM' && (
+                              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 ring-1 ring-amber-200/60 shrink-0">確認</span>
+                            )}
+                            {confirmingStepId === step.id ? (
+                              <button
+                                className="px-1.5 h-5 rounded-full bg-red-600 text-white text-[9px] font-bold flex items-center justify-center shadow-md ring-2 ring-white animate-scale-in shrink-0"
+                                onClick={() => deleteStep.mutate(step.id)}
+                                onBlur={() => setConfirmingStepId(null)}
+                                autoFocus
+                              >削除？</button>
+                            ) : (
+                              <button
+                                className="w-5 h-5 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center shrink-0"
+                                onClick={() => setConfirmingStepId(step.id)}
+                              >×</button>
+                            )}
+                          </div>
                         </div>
-                        {step.action_type === 'CONFIRM' && (
-                          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 ring-1 ring-amber-200/60 shrink-0">確認</span>
-                        )}
-                        {/* Delete button */}
-                        {confirmingStepId === step.id ? (
-                          <button
-                            className="px-1.5 h-5 rounded-full bg-red-600 text-white text-[9px] font-bold flex items-center justify-center shadow-md ring-2 ring-white animate-scale-in shrink-0"
-                            onClick={() => deleteStep.mutate(step.id)}
-                            onBlur={() => setConfirmingStepId(null)}
-                            autoFocus
-                          >削除？</button>
-                        ) : (
-                          <button
-                            className="w-5 h-5 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center shrink-0"
-                            onClick={() => setConfirmingStepId(step.id)}
-                          >×</button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-              {/* End row */}
-              <div className="flex items-center gap-2 pl-3.5 py-0.5">
-                <div className="w-px h-3 bg-surface-300 mx-1.5" />
-              </div>
-              <div className="flex items-center gap-2.5 px-2 py-1.5">
-                <span className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center text-white text-[10px] shrink-0">✓</span>
-                <span className="text-xs text-warmgray-400">{t('admin_done_node')}</span>
-              </div>
-            </div>
+                      );
+                    })
+                  )}
+                  {/* Collapse/expand toggle */}
+                  {hiddenMobileCount > 0 && (
+                    <button
+                      className="ml-8 text-[10px] text-ringo-400 hover:text-ringo-600 font-semibold transition-colors py-1"
+                      onClick={() => setExpandedRouteSteps(prev => { const s = new Set(prev); s.add(route.id); return s; })}
+                    >+ {hiddenMobileCount} ステップを表示</button>
+                  )}
+                  {mobileExpanded && route.steps.length > MOBILE_STEP_COLLAPSE && (
+                    <button
+                      className="ml-8 text-[10px] text-ringo-400 hover:text-ringo-600 font-semibold transition-colors py-1"
+                      onClick={() => setExpandedRouteSteps(prev => { const s = new Set(prev); s.delete(route.id); return s; })}
+                    >▲ 折りたたむ</button>
+                  )}
+                  {/* End row */}
+                  <div className="flex items-center gap-2 pl-3.5 py-0.5">
+                    <div className="w-px h-3 bg-surface-300 mx-1.5" />
+                  </div>
+                  <div className="flex items-center gap-2.5 px-2 py-1.5">
+                    <span className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center text-white text-[10px] shrink-0">✓</span>
+                    <span className="text-xs text-warmgray-400">{t('admin_done_node')}</span>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* ── Wide visual chain (md+) ── */}
             <div className="hidden md:flex md:items-center gap-3 md:flex-wrap">
