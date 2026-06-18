@@ -78,12 +78,10 @@ SET
         {"name":"amount","label":"金額（円）","label_en":"Amount","type":"number","unit":"円","validation":{"min":0},"sum_target":"other_expenses_total"}
       ]},
       {"name":"other_expenses_total","label":"その他費用合計（円）","label_en":"Total Other Expenses","type":"number","computed":true,"unit":"円"},
-      {"name":"receipts","label":"領収書","label_en":"Receipts","type":"repeat_group","required":false,"min_rows":0,"add_label":"領収書を追加","add_label_en":"Add Receipt","fields":[
-        {"name":"receipt_file","label":"領収書ファイル","label_en":"Receipt File","type":"ai_file_reader","required":false,"file_category":"receipts","target_amount_field":"receipt_amount"},
-        {"name":"receipt_description","label":"内容","label_en":"Description","type":"text","required":true},
-        {"name":"receipt_amount","label":"金額（円）","label_en":"Amount","type":"number","required":true,"unit":"円","validation":{"min":0},"sum_target":"receipt_total"}
+      {"name":"receipts","label":"領収書（証憑）","label_en":"Receipts (proof)","type":"repeat_group","required":false,"min_rows":0,"add_label":"領収書を追加","add_label_en":"Add Receipt","helper_text":"金額は上記の各明細に入力してください。ここは証憑の添付のみです。","fields":[
+        {"name":"receipt_file","label":"領収書ファイル","label_en":"Receipt File","type":"ai_file_reader","required":false,"file_category":"receipts"},
+        {"name":"receipt_description","label":"内容","label_en":"Description","type":"text","required":true}
       ]},
-      {"name":"receipt_total","label":"領収書合計","label_en":"Receipt Total","type":"number","computed":true,"unit":"円"},
       {"name":"remarks","label":"備考","label_en":"Remarks","type":"textarea","required":false},
       {"name":"settlement_total","label":"精算合計（円）","label_en":"Grand Total","type":"number","computed":true,"formula":"backpay_amount+transport_total+accommodation_total+daily_allowance_total+expressway_toll+other_expenses_total","unit":"円","show_in_row":true,"amount_field":true}
     ]

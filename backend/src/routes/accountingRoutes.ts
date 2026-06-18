@@ -11,6 +11,8 @@ import { computeApplicationRecipients } from '../services/eventRecipients';
 import { invalidateDashboardCache } from '../services/dashboardCache';
 import { addCsvExportJob, getCsvExportMeta } from '../services/csvExportQueue';
 import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
+import { pickAmount, resolveFinalAmount, type FormSchema } from '../services/settlementAmount';
+import { notifyApplicationEvent } from '../services/notificationService';
 import type pg from 'pg';
 import multer from 'multer';
 
@@ -19,6 +21,16 @@ const PatchSettlementSchema = z.object({
   transfer_date:   z.string().nullable().optional(),
   accounting_note: z.string().max(2000).optional(),
 });
+
+const AdjustAmountSchema = z.object({
+  adjusted_amount:   z.number().nonnegative().finite(),
+  adjustment_reason: z.string().trim().min(1, '調整理由を入力してください').max(2000),
+  notify_applicant:  z.boolean().optional().default(false),
+  // Optimistic-lock token the client last read; rejects stale concurrent edits.
+  version:           z.number().int().positive().optional(),
+});
+
+const yen = (n: number): string => Math.round(n).toLocaleString('ja-JP');
 
 const CsvExportSchema = z.object({
   ids:       z.array(z.string().uuid()).optional(),
@@ -109,6 +121,11 @@ router.get('/settlements', async (req: Request, res: Response): Promise<void> =>
          s.transfer_date,
          s.transfer_proof_url,
          s.accounting_note,
+         s.adjusted_amount,
+         s.adjustment_reason,
+         s.adjusted_at,
+         s.version,
+         adj_user.full_name AS adjusted_by_name,
          s.processed_at,
          s.created_at,
          a.id            AS application_id,
@@ -139,6 +156,7 @@ router.get('/settlements', async (req: Request, res: Response): Promise<void> =>
          ORDER BY step_order ASC LIMIT 1
        ) pending_step ON TRUE
        LEFT JOIN users pending_approver ON pending_approver.id = pending_step.approver_id
+       LEFT JOIN users adj_user ON adj_user.id = s.adjusted_by
        WHERE (($1 = 'ALL'     AND a.status IN ('SETTLEMENT_APPROVED', 'COMPLETED'))
           OR ($1 = 'PENDING' AND a.status = 'SETTLEMENT_APPROVED')
           OR ($1 = 'DONE'    AND a.status = 'COMPLETED'))
@@ -158,34 +176,31 @@ router.get('/settlements', async (req: Request, res: Response): Promise<void> =>
     const hasMore = rows.length > limit;
     if (hasMore) rows.pop();
 
-    // Recompute amounts from live form_data + current schema so stale stored
-    // values (from pre-amount_field submissions) are never shown.
-    const pickAmount = (schema: { fields?: Array<{ name: string; type: string; computed?: boolean; formula?: string; sum_target?: string; amount_field?: boolean }> } | null, data: Record<string, unknown> | null): number => {
-      const toNum = (v: unknown) => { const n = typeof v === 'number' ? v : parseFloat(String(v ?? 0)); return isFinite(n) ? n : 0; };
-      if (!data) return 0;
-      const fields = (schema?.fields ?? []).filter((f) => f.type === 'number');
-      const explicit = fields.filter((f) => f.amount_field);
-      if (explicit.length) return toNum(data[explicit[explicit.length - 1].name]);
-      const formula  = fields.filter((f) => f.computed && f.formula);
-      if (formula.length)  return toNum(data[formula[formula.length - 1].name]);
-      if (data.grand_total != null) return toNum(data.grand_total);
-      const summed   = fields.filter((f) => f.computed && f.sum_target);
-      if (summed.length)   return toNum(data[summed[summed.length - 1].name]);
-      const computed = fields.filter((f) => f.computed);
-      if (computed.length) return toNum(data[computed[computed.length - 1].name]);
-      if (fields.length)   return toNum(data[fields[0].name]);
-      return 0;
-    };
-
+    // Amounts recomputed live from form_data + current schema so stale stored
+    // values (pre-amount_field submissions) are never shown. Accounting's
+    // adjusted_amount override always wins for the actual (final) amount.
+    //
+    // Fallback to the stored settlements columns when the schema-recompute yields
+    // 0: custom-renderer forms (e.g. TRANSPORT_EXPENSE) keep their amount in
+    // form_data with a non-standard shape and have no amount_field in the schema,
+    // so pickAmount can't see it — but the correct total is already persisted in
+    // settlements.expected_amount / actual_amount via detectSettlementAmount.
+    const num = (v: unknown) => { const n = typeof v === 'number' ? v : parseFloat(String(v ?? 0)); return isFinite(n) ? n : 0; };
     const items = rows.map((r: any) => {
-      const expected_amount = pickAmount(r.schema_definition, r.form_data);
-      const actual_amount   = pickAmount(r.settlement_schema, r.settlement_data);
+      const expected_amount  = pickAmount(r.schema_definition, r.form_data) || num(r.expected_amount);
+      const submitted_amount = pickAmount(r.settlement_schema, r.settlement_data) || num(r.actual_amount);
+      const is_adjusted = r.adjusted_amount !== null && r.adjusted_amount !== undefined;
+      const actual_amount = is_adjusted ? num(r.adjusted_amount) : submitted_amount;
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { form_data: _fd, settlement_data: _sd, schema_definition: _sc, settlement_schema: _ss, ...rest } = r;
       return {
         ...rest,
         expected_amount,
         actual_amount,
+        // original applicant-submitted amount, kept so the UI can show original → adjusted
+        submitted_amount,
+        is_adjusted,
+        adjusted_amount: is_adjusted ? Number(r.adjusted_amount) : null,
         can_close:   r.app_status === 'SETTLEMENT_APPROVED',
         can_approve: false,
       };
@@ -271,6 +286,119 @@ router.patch('/settlements/:id', async (req: Request, res: Response): Promise<vo
     if (e.status) { res.status(e.status).json({ error: e.message }); return; }
     console.error('[accounting] settlement patch failed:', err);
     res.status(500).json({ error: '精算の更新に失敗しました' });
+  }
+});
+
+// ── PATCH /accounting/settlements/:id/amount ─────────────────────────────────
+// Accounting (soumu) corrects the final settlement TOTAL after verification,
+// without returning the whole application. The original applicant submission
+// (settlement_data) is never mutated — we write an override + audit trail.
+// Only allowed while SETTLEMENT_APPROVED (verified, awaiting close).
+// Optimistic-locked via settlements.version to block concurrent clobbers.
+router.patch('/settlements/:id/amount', async (req: Request, res: Response): Promise<void> => {
+  const parsed = AdjustAmountSchema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid request' }); return; }
+  const { adjusted_amount, adjustment_reason, notify_applicant, version } = parsed.data;
+  const { id } = req.params;
+
+  try {
+    const result = await withTransaction(async (client: pg.PoolClient) => {
+      // Lock the settlement + pull schema/data so we can compute the pre-edit amount.
+      const sRow = await client.query(
+        `SELECT s.id, s.version, s.adjusted_amount, s.actual_amount, s.settlement_data,
+                a.id AS application_id, a.status AS app_status,
+                ft.settlement_schema
+         FROM settlements s
+         JOIN applications a    ON a.id = s.application_id
+         JOIN form_templates ft ON ft.id = a.template_id
+         WHERE s.id = $1 FOR UPDATE OF s`,
+        [id],
+      );
+      if (sRow.rows.length === 0) {
+        throw Object.assign(new Error('精算記録が見つかりません'), { status: 404 });
+      }
+      const row = sRow.rows[0] as {
+        id: string; version: number; adjusted_amount: string | null; actual_amount: string | null;
+        settlement_data: Record<string, unknown> | null;
+        application_id: string; app_status: string;
+        settlement_schema: FormSchema | null;
+      };
+
+      if (row.app_status !== 'SETTLEMENT_APPROVED') {
+        throw Object.assign(
+          new Error(`この状態では金額を調整できません (現在: ${row.app_status})。承認完了後・締め前のみ可能です。`),
+          { status: 409 },
+        );
+      }
+      // Optimistic-lock check — if the client read an older version, reject.
+      if (version !== undefined && version !== row.version) {
+        throw Object.assign(
+          new Error('他のユーザーが更新したため操作を完了できませんでした。再読み込みしてください。'),
+          { status: 409 },
+        );
+      }
+
+      // Pre-edit amount: adjusted override → schema recompute → stored column
+      // (the column covers custom-renderer forms whose total isn't in the schema).
+      const recomputed = resolveFinalAmount(row.adjusted_amount, row.settlement_schema, row.settlement_data);
+      const storedActual = Number(row.actual_amount) || 0;
+      const oldAmount = recomputed || storedActual;
+
+      const upd = await client.query(
+        `UPDATE settlements
+         SET adjusted_amount   = $2,
+             adjustment_reason = $3,
+             adjusted_by       = $4,
+             adjusted_at       = CURRENT_TIMESTAMP,
+             version           = version + 1,
+             updated_at        = CURRENT_TIMESTAMP
+         WHERE id = $1
+         RETURNING id, application_id, adjusted_amount, adjustment_reason, adjusted_at, version`,
+        [id, adjusted_amount, adjustment_reason, req.user!.id],
+      );
+      const updated = upd.rows[0];
+
+      await client.query(
+        `INSERT INTO audit_logs (action, entity_type, entity_id, actor_id, metadata)
+         VALUES ('SETTLEMENT_AMOUNT_ADJUSTED', 'application', $1, $2, $3::jsonb)`,
+        [row.application_id, req.user!.id, JSON.stringify({
+          settlement_id: id,
+          old_amount:    oldAmount,
+          new_amount:    adjusted_amount,
+          reason:        adjustment_reason,
+          notified:      notify_applicant === true,
+        })],
+      );
+
+      const recipients = await computeApplicationRecipients(client, row.application_id, { includeAccounting: true });
+      await insertOutboxEvent(client, {
+        event_type:         'SETTLEMENT_ACTION',
+        entity_type:        'application',
+        entity_id:          row.application_id,
+        recipient_user_ids: recipients,
+        payload:            { type: 'amount_adjusted', applicationId: row.application_id },
+      });
+
+      return { updated, application_id: row.application_id, oldAmount, recipients };
+    });
+
+    // Notify applicant only when the accounting user opted in. Fire-and-forget.
+    if (notify_applicant) {
+      notifyApplicationEvent('SETTLEMENT_AMOUNT_ADJUSTED', result.application_id, {
+        actor_id:          req.user!.id,
+        old_amount:        yen(result.oldAmount),
+        new_amount:        yen(adjusted_amount),
+        adjustment_reason: adjustment_reason,
+      });
+    }
+    invalidateDashboardCache(result.recipients);
+
+    res.json({ settlement: result.updated });
+  } catch (err) {
+    const e = err as { status?: number; message?: string };
+    if (e.status) { res.status(e.status).json({ error: e.message }); return; }
+    console.error('[accounting] amount adjust failed:', err);
+    res.status(500).json({ error: '金額の調整に失敗しました' });
   }
 });
 

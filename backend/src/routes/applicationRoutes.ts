@@ -1385,7 +1385,10 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
               u.avatar_url AS applicant_avatar,
               COALESCE(ar.daily_rate_yen, u.daily_allowance_rate, 3000)::int AS applicant_daily_rate,
               s.transfer_date, s.transfer_proof_url, s.accounting_note,
-              s.expected_amount, s.actual_amount AS settled_actual_amount,
+              s.expected_amount,
+              COALESCE(s.adjusted_amount, s.actual_amount) AS settled_actual_amount,
+              s.adjusted_amount, s.adjustment_reason, s.adjusted_at,
+              adj_u.full_name AS adjusted_by_name,
               s.processed_at AS settlement_processed_at,
               s.status AS settlement_status
        FROM applications a
@@ -1394,6 +1397,7 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
        LEFT JOIN users u ON a.applicant_id = u.id
        LEFT JOIN allowance_rates ar ON ar.role = u.role
        LEFT JOIN settlements s ON s.application_id = a.id
+       LEFT JOIN users adj_u ON adj_u.id = s.adjusted_by
        WHERE a.id = $1`,
       [req.params.id],
     );

@@ -113,7 +113,7 @@ async function processCsvExport(job: Job<CsvExportPayload>): Promise<{ filename:
           d.name      AS department,
           ft.title_ja AS form_type,
           s.expected_amount,
-          s.actual_amount,
+          COALESCE(s.adjusted_amount, s.actual_amount) AS actual_amount,
           s.transfer_date,
           s.accounting_note,
           s.status    AS settlement_status,

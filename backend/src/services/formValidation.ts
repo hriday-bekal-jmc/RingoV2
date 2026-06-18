@@ -22,6 +22,8 @@ export interface FormField {
   hidden?: boolean;
   formula?: string;
   sum_target?: string;
+  /** marks a field as belonging to a custom entry-renderer form (e.g. transportation) */
+  entry_field?: boolean;
   date_diff_from?: string;
   date_diff_to?:   string;
   fields?: FormField[];
@@ -133,6 +135,11 @@ export function applyComputedFormData(schema: FormSchema | null | undefined, dat
 
   // Flatten visual field_groups so computed/sum/formula/whitelist see children flat.
   const flatFields = flattenGroups(schema.fields);
+
+  // Custom entry-renderer forms (e.g. transportation) manage their own data shape
+  // — they store an `entries` array + client-computed totals that aren't declared as
+  // flat schema fields. Skip whitelisting/computation so that data is preserved verbatim.
+  if (flatFields.some((field) => field.entry_field === true)) return data;
 
   const computedTargets = new Set(
     flatFields.filter((field) => field.type === 'number' && field.computed).map((field) => field.name),

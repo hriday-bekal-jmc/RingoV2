@@ -60,6 +60,11 @@ interface ApplicationDetail {
   accounting_note: string | null;
   settlement_processed_at: string | null;
   settlement_status: string | null;
+  // Amount adjustment by accounting (null = not adjusted)
+  adjusted_amount: number | null;
+  adjustment_reason: string | null;
+  adjusted_at: string | null;
+  adjusted_by_name: string | null;
 }
 
 // ── UI Components ─────────────────────────────────────────────────────────────
@@ -133,6 +138,29 @@ function SettlementDataViewer({ app, t }: { app: ApplicationDetail; t: (k: any) 
           );
         })}
       </dl>
+
+      {/* Amount adjustment notice — accounting corrected the final total */}
+      {app.adjusted_amount != null && (
+        <div className="mt-5 pt-4 border-t border-sky-100">
+          <div className="rounded-xl border border-sky-200/60 bg-sky-50/50 px-4 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-widest text-sky-700">
+                {lang === 'en' ? 'Amount adjusted by accounting' : '経理による金額調整'}
+              </span>
+              <span className="text-sm font-bold tabular-nums text-sky-700">
+                ¥{Number(app.adjusted_amount).toLocaleString('ja-JP')}
+              </span>
+            </div>
+            {app.adjustment_reason && (
+              <p className="text-xs text-warmgray-700 leading-relaxed">{app.adjustment_reason}</p>
+            )}
+            <p className="text-[10px] text-warmgray-400">
+              {app.adjusted_by_name ?? ''}
+              {app.adjusted_at ? ` ・ ${new Date(app.adjusted_at).toLocaleDateString('ja-JP')}` : ''}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Accounting result — transfer date / proof / note */}
       {(app.transfer_date || app.transfer_proof_url || app.accounting_note) && (

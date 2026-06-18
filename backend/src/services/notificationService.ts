@@ -115,6 +115,7 @@ export type NotificationEventType =
   | 'APP_REJECTED'
   | 'SETTLEMENT_SUBMITTED'
   | 'SETTLEMENT_APPROVED'
+  | 'SETTLEMENT_AMOUNT_ADJUSTED'
   | 'STEP_ACTION_REQUIRED';
 
 // Events where recipient = next pending step's assigned approver

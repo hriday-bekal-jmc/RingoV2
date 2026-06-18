@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useScrollEnd } from '../hooks/useScrollEnd';
 import { useDelayedLoading } from '../hooks/useDelayedLoading';
@@ -8,6 +9,7 @@ import Layout from '../components/common/Layout';
 import RingoLoader from '../components/common/RingoLoader';
 import { Sk } from '../components/common/Skeleton';
 import { useLang } from '../context/LanguageContext';
+import { useScrollLock } from '../hooks/useScrollLock';
 
 // File URLs are same-origin (vite proxy /api in dev, reverse proxy in prod) — no base prefix needed
 
@@ -19,7 +21,14 @@ interface Settlement {
   app_status: string;
   settlement_status: string;
   expected_amount: number;
-  actual_amount: number;
+  actual_amount: number;          // final amount = adjusted_amount ?? recompute(settlement_data)
+  submitted_amount: number;       // original applicant-submitted amount
+  is_adjusted: boolean;
+  adjusted_amount: number | null;
+  adjustment_reason: string | null;
+  adjusted_at: string | null;
+  adjusted_by_name: string | null;
+  version: number;
   currency: string;
   transfer_date: string | null;
   transfer_proof_url: string | null;
@@ -136,6 +145,183 @@ function DateEditor({
         <p className="text-[11px] text-ringo-500 flex items-center gap-1"><span>⚠</span> 保存に失敗しました</p>
       )}
     </div>
+  );
+}
+
+// ── Amount adjuster (soumu correction before close) ──────────────────────────
+// Opens a small panel to override the final settlement total without returning
+// the application. Reason required; optional applicant notification. Optimistic-
+// locked via `version` — a stale edit gets a 409 and prompts a refresh.
+function AmountAdjuster({
+  settlement,
+  fmt,
+  lang,
+}: {
+  settlement: Settlement;
+  fmt: (n: number | null | undefined) => string;
+  lang: string;
+}) {
+  const queryClient = useQueryClient();
+  const [open, setOpen]     = useState(false);
+  const [amount, setAmount] = useState(String(settlement.actual_amount ?? 0));
+  const [reason, setReason] = useState('');
+  const [notify, setNotify] = useState(true);
+  const [conflict, setConflict] = useState(false);
+
+  const reset = () => {
+    setAmount(String(settlement.actual_amount ?? 0));
+    setReason('');
+    setNotify(true);
+    setConflict(false);
+  };
+
+  const mutation = useMutation({
+    mutationFn: async () =>
+      (await apiClient.patch(`/accounting/settlements/${settlement.settlement_id}/amount`, {
+        adjusted_amount:   Number(amount),
+        adjustment_reason: reason.trim(),
+        notify_applicant:  notify,
+        version:           settlement.version,
+      })).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accountingSettlements'] });
+      setOpen(false);
+      reset();
+    },
+    onError: (err: any) => {
+      if (err?.response?.status === 409) setConflict(true);
+    },
+  });
+
+  const numAmount = Number(amount);
+  const valid = isFinite(numAmount) && numAmount >= 0 && reason.trim().length > 0;
+  const changed = numAmount !== Number(settlement.actual_amount);
+  const delta = numAmount - Number(settlement.actual_amount);
+
+  useScrollLock(open);
+
+  return (
+    <>
+      <button
+        onClick={() => { reset(); setOpen(true); }}
+        className="text-[11px] font-semibold text-warmgray-400 hover:text-ringo-500 transition-colors inline-flex items-center gap-1"
+      >
+        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+        </svg>
+        {lang === 'en' ? 'Adjust' : '金額を調整'}
+      </button>
+
+      {open && createPortal(
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-warmgray-900/50 backdrop-blur-sm" onClick={() => { setOpen(false); reset(); }} />
+          <div className="relative glass rounded-3xl shadow-2xl w-full max-w-sm p-6 space-y-5 animate-scale-in text-left">
+            {/* Header */}
+            <div className="flex items-start gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-sky-100 flex items-center justify-center text-sky-600 shrink-0">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                </svg>
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-bold text-warmgray-800">{lang === 'en' ? 'Adjust amount' : '精算金額の調整'}</h3>
+                <p className="text-xs text-warmgray-500 mt-0.5 truncate">
+                  {settlement.application_number ?? ''} ・ {settlement.applicant_name}
+                </p>
+              </div>
+            </div>
+
+            {/* Original → New summary */}
+            <div className="flex items-center justify-between rounded-2xl bg-surface-50/70 border border-white/70 px-4 py-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400">{lang === 'en' ? 'Original' : '調整前'}</p>
+                <p className="text-sm font-semibold tabular-nums text-warmgray-500">{fmt(settlement.actual_amount)}</p>
+              </div>
+              <svg className="w-4 h-4 text-warmgray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+              </svg>
+              <div className="text-right">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400">{lang === 'en' ? 'New' : '調整後'}</p>
+                <p className="text-sm font-bold tabular-nums text-sky-700">{valid || changed ? fmt(numAmount) : '—'}</p>
+                {changed && (
+                  <p className={`text-[10px] font-semibold tabular-nums ${delta > 0 ? 'text-ringo-500' : 'text-emerald-600'}`}>
+                    {delta > 0 ? '+' : ''}{fmt(delta)}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* New amount */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400">
+                {lang === 'en' ? 'New amount (¥)' : '調整後金額（円）'}
+              </label>
+              <input
+                type="number"
+                min={0}
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                autoFocus
+                className="input tabular-nums"
+              />
+            </div>
+
+            {/* Reason */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400">
+                {lang === 'en' ? 'Reason (required)' : '調整理由（必須）'}
+              </label>
+              <textarea
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                rows={3}
+                placeholder={lang === 'en' ? 'e.g. receipt #3 recalculated' : '例）領収書③の再計算により修正'}
+                className="input resize-none"
+              />
+            </div>
+
+            {/* Notify toggle */}
+            <label className="flex items-center gap-2.5 text-sm font-medium text-warmgray-600 cursor-pointer">
+              <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} className="rounded w-4 h-4" />
+              {lang === 'en' ? 'Notify applicant by email' : '申請者にメールで通知する'}
+            </label>
+
+            {/* Errors */}
+            {conflict && (
+              <p className="text-xs text-amber-600 flex items-center gap-1.5 bg-amber-50 border border-amber-200/60 rounded-lg px-3 py-2">
+                <span>⚠</span>
+                {lang === 'en' ? 'Updated by someone else — please refresh.' : '他のユーザーが更新しました。再読み込みしてください。'}
+              </p>
+            )}
+            {mutation.isError && !conflict && (
+              <p className="text-xs text-ringo-500 flex items-center gap-1.5">
+                <span>⚠</span>{(mutation.error as any)?.response?.data?.error ?? '保存に失敗しました'}
+              </p>
+            )}
+
+            {/* Actions */}
+            <div className="flex flex-col gap-2 pt-1">
+              <button
+                onClick={() => mutation.mutate()}
+                disabled={mutation.isPending || !valid || !changed}
+                className="btn-primary flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {mutation.isPending ? (
+                  <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>{lang === 'en' ? 'Saving…' : '保存中…'}</>
+                ) : (lang === 'en' ? 'Save adjustment' : '調整を保存')}
+              </button>
+              <button
+                onClick={() => { setOpen(false); reset(); }}
+                className="btn-ghost text-warmgray-500"
+              >
+                {lang === 'en' ? 'Cancel' : 'キャンセル'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
 
@@ -771,7 +957,7 @@ export default function Accounting() {
                           <p className="text-[10px] text-warmgray-400 truncate">{s.department_name}</p>
                         </td>
 
-                        {/* Amounts — stacked: est / actual / delta */}
+                        {/* Amounts — stacked: est / actual / delta + adjust */}
                         <td data-label="金額" className="text-right">
                           <div className="flex flex-col items-end gap-0.5">
                             <span className="text-[10px] tabular-nums text-warmgray-400 whitespace-nowrap">概算 {fmt(s.expected_amount)}</span>
@@ -780,6 +966,20 @@ export default function Accounting() {
                               <span className={`text-[10px] font-semibold tabular-nums whitespace-nowrap ${delta > 0 ? 'text-ringo-500' : 'text-emerald-600'}`}>
                                 {delta > 0 ? '+' : ''}{fmt(delta)}
                               </span>
+                            )}
+                            {/* Adjusted badge — shows original struck-through + who/why on hover */}
+                            {s.is_adjusted && (
+                              <span
+                                className="group/adj relative text-[10px] font-bold text-sky-700 bg-sky-50 border border-sky-200/60 px-1.5 py-0.5 rounded-full whitespace-nowrap inline-flex items-center gap-1 cursor-help"
+                                title={`${s.adjustment_reason ?? ''}${s.adjusted_by_name ? `（${s.adjusted_by_name}）` : ''}`}
+                              >
+                                調整済
+                                <span className="tabular-nums text-warmgray-400 line-through font-medium">{fmt(s.submitted_amount)}</span>
+                              </span>
+                            )}
+                            {/* Adjust trigger — only before close (SETTLEMENT_APPROVED) */}
+                            {s.app_status === 'SETTLEMENT_APPROVED' && (
+                              <AmountAdjuster settlement={s} fmt={fmt} lang={lang} />
                             )}
                           </div>
                         </td>
