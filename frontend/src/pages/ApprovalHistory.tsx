@@ -40,6 +40,8 @@ const ACTION_STYLES: Record<string, { badge: string; label_ja: string; label_en:
   REJECTED: { badge: 'badge-rejected', label_ja: '却下',     label_en: 'Rejected', icon: '✕' },
   RETURNED: { badge: 'badge-returned', label_ja: '差し戻し', label_en: 'Returned', icon: '↩' },
 };
+// Fallback for any action not in the map (SKIPPED/CANCELLED/etc.) — never crash.
+const ACTION_STYLE_FALLBACK = { badge: 'badge-draft', label_ja: '—', label_en: '—', icon: '•' };
 
 const APP_STATUS_BADGE: Record<string, string> = {
   PENDING_APPROVAL:  'badge-pending',
@@ -50,6 +52,7 @@ const APP_STATUS_BADGE: Record<string, string> = {
   SETTLEMENT_APPROVED:'badge-approved',
   COMPLETED:         'badge-approved',
   DRAFT:             'badge-draft',
+  CANCELLED:         'badge-draft',
 };
 
 const APP_STATUS_LABEL: Record<string, { ja: string; en: string }> = {
@@ -61,6 +64,7 @@ const APP_STATUS_LABEL: Record<string, { ja: string; en: string }> = {
   SETTLEMENT_APPROVED:{ ja: '精算承認済', en: 'Settlement OK' },
   COMPLETED:          { ja: '完了',       en: 'Completed' },
   DRAFT:              { ja: '下書き',     en: 'Draft' },
+  CANCELLED:          { ja: 'キャンセル', en: 'Cancelled' },
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -507,7 +511,7 @@ export default function ApprovalHistory() {
                   </thead>
                   <tbody className="stagger">
                     {items.map((item) => {
-                      const act = ACTION_STYLES[item.action];
+                      const act = ACTION_STYLES[item.action] ?? ACTION_STYLE_FALLBACK;
                       const appSt = APP_STATUS_LABEL[item.app_status];
                       return (
                         <tr

@@ -362,7 +362,9 @@ async function _dispatch(
     ...routeProgress,
     actor_name: actorName,
     comment:    extraVars.comment   ?? '',
-    step_name:  extraVars.step_name ?? '',
+    // Fall back to the live pending-step label so STEP_ACTION_REQUIRED emails
+    // (which don't pass step_name explicitly) still fill the ステップ row.
+    step_name:  extraVars.step_name ?? routeProgress.current_step ?? '',
     date:       new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }),
     ...extraVars,
   };

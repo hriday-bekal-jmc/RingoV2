@@ -844,7 +844,7 @@ router.get('/history', async (req: Request, res: Response): Promise<void> => {
     res.json(payload);
   } catch (err) {
     console.error('[approvals] history failed:', err);
-    res.status(500).json({ error: `承認履歴の取得に失敗しました: ${(err as Error).message}` });
+    res.status(500).json({ error: '承認履歴の取得に失敗しました' });
   }
 });
 

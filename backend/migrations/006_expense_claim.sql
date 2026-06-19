@@ -45,9 +45,6 @@ VALUES (
              "required": true, "min_rows": 1,
              "add_label": "明細を追加", "add_label_en": "Add item",
              "fields": [
-                 {"name": "purchase_date",
-                  "label": "購入日", "label_en": "Date",
-                  "type": "date", "required": true},
                  {"name": "vendor",
                   "label": "購入先", "label_en": "Vendor",
                   "type": "text", "required": true},

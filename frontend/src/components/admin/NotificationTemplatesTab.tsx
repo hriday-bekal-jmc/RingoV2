@@ -38,6 +38,7 @@ const EVENT_META: Record<string, { label: string; label_en: string; icon: string
   APP_REJECTED:         { label: '却下',         label_en: 'Application Rejected',     icon: '✗',  who: '→ 申請者',        who_en: '→ applicant' },
   SETTLEMENT_SUBMITTED: { label: '精算申請',     label_en: 'Settlement Submitted',     icon: '💴', who: '→ 精算承認者',    who_en: '→ settlement approver' },
   SETTLEMENT_APPROVED:  { label: '精算承認',     label_en: 'Settlement Approved',      icon: '🏦', who: '→ 申請者',        who_en: '→ applicant' },
+  SETTLEMENT_AMOUNT_ADJUSTED: { label: '精算金額調整', label_en: 'Settlement Amount Adjusted', icon: '✏️', who: '→ 申請者', who_en: '→ applicant' },
 };
 
 
@@ -58,6 +59,9 @@ const DUMMY_VARS: Record<string, string> = {
   route_total_steps:     '5',
   current_step:          'マネージャー承認',
   current_step_approver: '佐藤 花子',
+  old_amount:            '48,200',
+  new_amount:            '48,560',
+  adjustment_reason:     '領収書③の再計算により修正',
 };
 
 const ACCENT_PRESETS = [
@@ -81,6 +85,10 @@ const INFO_FIELD_OPTIONS: Array<{ key: string; labelJa: string }> = [
   { key: 'actor_name',         labelJa: '操作者' },
   { key: 'step_name',          labelJa: 'ステップ' },
   { key: 'date',               labelJa: '日付' },
+  // Settlement amount adjustment (SETTLEMENT_AMOUNT_ADJUSTED)
+  { key: 'old_amount',         labelJa: '調整前金額' },
+  { key: 'new_amount',         labelJa: '調整後金額' },
+  { key: 'adjustment_reason',  labelJa: '調整理由' },
 ];
 
 function buildEmailFromEasy(p: EasyParams): string {

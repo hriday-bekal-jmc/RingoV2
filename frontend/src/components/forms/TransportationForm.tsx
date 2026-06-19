@@ -347,11 +347,27 @@ export default function TransportationForm({
   }, []);
 
   // ── 下書き保存 (save all as draft) ───────────────────────────────────────
+  const isCurrentEntryPartiallyFilled = useCallback((): boolean => {
+    // Check if user has touched currentEntry (routes filled, or any text field non-empty)
+    if (routeField) {
+      const routes = (currentEntry[routeField.name] as TransportRoute[] | undefined) ?? [];
+      if (routes.some((r) => r.from_station.trim() || r.to_station.trim())) return true;
+    }
+    for (const f of entryFields) {
+      if (f.type === 'text' || f.type === 'date') {
+        const val = (currentEntry[f.name] as string | undefined) ?? '';
+        if (val.trim()) return true;
+      }
+    }
+    return false;
+  }, [currentEntry, entryFields, routeField]);
+
   const handleDraftAll = useCallback(async () => {
     if (!onDraft) return;
     setIsDrafting(true);
-    try { await onDraft(buildPayload(entries)); } finally { setIsDrafting(false); }
-  }, [onDraft, entries, buildPayload]);
+    const ents = isCurrentEntryPartiallyFilled() ? [...entries, currentEntry] : entries;
+    try { await onDraft(buildPayload(ents)); } finally { setIsDrafting(false); }
+  }, [onDraft, entries, currentEntry, buildPayload, isCurrentEntryPartiallyFilled]);
 
   // ── 申請する (submit all) ─────────────────────────────────────────────────
   const handleSubmit = useCallback(async () => {

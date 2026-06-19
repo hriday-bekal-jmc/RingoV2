@@ -754,11 +754,11 @@ router.post('/:id/start-settlement', validateBody(startSettlementSchema), async 
         [req.params.id, JSON.stringify(normalizedSettlementData)],
       );
 
-      // Create / update settlements table row for accounting dashboard
+      // Create / update settlements table row for accounting dashboard.
+      // Resolve the total via the shared detector (handles each form's amount
+      // field — e.g. BUSINESS_TRIP's settlement_total — not a hardcoded key).
       const expectedAmount = parseFloat(String(originalFormData?.expected_amount ?? 0)) || 0;
-      // actual_amount may be computed from line_items; fall back to direct field
-      const rawActual = normalizedSettlementData?.actual_amount;
-      const actualAmount = typeof rawActual === 'number' ? rawActual : parseFloat(String(rawActual ?? 0)) || 0;
+      const actualAmount = detectSettlementAmount(settlementSchema ?? null, normalizedSettlementData);
       await client.query(
         `INSERT INTO settlements (application_id, expected_amount, actual_amount, settlement_data, status)
          VALUES ($1, $2, $3, $4::jsonb, 'PENDING_VERIFICATION')
@@ -816,6 +816,7 @@ router.post('/:id/start-settlement', validateBody(startSettlementSchema), async 
     });
 
     invalidateDashboardCache((result as any)._recipients ?? []);
+    notifyApplicationEvent('SETTLEMENT_SUBMITTED', String(req.params.id));
     res.json({ message: '精算申請を提出しました', application: result });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
@@ -981,9 +982,9 @@ router.post('/:id/resubmit-settlement', validateBody(submitSettlementSchema), as
            WHERE id = $1`,
           [req.params.id, JSON.stringify(normalizedSettlementData)],
         );
-        // Update settlements table row
-        const rawActual = normalizedSettlementData?.actual_amount;
-        const actualAmount = typeof rawActual === 'number' ? rawActual : parseFloat(String(rawActual ?? 0)) || 0;
+        // Update settlements table row — resolve total via shared detector
+        // (same fix as the direct branch; not a hardcoded actual_amount key).
+        const actualAmount = detectSettlementAmount(settlementSchema, normalizedSettlementData);
         await client.query(
           `UPDATE settlements
            SET actual_amount = $2, settlement_data = $3::jsonb, updated_at = CURRENT_TIMESTAMP
@@ -1033,6 +1034,7 @@ router.post('/:id/resubmit-settlement', validateBody(submitSettlementSchema), as
     });
 
     invalidateDashboardCache((result as any)._recipients ?? []);
+    notifyApplicationEvent('SETTLEMENT_SUBMITTED', String(req.params.id));
     res.json({ message: '精算を再提出しました', application: result });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
@@ -1194,9 +1196,11 @@ router.post('/', validateBody(adminSubmitSchema), async (req: Request, res: Resp
         payload:            { type: 'submit', applicationId: app.id },
       });
 
-      return { ...app, total_steps: resolvedSteps.length, skipped_steps: routePolicy.skipped_steps };
+      return { ...app, total_steps: resolvedSteps.length, skipped_steps: routePolicy.skipped_steps, _recipients: recipients };
     });
 
+    invalidateDashboardCache((result as any)._recipients ?? []);
+    notifyApplicationEvent('APP_SUBMITTED', String((result as any).id));
     res.status(201).json({ message: '申請が完了しました！', application: result });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
@@ -1475,6 +1479,7 @@ router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
       });
       return app;
     });
+    invalidateDashboardCache([req.user!.id]);
     res.json({ message: '下書きを削除しました' });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };

@@ -8,6 +8,7 @@ import {
   cacheUserState,
   invalidateUserStateCache,
   loadUserState,
+  requireAuth,
   type JwtPayload,
 } from '../middlewares/authMiddleware';
 import { authLimiter } from '../middlewares/rateLimit';
@@ -180,23 +181,21 @@ router.post('/login', authLimiter, async (req: Request, res: Response): Promise<
   }
 });
 
-// PATCH /auth/me — update own profile (name only)
-router.patch('/me', async (req: Request, res: Response): Promise<void> => {
-  const token = req.cookies?.token as string | undefined;
-  if (!token) { res.status(401).json({ error: 'Not authenticated' }); return; }
+// PATCH /auth/me — update own profile (name only).
+// requireAuth enforces token_version (revoked sessions rejected) + active user.
+router.patch('/me', requireAuth, async (req: Request, res: Response): Promise<void> => {
   const { full_name } = req.body as { full_name?: string };
   if (!full_name?.trim()) { res.status(400).json({ error: '名前を入力してください' }); return; }
   try {
-    const { default: jwt } = await import('jsonwebtoken');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as { id: string };
+    const userId = req.user!.id;
     const result = await query(
       `UPDATE users SET full_name = $1, updated_at = CURRENT_TIMESTAMP
        WHERE id = $2 AND is_active = TRUE
        RETURNING id, full_name, email, role, is_admin, department_id`,
-      [full_name.trim(), decoded.id],
+      [full_name.trim(), userId],
     );
     if (result.rows.length === 0) { res.status(404).json({ error: 'ユーザーが見つかりません' }); return; }
-    await invalidateUserStateCache(decoded.id);
+    await invalidateUserStateCache(userId);
     res.json({ user: result.rows[0] });
   } catch {
     res.status(500).json({ error: '更新に失敗しました' });
@@ -204,10 +203,7 @@ router.patch('/me', async (req: Request, res: Response): Promise<void> => {
 });
 
 // PATCH /auth/me/notifications — update own notification preferences
-router.patch('/me/notifications', async (req: Request, res: Response): Promise<void> => {
-  const token = req.cookies?.token as string | undefined;
-  if (!token) { res.status(401).json({ error: 'Not authenticated' }); return; }
-
+router.patch('/me/notifications', requireAuth, async (req: Request, res: Response): Promise<void> => {
   const { notify_email, notify_gchat, gchat_webhook_url } = req.body as {
     notify_email?: boolean;
     notify_gchat?: boolean;
@@ -220,9 +216,6 @@ router.patch('/me/notifications', async (req: Request, res: Response): Promise<v
   }
 
   try {
-    const { default: jwtLib } = await import('jsonwebtoken');
-    const decoded = jwtLib.verify(token, process.env.JWT_SECRET as string) as { id: string };
-
     const r = await query(
       `UPDATE users
        SET notify_email      = COALESCE($1, notify_email),
@@ -235,7 +228,7 @@ router.patch('/me/notifications', async (req: Request, res: Response): Promise<v
         notify_email ?? null,
         notify_gchat ?? null,
         gchat_webhook_url !== undefined ? (gchat_webhook_url || null) : null,
-        decoded.id,
+        req.user!.id,
       ],
     );
     if (r.rows.length === 0) { res.status(404).json({ error: 'ユーザーが見つかりません' }); return; }

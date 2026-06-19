@@ -103,7 +103,7 @@ router.post('/users', validateBody(createUserSchema), async (req: Request, res: 
     if (e.code === '23505') { res.status(409).json({ error: 'このメールアドレスは既に使用されています' }); return; }
     if (e.code === '23514') { res.status(400).json({ error: `無効なロール: ${role}` }); return; }
     console.error('[admin] user create failed:', err);
-    res.status(500).json({ error: `ユーザーの作成に失敗しました: ${e.message ?? '不明なエラー'}` });
+    res.status(500).json({ error: 'ユーザーの作成に失敗しました' });
   }
 });
 
@@ -148,13 +148,10 @@ router.patch('/users/:id', validateBody(updateUserSchema), async (req: Request, 
     const passwordChanged = !!password;
     const bumpTokenVersion = roleChanged || adminChanged || activationChanged || passwordChanged;
 
-    if (before.is_admin && (is_admin === false || is_active === false)) {
-      const otherAdminExists = await hasOtherActiveAdmin(String(id));
-      if (!otherAdminExists) {
-        res.status(409).json({ error: 'At least one active admin is required' });
-        return;
-      }
-    }
+    const demotingAdmin = before.is_admin && (is_admin === false || is_active === false);
+
+    // Hash password outside the tx (CPU-bound, keeps the tx short).
+    const passwordHash = password ? await argon2.hash(password) : null;
 
     const params: unknown[] = [
       full_name ?? before.full_name,
@@ -165,9 +162,8 @@ router.patch('/users/:id', validateBody(updateUserSchema), async (req: Request, 
       is_active ?? before.is_active,
     ];
     let q = `UPDATE users SET full_name=$1, email=$2, role=$3, is_admin=$4, department_id=$5, is_active=$6`;
-
-    if (password) {
-      params.push(await argon2.hash(password));
+    if (passwordHash) {
+      params.push(passwordHash);
       q += `, password_hash=$${params.length}`;
     }
     if (bumpTokenVersion) {
@@ -176,34 +172,47 @@ router.patch('/users/:id', validateBody(updateUserSchema), async (req: Request, 
     q += ` WHERE id=$${params.length + 1}`;
     params.push(id);
 
-    await query(q, params);
-
-    // Sync daily_allowance_rate when role changes — keeps cached rate current
-    if (roleChanged) {
-      await query(
-        `UPDATE users u
-         SET daily_allowance_rate = ar.daily_rate_yen
-         FROM allowance_rates ar
-         WHERE ar.role = $1 AND u.id = $2`,
-        [role ?? before.role, id],
-      );
+    // All mutations (last-admin guard + update + rate sync + SSE outbox) in ONE
+    // transaction. A xact advisory lock serializes admin-status changes so two
+    // concurrent demotions can't both pass the "≥1 admin" check → no lockout.
+    try {
+      await withTransaction(async (client) => {
+        if (demotingAdmin) {
+          await client.query(`SELECT pg_advisory_xact_lock(hashtext('ringo-admin-guard'))`);
+          const others = await client.query(
+            `SELECT 1 FROM users WHERE is_admin = TRUE AND is_active = TRUE AND id != $1 LIMIT 1`,
+            [id],
+          );
+          if (others.rowCount === 0) {
+            throw Object.assign(new Error('At least one active admin is required'), { status: 409 });
+          }
+        }
+        await client.query(q, params);
+        if (roleChanged) {
+          await client.query(
+            `UPDATE users u SET daily_allowance_rate = ar.daily_rate_yen
+             FROM allowance_rates ar WHERE ar.role = $1 AND u.id = $2`,
+            [role ?? before.role, id],
+          );
+        }
+        if (bumpTokenVersion) {
+          // Push to the affected user's SSE channel so the frontend re-fetches /me.
+          await insertOutboxEvent(client, {
+            event_type:         'user-state-changed',
+            entity_type:        'user',
+            entity_id:          String(id),
+            recipient_user_ids: [String(id)],
+            payload:            { reason: 'profile-updated' },
+          });
+        }
+      });
+    } catch (txErr) {
+      const te = txErr as { status?: number; message?: string };
+      if (te.status === 409) { res.status(409).json({ error: te.message }); return; }
+      throw txErr;
     }
 
     await invalidateUserStateCache(String(id));
-    if (bumpTokenVersion) {
-      await invalidateUserStateCache(String(id));
-      // Push event to the affected user's SSE channel via outbox — replaces 60s /me poll.
-      // Frontend AuthContext listens and re-fetches /me on receipt.
-      await withTransaction(async (client) => {
-        await insertOutboxEvent(client, {
-          event_type:         'user-state-changed',
-          entity_type:        'user',
-          entity_id:          String(id),
-          recipient_user_ids: [String(id)],
-          payload:            { reason: 'profile-updated' },
-        });
-      });
-    }
     void invalidateAdminReferenceCache('routes');
     res.json({ message: 'ユーザーを更新しました' });
   } catch (err: unknown) {

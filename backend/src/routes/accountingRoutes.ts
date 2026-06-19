@@ -278,8 +278,9 @@ router.patch('/settlements/:id', async (req: Request, res: Response): Promise<vo
         recipient_user_ids: recipients,
         payload:            { type: 'update', applicationId: row.application_id },
       });
-      return r.rows[0];
+      return { ...r.rows[0], recipients };
     });
+    invalidateDashboardCache((result as any).recipients ?? []);
     res.json({ settlement: result });
   } catch (err) {
     const e = err as { status?: number; message?: string };
@@ -439,7 +440,7 @@ router.post(
       }
 
       let fileUrl = '';
-      await withTransaction(async (client: pg.PoolClient) => {
+      const proofRecipients = await withTransaction(async (client: pg.PoolClient) => {
         // Find the settlement's application so we can link the file to it
         const settle = await client.query(
           `SELECT application_id FROM settlements WHERE id = $1`,
@@ -490,7 +491,9 @@ router.post(
           recipient_user_ids: recipients,
           payload:            { type: 'proof_uploaded', applicationId: proofRow.application_id },
         });
+        return recipients;
       });
+      invalidateDashboardCache(proofRecipients ?? []);
       res.json({ transfer_proof_url: fileUrl });
     } catch (err) {
       const e = err as { status?: number; message?: string };

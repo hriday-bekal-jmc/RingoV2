@@ -807,6 +807,7 @@ export default function Approvals() {
     setSystemView(v => !v);
     setSelectedApp(null);
     setProxyView(false);
+    setConfirmFilter(false);
     setSelectedProxyApp(null);
     exitSelectionMode();
   }

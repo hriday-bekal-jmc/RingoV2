@@ -46,6 +46,8 @@ function keysForApprovalAction(d: ApprovalPayload): KeyList {
     ['dashboard', 'summary'],
     ['dashboard', 'admin-overview'],
     ['pendingApprovals'],
+    ['pendingApprovalsFull'],           // dashboard "pending approvals" drawer
+    ['unsettledApps'],                  // dashboard "awaiting settlement" drawer
     ['approvalHistory'],
     ['admin', 'applications'],          // admin list view
     ['accountingSettlements'],          // accounting inbox flips when SETTLEMENT step closes / final approval
@@ -68,6 +70,7 @@ function keysForApplicationSubmitted(d: SubmitPayload): KeyList {
     ['dashboard', 'admin-overview'],
     ['myApplications'],
     ['pendingApprovals'],         // approver's inbox flips
+    ['pendingApprovalsFull'],     // dashboard "pending approvals" drawer
     ['admin', 'applications'],    // admin list view
   ];
   if (d.applicationId) {
@@ -99,6 +102,7 @@ function keysForSettlementAction(d: SettlementPayload): KeyList {
     ['dashboard', 'summary'],
     ['dashboard', 'admin-overview'],
     ['accountingSettlements'],
+    ['unsettledApps'],                  // dashboard "awaiting settlement" drawer
     ['admin', 'applications'],
   ];
   if (d.applicationId) {

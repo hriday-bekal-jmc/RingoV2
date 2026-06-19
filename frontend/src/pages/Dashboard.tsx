@@ -367,18 +367,20 @@ function RecentAppsList({ apps, lang, dateLocale, t }: {
     DRAFT: 'badge-draft', PENDING_APPROVAL: 'badge-pending', APPROVED: 'badge-approved',
     REJECTED: 'badge-rejected', RETURNED: 'badge-returned',
     PENDING_SETTLEMENT: 'badge-mustard', SETTLEMENT_APPROVED: 'badge-teal', COMPLETED: 'badge-approved',
+    CANCELLED: 'badge-draft',
   };
   const STATUS_LABEL_MAP = (s: string): string => ({
     DRAFT: t('status_draft'), PENDING_APPROVAL: t('status_pending'), APPROVED: t('status_approved'),
     REJECTED: t('status_rejected'), RETURNED: t('status_returned'),
     PENDING_SETTLEMENT: t('status_pending_settle'), SETTLEMENT_APPROVED: t('status_settle_approved'),
-    COMPLETED: t('status_completed'),
+    COMPLETED: t('status_completed'), CANCELLED: t('status_cancelled'),
   }[s] ?? s);
 
   const STATUS_DOT: Record<string, string> = {
     DRAFT: 'bg-warmgray-400', PENDING_APPROVAL: 'bg-amber-400',
     PENDING_SETTLEMENT: 'bg-teal-400', APPROVED: 'bg-emerald-400',
     COMPLETED: 'bg-emerald-400', REJECTED: 'bg-red-400', RETURNED: 'bg-amber-500',
+    CANCELLED: 'bg-warmgray-400',
   };
 
   const phaseBadge = (app: RecentApp): { text: string; cls: string } | null => {
@@ -546,7 +548,16 @@ function SearchDrawer({ onClose }: { onClose: () => void }) {
     APPROVED: 'badge-approved', REJECTED: 'badge-rejected',
     RETURNED: 'badge-returned', PENDING_SETTLEMENT: 'badge-mustard',
     SETTLEMENT_APPROVED: 'badge-teal', COMPLETED: 'badge-approved',
+    CANCELLED: 'badge-draft',
   };
+
+  const STATUS_LABEL: Record<string, string> = lang === 'en'
+    ? { DRAFT: 'Draft', PENDING_APPROVAL: 'Pending Approval', APPROVED: 'Approved',
+        REJECTED: 'Rejected', RETURNED: 'Returned', PENDING_SETTLEMENT: 'Pending Settlement',
+        SETTLEMENT_APPROVED: 'Settlement Approved', COMPLETED: 'Completed', CANCELLED: 'Cancelled' }
+    : { DRAFT: '下書き', PENDING_APPROVAL: '承認待ち', APPROVED: '承認済み',
+        REJECTED: '却下', RETURNED: '差し戻し', PENDING_SETTLEMENT: '未精算',
+        SETTLEMENT_APPROVED: '精算承認済み', COMPLETED: '完了', CANCELLED: 'キャンセル' };
 
   // Filter chips — clicking with no search text navigates directly to filtered history
   const FILTER_CHIPS = lang === 'en'
@@ -645,7 +656,7 @@ function SearchDrawer({ onClose }: { onClose: () => void }) {
                         <p className="text-sm font-semibold text-warmgray-800 truncate">
                           {templateLabel(app.template_code, lang, app.template_name, app.template_title_en)}
                         </p>
-                        <span className={STATUS_CLS[app.status] ?? 'badge-draft'}>{app.status.replace(/_/g, ' ')}</span>
+                        <span className={STATUS_CLS[app.status] ?? 'badge-draft'}>{STATUS_LABEL[app.status] ?? app.status.replace(/_/g, ' ')}</span>
                       </div>
                       {app.row_preview?.text && (
                         <p className="text-[11px] text-warmgray-500 truncate mt-0.5">{app.row_preview.text.value}</p>
