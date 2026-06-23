@@ -68,15 +68,6 @@ const TILE_ACCENT: Record<string, { bg: string; icon: string }> = {
   'Search':        { bg: 'from-ringo-400 to-rose-500',     icon: '🔍' },
   '申請履歴':      { bg: 'from-slate-400 to-slate-500',    icon: '🗂️' },
   'Application History': { bg: 'from-slate-400 to-slate-500', icon: '🗂️' },
-  // status group
-  '精算承認済':    { bg: 'from-teal-400 to-emerald-500',   icon: '✅' },
-  'Settlement OK': { bg: 'from-teal-400 to-emerald-500',   icon: '✅' },
-  '完了':          { bg: 'from-emerald-400 to-green-500',  icon: '🎉' },
-  'Completed':     { bg: 'from-emerald-400 to-green-500',  icon: '🎉' },
-  '却下':          { bg: 'from-warmgray-400 to-warmgray-500', icon: '🚫' },
-  'Rejected':      { bg: 'from-warmgray-400 to-warmgray-500', icon: '🚫' },
-  'すべて':        { bg: 'from-slate-400 to-slate-500',    icon: '📚' },
-  'All':           { bg: 'from-slate-400 to-slate-500',    icon: '📚' },
   // admin group
   '全体承認待ち':  { bg: 'from-amber-400 to-orange-400',   icon: '⏳' },
   'All Pending':   { bg: 'from-amber-400 to-orange-400',   icon: '⏳' },
@@ -737,9 +728,6 @@ export default function Dashboard() {
   const returnedCount         = Math.max(0, (counts?.RETURNED ?? 0) - settlementReturned); // ringi-only
   const approvedCount         = (counts?.APPROVED ?? 0) + settlementReturned;  // awaiting settlement + returns to fix
   const pendingCount          = counts?.PENDING_APPROVAL ?? 0;
-  const settlementApprovedCount = counts?.SETTLEMENT_APPROVED ?? 0;
-  const completedCount        = counts?.COMPLETED ?? 0;
-  const rejectedCount         = counts?.REJECTED ?? 0;
   const recentApps            = summary?.recent_apps ?? [];
   const firstName = user?.full_name?.split(' ')[0] ?? 'ゲスト';
   const hour      = new Date().getHours();
@@ -982,12 +970,6 @@ export default function Dashboard() {
                       {perms.canApprove && (
                         <ActionTile label={lang === 'en' ? 'Approval History' : '承認履歴'} to="/approval-history" />
                       )}
-                    </Section>
-                    <Section icon="🏁" title={lang === 'en' ? 'Status' : '状態'}>
-                      <ActionTile label={lang === 'en' ? 'Settlement OK' : '精算承認済'} count={settlementApprovedCount} countTone="muted" to="/history?filter=SETTLEMENT_APPROVED" />
-                      <ActionTile label={lang === 'en' ? 'Completed' : '完了'} count={completedCount} countTone="muted" to="/history?filter=COMPLETED" />
-                      <ActionTile label={lang === 'en' ? 'Rejected' : '却下'} count={rejectedCount} countTone="muted" to="/history?filter=REJECTED" />
-                      <ActionTile label={lang === 'en' ? 'All' : 'すべて'} to="/history" />
                     </Section>
                   </div>
 

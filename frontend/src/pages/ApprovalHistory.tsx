@@ -173,7 +173,7 @@ export default function ApprovalHistory() {
       <div className="max-w-[1800px] mx-auto space-y-6">
 
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+        <div className="animate-fade-up flex flex-col sm:flex-row sm:items-end justify-between gap-3">
           <div>
             <p className="section-title mb-0">{t('nav_approval_history')}</p>
             <h2 className="text-xl sm:text-2xl font-bold text-warmgray-800 mt-1 flex flex-wrap items-center gap-2">
@@ -207,7 +207,7 @@ export default function ApprovalHistory() {
         </div>
 
         {/* Filters — relative z-10 so calendar/select dropdowns escape the results card's stacking context */}
-        <div className="card space-y-4 relative z-10">
+        <div className="animate-fade-up card space-y-4 relative z-10" style={{ animationDelay: '60ms' }}>
           <div className="flex items-center justify-between">
             <p className="section-title mb-0">{lang === 'en' ? 'Filters' : '絞り込み'}</p>
             {hasFilters && (
@@ -349,7 +349,7 @@ export default function ApprovalHistory() {
         </div>
 
         {/* Results */}
-        <div className="card">
+        <div className="animate-fade-up card" style={{ animationDelay: '120ms' }}>
           <div className="flex items-center justify-between mb-4">
             <p className="section-title mb-0">
               {lang === 'en'
