@@ -965,9 +965,9 @@ export default function Dashboard() {
                     <Section icon="📝" title={lang === 'en' ? 'Submit' : '申請する'}>
                       <ActionTile label={lang === 'en' ? 'New' : '作成'} onClick={() => navigate('/applications/new')} />
                       <ActionTile label={lang === 'en' ? 'Drafts' : '下書き'} count={draftCount} to="/history?filter=DRAFT" />
-                      <ActionTile label={lang === 'en' ? 'Returned' : '差し戻し'} count={returnedCount} to="/history?filter=RETURNED" />
                       <ActionTile label={lang === 'en' ? 'In Progress' : '申請中'} count={pendingCount} to="/history?filter=PENDING_APPROVAL" />
                       <ActionTile label={lang === 'en' ? 'Unsettled' : '未精算'} count={approvedCount} onClick={() => setShowUnsettled(true)} />
+                      <ActionTile label={lang === 'en' ? 'Returned' : '差し戻し'} count={returnedCount} to="/history?filter=RETURNED" />
                     </Section>
                     {perms.canApprove && (
                       <Section icon="✅" title={lang === 'en' ? 'Approve' : '承認する'}>

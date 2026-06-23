@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useScrollEnd } from '../hooks/useScrollEnd';
@@ -31,7 +31,6 @@ interface Settlement {
   version: number;
   currency: string;
   transfer_date: string | null;
-  transfer_proof_url: string | null;
   accounting_note: string | null;
   processed_at: string | null;
   created_at: string;
@@ -113,7 +112,7 @@ function DateEditor({
         />
       </div>
       <div className="space-y-1.5">
-        <label className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_col_proof')}</label>
+        <label className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400">{t('accounting_note_ph')}</label>
         <input
           type="text"
           value={note}
@@ -325,77 +324,15 @@ function AmountAdjuster({
   );
 }
 
-// ── Transfer proof uploader ───────────────────────────────────────────────────
-function ProofUploader({
-  settlementId,
-  proofUrl,
-  t,
-}: {
-  settlementId: string;
-  proofUrl: string | null;
-  t: (k: any) => string;
-}) {
-  const queryClient = useQueryClient();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
 
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      await apiClient.post(`/accounting/settlements/${settlementId}/transfer-proof`, fd);
-      queryClient.invalidateQueries({ queryKey: ['accountingSettlements'] });
-    } catch {
-      alert('アップロードに失敗しました');
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
-
-  // Same-origin URLs (vite proxy in dev, reverse proxy in prod)
-  const fullUrl = proofUrl ?? null;
-
-  return (
-    <div className="flex items-center gap-2">
-      {fullUrl ? (
-        <>
-          <span className="text-[10px] font-semibold text-teal-600 bg-teal-50 border border-teal-200/60 px-1.5 py-0.5 rounded-full">
-            {t('accounting_proof_uploaded')}
-          </span>
-          <a
-            href={fullUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-ringo-500 hover:text-ringo-600 font-semibold"
-          >
-            {t('accounting_proof_view')}
-          </a>
-        </>
-      ) : null}
-      <label className={`text-xs cursor-pointer font-semibold transition-colors ${
-        uploading ? 'text-warmgray-400' : 'text-warmgray-400 hover:text-ringo-500'
-      }`}>
-        <input ref={fileInputRef} type="file" className="sr-only" onChange={handleFile} disabled={uploading} />
-        {uploading ? t('accounting_uploading') : (fullUrl ? '↺ 更新' : t('accounting_upload_proof'))}
-      </label>
-    </div>
-  );
-}
-
-// ── Settlement close button (Phase 2 — gated on transfer_date + proof) ────────
+// ── Settlement close button (Phase 2 — gated on transfer_date) ────────────────
 // Called only when app_status = SETTLEMENT_APPROVED (workflow fully done).
 function CloseButton({
   settlementId,
   transferDate,
-  proofUrl,
 }: {
   settlementId: string;
   transferDate: string | null;
-  proofUrl: string | null;
 }) {
   const queryClient = useQueryClient();
   const mutation = useMutation({
@@ -407,9 +344,8 @@ function CloseButton({
     },
   });
 
-  const missingDate  = !transferDate;
-  const missingProof = !proofUrl;
-  const blocked = missingDate || missingProof;
+  const missingDate = !transferDate;
+  const blocked = missingDate;
 
   if (mutation.isSuccess) {
     return (
@@ -424,8 +360,7 @@ function CloseButton({
 
   if (blocked) {
     const hints: string[] = [];
-    if (missingDate)  hints.push('振込日');
-    if (missingProof) hints.push('振込証明');
+    if (missingDate) hints.push('振込日');
     return (
       <div className="group relative inline-block">
         <button
@@ -984,21 +919,14 @@ export default function Accounting() {
                           </div>
                         </td>
 
-                        {/* Transfer info — date + proof stacked */}
+                        {/* Transfer date */}
                         <td data-label="振込情報">
-                          <div className="space-y-1.5">
-                            <DateEditor
-                              settlementId={s.settlement_id}
-                              currentDate={s.transfer_date}
-                              currentNote={s.accounting_note}
-                              t={t}
-                            />
-                            <ProofUploader
-                              settlementId={s.settlement_id}
-                              proofUrl={s.transfer_proof_url}
-                              t={t}
-                            />
-                          </div>
+                          <DateEditor
+                            settlementId={s.settlement_id}
+                            currentDate={s.transfer_date}
+                            currentNote={s.accounting_note}
+                            t={t}
+                          />
                         </td>
 
                         <td data-label={t('accounting_col_status')}>
@@ -1012,7 +940,6 @@ export default function Accounting() {
                             <CloseButton
                               settlementId={s.settlement_id}
                               transferDate={s.transfer_date}
-                              proofUrl={s.transfer_proof_url}
                             />
                           ) : s.app_status === 'PENDING_SETTLEMENT' ? (
                             <div className="flex flex-col gap-0.5 md:items-start items-end">

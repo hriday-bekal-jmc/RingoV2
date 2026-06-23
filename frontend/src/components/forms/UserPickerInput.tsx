@@ -70,6 +70,17 @@ export default function UserPickerInput({ field, setValue, currentValue, error, 
     catch { return []; }
   });
 
+  // Resync when parent pushes new currentValue via reset (e.g. copy from ringi)
+  const lastSyncedValueRef = useRef(currentValue);
+  useEffect(() => {
+    if (currentValue === lastSyncedValueRef.current) return;
+    lastSyncedValueRef.current = currentValue;
+    try {
+      const incoming = currentValue ? (JSON.parse(currentValue) as PickedUser[]) : [];
+      setPicked(incoming);
+    } catch { /* ignore malformed */ }
+  }, [currentValue]);
+
   // Default to logged-in user's own department
   const myDeptId   = authUser?.department_id ?? null;
   const myDeptName = authUser?.department_name;

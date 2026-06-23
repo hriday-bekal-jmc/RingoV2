@@ -1,5 +1,6 @@
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { motion } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import { useSidebar } from '../../context/SidebarContext';
 import { useLang } from '../../context/LanguageContext';
@@ -160,25 +161,42 @@ export default function Sidebar() {
                   onFocus={() => preloadRoute(item.to)}
                   className={({ isActive }) =>
                     `relative group flex items-center gap-3 rounded-xl text-sm font-medium
-                     transition-all duration-150
+                     transition-colors duration-150
                      ${collapsed ? 'px-0 py-2.5 justify-center' : 'px-3 py-2.5'}
-                     ${isActive
-                       ? 'bg-white/20 text-white shadow-sm'
-                       : 'text-white/80 hover:bg-white/15 hover:text-white'
-                     }`
+                     ${isActive ? 'text-white' : 'text-white/80 hover:text-white'}`
                   }
                 >
                   {({ isActive }) => (
                     <>
-                      {isActive && !collapsed && (
-                        <span className="absolute left-0 w-0.5 h-6 bg-gradient-to-b from-white/90 to-white/40 rounded-r-full" />
+                      {/* Sliding pill bg — no AnimatePresence; layoutId teleports itself */}
+                      {isActive && (
+                        <motion.span
+                          layoutId="desktop-nav-pill"
+                          className="absolute inset-0 rounded-xl bg-white/20 shadow-sm"
+                          transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+                          style={{ zIndex: 0 }}
+                        />
                       )}
-                      <span className={`transition-colors shrink-0 ${isActive ? 'text-white' : 'text-white/70 group-hover:text-white'}`}>
+                      {/* Left accent bar */}
+                      {isActive && !collapsed && (
+                        <motion.span
+                          layoutId="desktop-nav-accent"
+                          className="absolute left-0 w-0.5 h-6 bg-gradient-to-b from-white/90 to-white/40 rounded-r-full"
+                          transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+                          style={{ zIndex: 1 }}
+                        />
+                      )}
+                      <span className={`relative z-10 transition-colors shrink-0 ${isActive ? 'text-white' : 'text-white/70 group-hover:text-white'}`}>
                         {ICONS[item.to] ?? <span className="w-[18px] h-[18px] text-xs flex items-center justify-center">{item.icon}</span>}
+                        {item.to === '/approvals' && pendingCount > 0 && collapsed && (
+                          <span className="absolute -top-1 -right-1.5 flex items-center justify-center min-w-[14px] h-[14px] px-1 rounded-full bg-ringo-500 text-white text-[8px] font-bold shadow-sm leading-none">
+                            {pendingCount > 99 ? '99+' : pendingCount}
+                          </span>
+                        )}
                       </span>
-                      {!collapsed && <span className="flex-1 truncate">{label}</span>}
-                      {item.to === '/approvals' && pendingCount > 0 && (
-                        <span className={`flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-gradient-to-r from-ringo-500 to-ringo-400 text-white text-[10px] font-bold shadow-sm ${collapsed ? 'absolute -top-0.5 -right-0.5 scale-75' : ''}`}>
+                      {!collapsed && <span className="relative z-10 flex-1 truncate">{label}</span>}
+                      {item.to === '/approvals' && pendingCount > 0 && !collapsed && (
+                        <span className="relative z-10 flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-gradient-to-r from-ringo-500 to-ringo-400 text-white text-[10px] font-bold shadow-sm">
                           {pendingCount > 99 ? '99+' : pendingCount}
                         </span>
                       )}
@@ -269,37 +287,46 @@ export default function Sidebar() {
                 end={item.to === '/dashboard'}
                 onTouchStart={() => preloadRoute(item.to)}
                 onMouseEnter={() => preloadRoute(item.to)}
-                className="select-none active:opacity-60 transition-opacity duration-100"
+                className="relative select-none active:scale-95 transition-transform duration-100"
               >
-                {/*
-                  Capsule: padding is CONSTANT (no layout animation).
-                  Only background + shadow animate (compositor-only, no reflow).
-                  Label uses max-width with ease-out — no spring overshoot = no jitter.
-                */}
+                {/* Sliding background — shared layoutId glides between active tabs */}
+                {isActive && (
+                  <motion.span
+                    layoutId="mobile-dock-pill"
+                    className="absolute inset-0 rounded-full"
+                    style={{
+                      background: 'var(--ringo-gradient)',
+                      boxShadow: '0 2px 14px rgba(154,46,34,0.40)',
+                    }}
+                    transition={{
+                      type: 'spring',
+                      stiffness: 380,
+                      damping: 28,
+                      mass: 0.9,
+                    }}
+                  />
+                )}
+
                 <span
-                  className="flex items-center overflow-hidden"
+                  className="relative flex items-center overflow-hidden"
                   style={{
                     gap: '5px',
                     padding: '8px 12px',
-                    borderRadius: '9999px',
-                    background: isActive ? 'var(--ringo-gradient)' : 'transparent',
-                    boxShadow: isActive ? '0 2px 10px rgba(154,46,34,0.38)' : 'none',
-                    transition: 'background 260ms ease, box-shadow 260ms ease, color 200ms ease',
                     color: isActive ? '#fff' : 'rgba(80,28,20,0.48)',
+                    transition: 'color 180ms ease',
                   }}
                 >
-                  {/* Icon — only scale animates, no layout change */}
+                  {/* Icon */}
                   <span className="relative flex items-center justify-center shrink-0">
-                    <span style={{
-                      display: 'flex',
-                      color: 'inherit',
-                      transform: isActive ? 'scale(1.06)' : 'scale(1)',
-                      transition: 'transform 220ms ease-out',
-                    }}>
+                    <motion.span
+                      animate={{ scale: isActive ? 1.08 : 1 }}
+                      transition={{ type: 'spring', stiffness: 500, damping: 28 }}
+                      style={{ display: 'flex', color: 'inherit' }}
+                    >
                       {ICONS[item.to] ?? (
                         <span className="w-[18px] h-[18px] text-xs flex items-center justify-center">{item.icon}</span>
                       )}
-                    </span>
+                    </motion.span>
                     {/* Badge */}
                     {item.to === '/approvals' && pendingCount > 0 && (
                       <span
@@ -320,25 +347,21 @@ export default function Sidebar() {
                     )}
                   </span>
 
-                  {/*
-                    Label: max-width 0→80px with ease-out (no overshoot).
-                    opacity fades slightly behind width so text doesn't clip visibly.
-                    willChange hints compositor to pre-promote layer.
-                  */}
-                  <span
-                    className="font-semibold leading-none tracking-tight whitespace-nowrap"
-                    style={{
-                      fontSize: '11px',
-                      color: 'inherit',
-                      maxWidth: isActive ? '80px' : '0px',
+                  {/* Label — expands/collapses with spring */}
+                  <motion.span
+                    className="font-semibold leading-none tracking-tight whitespace-nowrap overflow-hidden"
+                    animate={{
+                      maxWidth: isActive ? 80 : 0,
                       opacity: isActive ? 1 : 0,
-                      overflow: 'hidden',
-                      willChange: 'max-width, opacity',
-                      transition: 'max-width 260ms ease-out, opacity 160ms ease',
                     }}
+                    transition={{
+                      maxWidth: { type: 'spring', stiffness: 380, damping: 28, mass: 0.9 },
+                      opacity: { duration: 0.15, ease: 'easeOut' },
+                    }}
+                    style={{ fontSize: '11px', color: 'inherit', display: 'block' }}
                   >
                     {label}
-                  </span>
+                  </motion.span>
                 </span>
               </NavLink>
             );

@@ -113,6 +113,8 @@ interface DynamicFormProps {
   submitLabel?: string;
   /** Values injected from outside (e.g. _daily_rate from applicant role) — always synced, even after mount */
   externalValues?: Record<string, unknown>;
+  /** One-shot copy from ringi — triggers a form reset merging over schema defaults */
+  initialValues?: Record<string, unknown>;
 }
 
 export default function DynamicForm({
@@ -124,6 +126,7 @@ export default function DynamicForm({
   defaultValues,
   submitLabel,
   externalValues,
+  initialValues,
 }: DynamicFormProps) {
   const { t, lang } = useLang();
   const [isDrafting, setIsDrafting] = useState(false);
@@ -146,14 +149,23 @@ export default function DynamicForm({
     return { ...schema, ...defaultValues };
   }, []); // intentionally static — only used as initial form values
 
+  const resolvedDefaultsRef = useRef(resolvedDefaults);
+
   const {
-    register, handleSubmit, getValues, setValue, watch, control,
+    register, handleSubmit, getValues, setValue, watch, control, reset,
     formState: { errors, isSubmitting },
   } = useForm<Record<string, unknown>>({
     defaultValues: resolvedDefaults,
     mode: 'onSubmit',
     reValidateMode: 'onSubmit',
   });
+
+  // When parent pushes initialValues (e.g. copied from ringi), merge over defaults
+  useEffect(() => {
+    if (!initialValues || Object.keys(initialValues).length === 0) return;
+    reset({ ...resolvedDefaultsRef.current, ...initialValues }, { keepDefaultValues: false });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialValues]);
 
   // Sync externalValues (e.g. _daily_rate from applicant's role) whenever they change,
   // then immediately recompute any formula fields whose deps include those injected keys.
@@ -199,10 +211,22 @@ export default function DynamicForm({
     return allLeaves.filter((f) => {
       if (!f.conditional_on) return true;
       const got = sourceMap[f.conditional_on.field];
+      const eq = String(f.conditional_on.equals ?? '');
+      // sentinel: __filled__ / __empty__
+      if (eq === '__filled__') {
+        if (got == null || got === '' || got === false) return false;
+        if (Array.isArray(got)) return (got as unknown[]).length > 0;
+        return true;
+      }
+      if (eq === '__empty__') {
+        if (got == null || got === '' || got === false) return true;
+        if (Array.isArray(got)) return (got as unknown[]).length === 0;
+        return false;
+      }
       if (got == null) return false;
-      const eq = f.conditional_on.equals;
-      const eqArr = Array.isArray(eq) ? eq.map(String) : [String(eq)];
-      const gotArr = Array.isArray(got) ? got.map(String) : [String(got)];
+      const raw = f.conditional_on.equals;
+      const eqArr = Array.isArray(raw) ? (raw as Array<string | number | boolean>).map(String) : [eq];
+      const gotArr = Array.isArray(got) ? (got as unknown[]).map(String) : [String(got)];
       return gotArr.some((v) => eqArr.includes(v));
     });
   }, [allLeaves, watchedConds, conditionalSources]);

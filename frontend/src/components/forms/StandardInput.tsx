@@ -16,6 +16,7 @@ import AiFileReaderInput from './AiFileReaderInput';
 import UserPickerInput from './UserPickerInput';
 import { TRANSPORT_MODE_OPTIONS } from './TransportationForm';
 import { evalFormula, formulaDeps } from '../../utils/formulaEval';
+import { fieldColSpanClass } from './fieldLayout';
 import { useLang } from '../../context/LanguageContext';
 
 // File URLs are same-origin (vite proxy /api in dev, reverse proxy in prod)
@@ -763,9 +764,9 @@ function RouteEntryInput({
   const { lang } = useLang();
   const rawVal = watch?.(field.name);
 
-  const [routes, setRoutes] = useState<RouteRow[]>(() => {
-    if (Array.isArray(rawVal)) {
-      return (rawVal as RouteRow[]).map((r) => ({
+  const parseRoutes = (val: unknown): RouteRow[] => {
+    if (Array.isArray(val)) {
+      return (val as RouteRow[]).map((r) => ({
         id:           r.id ?? crypto.randomUUID(),
         mode:         r.mode,
         mode_custom:  r.mode_custom,
@@ -776,11 +777,24 @@ function RouteEntryInput({
       }));
     }
     return [{ id: crypto.randomUUID(), from_station: '', to_station: '', fare: 0 }];
-  });
+  };
 
+  const [routes, setRoutes] = useState<RouteRow[]>(() => parseRoutes(rawVal));
+
+  const lastRouteRef = useRef<string>('');
   useEffect(() => {
+    const serialized = JSON.stringify(routes);
+    lastRouteRef.current = serialized;
     setValue?.(field.name, routes, { shouldDirty: true, shouldTouch: false, shouldValidate: false });
   }, [routes, field.name, setValue]);
+
+  // Resync on external reset (e.g. copy from ringi)
+  useEffect(() => {
+    if (!Array.isArray(rawVal) || rawVal.length === 0) return;
+    if (JSON.stringify(rawVal) === lastRouteRef.current) return;
+    setRoutes(parseRoutes(rawVal));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawVal]);
 
   const update  = (i: number, patch: Partial<RouteRow>) =>
     setRoutes((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)));
@@ -948,13 +962,29 @@ function RepeatGroupInput({
 
   const storedRows = useMemo(() => cleanRepeatRows(rows, childFields), [rows, childFields]);
 
+  // Track the last value we wrote to RHF so we can ignore our own writes
+  // when detecting external resets (e.g. copy-from-ringi).
+  const lastWrittenRef = useRef<string>('');
+
   useEffect(() => {
+    const serialized = JSON.stringify(storedRows);
+    lastWrittenRef.current = serialized;
     setValue?.(field.name, storedRows, {
       shouldDirty: true,
       shouldTouch: false,
       shouldValidate: false,
     });
   }, [field.name, setValue, storedRows]);
+
+  // Resync local rows when an external reset pushes new data into RHF
+  // (e.g. copy-from-ringi). Skip if the incoming value is what we just wrote.
+  const watchedExternal = watch?.(field.name);
+  useEffect(() => {
+    if (!Array.isArray(watchedExternal) || watchedExternal.length === 0) return;
+    if (JSON.stringify(watchedExternal) === lastWrittenRef.current) return;
+    setRows(normalizeRepeatRows(watchedExternal, childFields, initialVisibleRows));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedExternal]);
 
   const updateCell = (rowIndex: number, childName: string, value: unknown) => {
     setRows((prev) => {
@@ -1036,11 +1066,11 @@ function RepeatGroupInput({
                 {lang === 'en' ? 'Remove' : '削除'}
               </button>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-x-4 gap-y-3">
               {childFields.map((child) => (
                 <div
                   key={child.name}
-                  className={`min-w-0 ${child.type === 'textarea' || child.type === 'file' || child.type === 'ai_file_reader' ? 'md:col-span-2' : ''}`}
+                  className={`min-w-0 ${fieldColSpanClass(child)}`}
                 >
                   <RepeatCell
                     groupName={field.name}

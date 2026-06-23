@@ -13,6 +13,7 @@ import RouteTimeline from '../components/common/RouteTimeline';
 import RepeatGroupDisplay from '../components/forms/RepeatGroupDisplay';
 import { FieldValueContent, type DisplayField } from '../components/forms/FieldValueDisplay';
 import { fieldColSpanClass, flattenFieldGroups } from '../components/forms/fieldLayout';
+import { copyRingiToSettlement } from '../utils/copyRingiToSettlement';
 
 interface FormField {
   name: string;
@@ -205,6 +206,8 @@ export default function Settlement() {
   const { toast: settleToast, show: showToast, dismiss: dismissToast } = useToast();
 
   const [selectedRouteId, setSelectedRouteId] = useState<string>('');
+  const [copiedValues, setCopiedValues] = useState<Record<string, unknown> | null>(null);
+  const [hasCopied, setHasCopied] = useState(false);
 
   const { data: app, isLoading, isError } = useQuery<AppDetail>({
     queryKey: ['application', id],
@@ -373,7 +376,51 @@ export default function Settlement() {
 
         {/* Settlement form */}
         <div className="animate-fade-up">
-          <p className="section-title mb-3">{t('settle_form_title')}</p>
+          <div className="flex items-center justify-between mb-3">
+            <p className="section-title mb-0">{t('settle_form_title')}</p>
+            {app.settlement_schema && (
+              <button
+                type="button"
+                disabled={hasCopied}
+                onClick={() => {
+                  const { values, copiedCount } = copyRingiToSettlement(
+                    app.form_data,
+                    app.schema_definition.fields,
+                    app.settlement_schema!.fields,
+                  );
+                  setCopiedValues(values);
+                  setHasCopied(true);
+                  showToast(
+                    lang === 'en'
+                      ? `${copiedCount} field${copiedCount !== 1 ? 's' : ''} copied from application`
+                      : `申請内容から${copiedCount}項目をコピーしました`,
+                    'info',
+                  );
+                }}
+                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl border transition-all duration-150 ${
+                  hasCopied
+                    ? 'bg-teal-50 border-teal-200 text-teal-600 cursor-default'
+                    : 'bg-white/70 border-warmgray-200 text-warmgray-600 hover:border-teal-300 hover:text-teal-600 hover:bg-teal-50'
+                }`}
+              >
+                {hasCopied ? (
+                  <>
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    {lang === 'en' ? 'Copied' : 'コピー済'}
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    {lang === 'en' ? 'Copy from application' : '申請内容をコピー'}
+                  </>
+                )}
+              </button>
+            )}
+          </div>
           {mutation.isError && (
             <div className="mb-4 px-4 py-3 rounded-xl bg-red-50/80 border border-red-200/60 text-red-600 text-sm">
               {(mutation.error as any)?.response?.data?.error ?? t('toast_submit_error')}
@@ -384,6 +431,7 @@ export default function Settlement() {
             <DynamicForm
               template={pseudoTemplate as any}
               isSettlementPhase={true}
+              initialValues={copiedValues ?? undefined}
               externalValues={{ _daily_rate: authUser?.daily_allowance_rate ?? 3000 }}
               onSubmit={async (data) => {
                 const settlementData = (data?.form_data ?? data) as Record<string, unknown>;

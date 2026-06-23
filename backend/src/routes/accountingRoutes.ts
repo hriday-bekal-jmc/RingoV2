@@ -1,6 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import fs from 'fs';
-import fsPromises from 'fs/promises';
 import path from 'path';
 import { z } from 'zod';
 import { query, withTransaction } from '../config/db';
@@ -14,7 +13,6 @@ import { decodeCursor, encodeCursor, parsePageLimit } from '../services/paginati
 import { pickAmount, resolveFinalAmount, type FormSchema } from '../services/settlementAmount';
 import { notifyApplicationEvent } from '../services/notificationService';
 import type pg from 'pg';
-import multer from 'multer';
 
 // ── Request schemas ───────────────────────────────────────────────────────────
 const PatchSettlementSchema = z.object({
@@ -63,40 +61,7 @@ async function requireAccounting(req: Request, res: Response, next: NextFunction
 }
 router.use(requireAccounting);
 
-// ── File upload (transfer proof) ──────────────────────────────────────────────
-// Memory storage so we can either:
-//   (a) push to Google Drive when service account is configured, or
-//   (b) write to local FS as a fallback.
-// Either way the file is served via the auth-gated /api/files/:id route, so
-// no public /uploads mount is needed.
-import { isDriveEnabled, uploadToDrive } from '../services/driveService';
 
-const PROOF_UPLOADS_DIR = path.join(__dirname, '../../uploads');
-fs.mkdirSync(PROOF_UPLOADS_DIR, { recursive: true });
-
-const proofUpload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, PROOF_UPLOADS_DIR),
-    filename:    (_req, file, cb) => cb(null, safeProofName(file.originalname)),
-  }),
-  limits: { fileSize: 20 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const allowed = [
-      'image/jpeg', 'image/png', 'image/webp',
-      'application/pdf',
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    ];
-    if (allowed.includes(file.mimetype)) cb(null, true);
-    else cb(new Error(`対応していないファイル形式: ${file.mimetype}`));
-  },
-});
-
-function safeProofName(original: string): string {
-  const ts = Date.now();
-  const safe = original.replace(/[^a-zA-Z0-9._-]/g, '_');
-  return `proof_${ts}_${safe}`;
-}
 
 // ── GET /accounting/settlements  (paginated, server-side filter)
 // ?filter=ALL|PENDING|DONE  &date_from=YYYY-MM-DD  &date_to=YYYY-MM-DD  &limit=25
@@ -119,7 +84,6 @@ router.get('/settlements', async (req: Request, res: Response): Promise<void> =>
          s.currency,
          s.status        AS settlement_status,
          s.transfer_date,
-         s.transfer_proof_url,
          s.accounting_note,
          s.adjusted_amount,
          s.adjustment_reason,
@@ -403,110 +367,9 @@ router.patch('/settlements/:id/amount', async (req: Request, res: Response): Pro
   }
 });
 
-// ── POST /accounting/settlements/:id/transfer-proof ───────────────────────────
-router.post(
-  '/settlements/:id/transfer-proof',
-  proofUpload.single('file'),
-  async (req: Request, res: Response): Promise<void> => {
-    const file = req.file;
-    if (!file) {
-      res.status(400).json({ error: 'ファイルが必要です' });
-      return;
-    }
-
-    try {
-      // Store file: Drive when configured, else local FS. Either way, the
-      // resulting URL is auth-gated /api/files/<id> so admins + the applicant
-      // can later view it from the AdminAppDetailModal or settlement page.
-      let stored_path  = '';
-      let drive_file_id: string | null = null;
-      let drive_url:     string | null = null;
-
-      const tempPath  = file.path; // diskStorage wrote here
-      const driveMode = isDriveEnabled();
-      try {
-        if (driveMode) {
-          const stream = fs.createReadStream(tempPath);
-          const r = await uploadToDrive(file.originalname, file.mimetype, stream, 'receipts');
-          drive_file_id = r.fileId;
-          drive_url     = r.webViewLink;
-          stored_path   = `drive:${r.fileId}`;
-        } else {
-          // diskStorage already wrote to PROOF_UPLOADS_DIR with safeProofName
-          stored_path = path.basename(tempPath);
-        }
-      } finally {
-        if (driveMode) await fsPromises.unlink(tempPath).catch(() => {});
-      }
-
-      let fileUrl = '';
-      const proofRecipients = await withTransaction(async (client: pg.PoolClient) => {
-        // Find the settlement's application so we can link the file to it
-        const settle = await client.query(
-          `SELECT application_id FROM settlements WHERE id = $1`,
-          [req.params.id],
-        );
-        if (settle.rows.length === 0) {
-          throw Object.assign(new Error('精算記録が見つかりません'), { status: 404 });
-        }
-        const applicationId = settle.rows[0].application_id as string;
-
-        // Insert uploaded_files row so the auth-gated /api/files/:id route
-        // can serve it (Drive redirect or local FS stream).
-        const fileRow = await client.query(
-          `INSERT INTO uploaded_files
-             (application_id, uploader_id, field_name, original_name,
-              stored_path, file_size, mime_type, drive_url, drive_file_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-           RETURNING id`,
-          [
-            applicationId,
-            req.user!.id,
-            'transfer_proof',
-            file.originalname,
-            stored_path,
-            file.size,
-            file.mimetype,
-            drive_url,
-            drive_file_id,
-          ],
-        );
-        fileUrl = `/api/files/${fileRow.rows[0].id}`;
-
-        // Save URL on settlement
-        const r = await client.query(
-          `UPDATE settlements
-           SET transfer_proof_url = $1, updated_at = CURRENT_TIMESTAMP
-           WHERE id = $2
-           RETURNING id, application_id, transfer_proof_url`,
-          [fileUrl, req.params.id],
-        );
-        const proofRow = r.rows[0] as { application_id: string };
-
-        const recipients = await computeApplicationRecipients(client, proofRow.application_id, { includeAccounting: true });
-        await insertOutboxEvent(client, {
-          event_type:         'SETTLEMENT_ACTION',
-          entity_type:        'application',
-          entity_id:          proofRow.application_id,
-          recipient_user_ids: recipients,
-          payload:            { type: 'proof_uploaded', applicationId: proofRow.application_id },
-        });
-        return recipients;
-      });
-      invalidateDashboardCache(proofRecipients ?? []);
-      res.json({ transfer_proof_url: fileUrl });
-    } catch (err) {
-      const e = err as { status?: number; message?: string };
-      if (e.status) { res.status(e.status).json({ error: e.message }); return; }
-      console.error('[accounting] transfer-proof upload failed:', err);
-      res.status(500).json({ error: '振込証明のアップロードに失敗しました' });
-    }
-  },
-);
-
 // ── POST /accounting/settlements/:id/close ────────────────────────────────────
 // Phase 2 closure: settlement workflow already done (SETTLEMENT_APPROVED),
-// accounting user confirms transfer_date + proof then marks COMPLETED.
+// accounting user confirms transfer_date then marks COMPLETED.
 router.post('/settlements/:id/close', async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
 
@@ -514,7 +377,7 @@ router.post('/settlements/:id/close', async (req: Request, res: Response): Promi
     const result = await withTransaction(async (client: pg.PoolClient) => {
       // Lock + validate
       const sRow = await client.query(
-        `SELECT s.id, s.transfer_date, s.transfer_proof_url, a.id AS application_id, a.status
+        `SELECT s.id, s.transfer_date, a.id AS application_id, a.status
          FROM settlements s
          JOIN applications a ON a.id = s.application_id
          WHERE s.id = $1 FOR UPDATE`,
@@ -524,7 +387,7 @@ router.post('/settlements/:id/close', async (req: Request, res: Response): Promi
         throw Object.assign(new Error('精算記録が見つかりません'), { status: 404 });
       }
       const row = sRow.rows[0] as {
-        id: string; transfer_date: string | null; transfer_proof_url: string | null;
+        id: string; transfer_date: string | null;
         application_id: string; status: string;
       };
 
@@ -536,9 +399,6 @@ router.post('/settlements/:id/close', async (req: Request, res: Response): Promi
       }
       if (!row.transfer_date) {
         throw Object.assign(new Error('振込日を入力してから締めてください'), { status: 422 });
-      }
-      if (!row.transfer_proof_url) {
-        throw Object.assign(new Error('振込証明をアップロードしてから締めてください'), { status: 422 });
       }
 
       // Mark application COMPLETED

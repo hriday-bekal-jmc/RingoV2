@@ -42,7 +42,7 @@ export default function NewApplication() {
   const { t, lang } = useLang();
   const { toast, show: showToast, dismiss } = useToast();
   const [selectedRouteId, setSelectedRouteId] = useState<string>('');
-  const [routeExpanded, setRouteExpanded] = useState(false);
+  const [routeExpanded, setRouteExpanded] = useState(true);
 
   const { data: template, isLoading: templateLoading, isError: templateError } = useQuery({
     queryKey: ['template', templateCode],

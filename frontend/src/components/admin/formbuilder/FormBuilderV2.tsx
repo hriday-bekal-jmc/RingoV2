@@ -751,10 +751,19 @@ export default function FormBuilderV2({
                     )
                   ) : currentFields.length === 0 ? (
                     <>
-                      <div className="flex flex-col items-center justify-center text-center text-warmgray-400 gap-2 py-12">
-                        <span className="text-3xl">📋</span>
-                        <p className="text-sm font-medium">{lang === 'en' ? 'No fields yet' : 'まだ項目がありません'}</p>
-                        <p className="text-xs">{lang === 'en' ? 'Click or drag a field type from the left to start.' : '左から項目をクリックまたはドラッグして追加。'}</p>
+                      <div className="flex flex-col items-center justify-center text-center text-warmgray-400 gap-3 py-10 px-4">
+                        <span className="text-4xl">📋</span>
+                        <div>
+                          <p className="text-sm font-bold text-warmgray-600">{lang === 'en' ? 'Start adding fields' : '項目を追加してフォームを作成'}</p>
+                          <p className="text-xs mt-1 leading-relaxed">{lang === 'en' ? 'Click any field type on the left to add it here.' : '左のパネルから追加したい項目の種類をクリックすると、ここに追加されます。'}</p>
+                        </div>
+                        <div className="flex flex-col gap-1 text-left bg-white/60 rounded-xl border border-white/80 px-4 py-3 text-xs text-warmgray-500 w-full max-w-xs">
+                          <p className="font-semibold text-warmgray-600 text-[10px] uppercase tracking-widest mb-0.5">{lang === 'en' ? 'How to use' : '使い方'}</p>
+                          <p>① {lang === 'en' ? 'Pick a field type from the left panel' : '左パネルから項目の種類を選ぶ'}</p>
+                          <p>② {lang === 'en' ? 'Click a field to edit its settings on the right' : '項目をクリックして右パネルで設定を編集'}</p>
+                          <p>③ {lang === 'en' ? 'Drag ⠿ to reorder fields' : '⠿ ハンドルをドラッグして並び替え'}</p>
+                          <p>④ {lang === 'en' ? 'Use "Preview" to see the live form' : '「プレビュー」でフォームの表示を確認'}</p>
+                        </div>
                       </div>
                       <RootDropZone label={lang === 'en' ? 'Drop a field here' : 'ここに項目をドロップ'} />
                     </>
@@ -825,6 +834,7 @@ export default function FormBuilderV2({
                     computedFieldNames={computedFieldNames}
                     isCustomRenderer={isCustomRenderer}
                     isChild={editingChild}
+                    isSettlementField={editingSettle}
                     onUpdate={updateSelected}
                     onRemove={removeSelected}
                     onMove={moveSelected}
@@ -833,8 +843,9 @@ export default function FormBuilderV2({
                   />
                 ) : (
                   <div className="flex-1 flex flex-col items-center justify-center text-center text-warmgray-400 gap-2 py-16 px-4">
-                    <span className="text-2xl">👈</span>
-                    <p className="text-xs">{lang === 'en' ? 'Select a field to edit its settings.' : '項目を選択すると設定を編集できます。'}</p>
+                    <span className="text-2xl">←</span>
+                    <p className="text-sm font-semibold text-warmgray-500">{lang === 'en' ? 'No field selected' : '項目が未選択'}</p>
+                    <p className="text-xs leading-relaxed">{lang === 'en' ? 'Click any field in the canvas to edit its label, type, and settings here.' : '中央の項目をクリックすると、ラベルや設定をここで編集できます。'}</p>
                   </div>
                 )}
               </div>

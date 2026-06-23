@@ -102,6 +102,12 @@ export interface FormField {
   unit?: string;
   /** number: designates this field as the headline amount for accounting/settlements page */
   amount_field?: boolean;
+  /**
+   * Settlement copy: name of the ringi field to copy the value FROM when the user
+   * clicks "申請内容をコピー". Defaults to this field's own name when unset.
+   * Set on settlement fields whose name differs from the matching ringi field.
+   */
+  copy_from?: string;
 }
 
 export interface FormSchema {
