@@ -739,6 +739,8 @@ export default function Dashboard() {
     .map(code => templates?.find(t => t.code === code))
     .filter(Boolean) as TemplateTile[];
 
+  const isEmptyState = !!summary && recentApps.length === 0 && pendingCount === 0 && draftCount === 0 && returnedCount === 0 && approvedCount === 0;
+
   const companyTotal   = overview ? Object.values(overview.status_counts).reduce((s, n) => s + n, 0) : 0;
   const companyPending = overview?.status_counts.PENDING_APPROVAL ?? 0;
   const companySettle  = (overview?.status_counts.PENDING_SETTLEMENT ?? 0) + (overview?.status_counts.SETTLEMENT_APPROVED ?? 0);
@@ -757,7 +759,8 @@ export default function Dashboard() {
       {loading ? <RingoLoader.Block /> : (
         <div className="max-w-[1800px] mx-auto space-y-5">
 
-          {/* Greeting */}
+          {/* Greeting — hidden in empty state (shown inside empty state layout) */}
+          {!isEmptyState && (
           <div className="flex items-start justify-between gap-4 animate-fade-up">
             <div>
               <p className="text-xs font-semibold text-warmgray-400 mb-0.5">
@@ -777,6 +780,7 @@ export default function Dashboard() {
               </button>
             )}
           </div>
+          )}
 
           {/* ════════════════════════════════════════════════════════════════
               ADMIN COMPANY VIEW
@@ -905,6 +909,60 @@ export default function Dashboard() {
                 </div>
               )}
 
+            </div>
+
+          ) : isEmptyState ? (
+            /* ══════════════════════════════════════════════════════════════
+               EMPTY STATE — no applications yet
+            ════════════════════════════════════════════════════════════════ */
+            <div className="flex flex-col items-center justify-center min-h-[calc(100vh-14rem)] text-center animate-fade-up">
+              {/* Icon */}
+              <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-ringo-400 to-ringo-600 flex items-center justify-center text-4xl mb-6 shadow-lg border border-white/40">
+                🍎
+              </div>
+              {/* Welcome text */}
+              <h2 className="text-2xl font-bold text-warmgray-800 mb-2">
+                {greeting}、{firstName}さん
+              </h2>
+              <p className="text-warmgray-400 text-sm mb-8 max-w-xs">
+                {lang === 'en' ? 'No applications yet. Start by submitting your first form below.' : 'まだ申請がありません。下のフォームから最初の申請を始めましょう。'}
+              </p>
+              {/* Primary CTA */}
+              <button
+                onClick={() => navigate('/applications/new')}
+                className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-ringo-500 text-white font-bold text-sm shadow-md hover:bg-ringo-600 hover:-translate-y-0.5 transition-all duration-200 mb-10"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+                {lang === 'en' ? 'New Application' : '新規申請'}
+              </button>
+              {/* All templates grid */}
+              {(templates?.length ?? 0) > 0 && (
+                <div className="w-full max-w-4xl">
+                  <p className="text-xs font-bold uppercase tracking-widest text-warmgray-400 mb-4">
+                    {lang === 'en' ? 'Available forms' : '利用可能なフォーム'}
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                    {(templates ?? []).map((tmpl, i) => {
+                      const label = templateLabel(tmpl.code, lang, tmpl.title_ja, tmpl.title);
+                      const gradient = tmpl.gradient ?? DEFAULT_GRADIENTS[tmpl.code] ?? 'from-warmgray-400 to-warmgray-600';
+                      return (
+                        <button
+                          key={tmpl.id}
+                          onClick={() => navigate(`/applications/new/${tmpl.code}`)}
+                          className="card !p-4 text-left group hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-200 animate-fade-up"
+                          style={{ animationDelay: `${i * 40}ms` }}
+                        >
+                          <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center text-lg mb-3 border border-white/40`}>
+                            {tmpl.icon ?? '📄'}
+                          </div>
+                          <p className="text-xs font-bold text-warmgray-800 group-hover:text-ringo-600 transition-colors leading-tight line-clamp-2">{label}</p>
+                          <PatternBadge patternId={tmpl.pattern_id} size="sm" className="mt-1.5" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
           ) : (

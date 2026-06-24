@@ -19,7 +19,9 @@ const STORAGE_KEY = 'ringo_sidebar_collapsed';
 export function SidebarProvider({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return stored === null ? true : stored === 'true';
+    if (stored !== null) return stored === 'true';
+    // Default: open on wide screens (≥1024px), collapsed on narrow
+    return window.innerWidth < 1024;
   });
 
   const [mobileOpen, setMobileOpen] = useState(false);
