@@ -966,13 +966,13 @@ function RepeatGroupInput({
   const storedRowsRef = useRef(storedRows);
   storedRowsRef.current = storedRows;
 
-  // Flag set by Effect A so Effect B skips the cycle where we just wrote to RHF.
-  // Prevents a race: watchedExternal captured at render time is one cycle behind
-  // storedRows, so a JSON comparison there would always misfire.
-  const justWroteRef = useRef(false);
+  // Counter incremented by Effect A; Effect B decrements and skips if > 0.
+  // Using a counter (not boolean) handles batched state updates where multiple
+  // storedRows changes flush together — each write gets its own skip token.
+  const pendingWritesRef = useRef(0);
 
   useEffect(() => {
-    justWroteRef.current = true;
+    pendingWritesRef.current += 1;
     setValue?.(field.name, storedRows, {
       shouldDirty: true,
       shouldTouch: false,
@@ -981,10 +981,10 @@ function RepeatGroupInput({
   }, [field.name, setValue, storedRows]);
 
   // Resync local rows when an external reset pushes new data into RHF
-  // (e.g. copy-from-ringi). Skipped when Effect A fired in the same cycle.
+  // (e.g. copy-from-ringi). Skipped for cycles where we just wrote to RHF.
   const watchedExternal = watch?.(field.name);
   useEffect(() => {
-    if (justWroteRef.current) { justWroteRef.current = false; return; }
+    if (pendingWritesRef.current > 0) { pendingWritesRef.current -= 1; return; }
     if (!Array.isArray(watchedExternal) || watchedExternal.length === 0) return;
     if (JSON.stringify(watchedExternal) === JSON.stringify(storedRowsRef.current)) return;
     setRows(normalizeRepeatRows(watchedExternal, childFields, initialVisibleRows));
