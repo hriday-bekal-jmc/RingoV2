@@ -962,13 +962,17 @@ function RepeatGroupInput({
 
   const storedRows = useMemo(() => cleanRepeatRows(rows, childFields), [rows, childFields]);
 
-  // Track the last value we wrote to RHF so we can ignore our own writes
-  // when detecting external resets (e.g. copy-from-ringi).
-  const lastWrittenRef = useRef<string>('');
+  // Sync ref so the resync effect can compare without a stale closure.
+  const storedRowsRef = useRef(storedRows);
+  storedRowsRef.current = storedRows;
+
+  // Flag set by Effect A so Effect B skips the cycle where we just wrote to RHF.
+  // Prevents a race: watchedExternal captured at render time is one cycle behind
+  // storedRows, so a JSON comparison there would always misfire.
+  const justWroteRef = useRef(false);
 
   useEffect(() => {
-    const serialized = JSON.stringify(storedRows);
-    lastWrittenRef.current = serialized;
+    justWroteRef.current = true;
     setValue?.(field.name, storedRows, {
       shouldDirty: true,
       shouldTouch: false,
@@ -977,11 +981,12 @@ function RepeatGroupInput({
   }, [field.name, setValue, storedRows]);
 
   // Resync local rows when an external reset pushes new data into RHF
-  // (e.g. copy-from-ringi). Skip if the incoming value is what we just wrote.
+  // (e.g. copy-from-ringi). Skipped when Effect A fired in the same cycle.
   const watchedExternal = watch?.(field.name);
   useEffect(() => {
+    if (justWroteRef.current) { justWroteRef.current = false; return; }
     if (!Array.isArray(watchedExternal) || watchedExternal.length === 0) return;
-    if (JSON.stringify(watchedExternal) === lastWrittenRef.current) return;
+    if (JSON.stringify(watchedExternal) === JSON.stringify(storedRowsRef.current)) return;
     setRows(normalizeRepeatRows(watchedExternal, childFields, initialVisibleRows));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchedExternal]);
