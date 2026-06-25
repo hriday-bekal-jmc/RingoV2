@@ -54,3 +54,59 @@ export const updatePermissionsSchema = z.object({
   navPages:   z.array(z.string().max(50)).max(50),
 });
 export type UpdatePermissionsBody = z.infer<typeof updatePermissionsSchema>;
+
+// ── Routing V2 schemas ────────────────────────────────────────────────────────
+
+export const createSlotSchema = z.object({
+  label_ja:  z.string().min(1).max(100),
+  slot_type: z.enum(['RINGI', 'SETTLEMENT', 'CONFIRM']),
+});
+export type CreateSlotBody = z.infer<typeof createSlotSchema>;
+
+export const upsertPatternSchema = z.object({
+  name:        z.string().min(1).max(100),
+  description: z.string().max(500).optional().nullable(),
+  slot_ids:    z.array(z.string().uuid()).max(30),
+});
+export type UpsertPatternBody = z.infer<typeof upsertPatternSchema>;
+
+export const upsertUserSlotsSchema = z.object({
+  slots: z.array(z.object({
+    slot_id:     z.string().uuid(),
+    approver_id: z.string().uuid().nullable(),
+  })).min(1).max(20),
+});
+export type UpsertUserSlotsBody = z.infer<typeof upsertUserSlotsSchema>;
+
+export const copyFromUserSchema = z.object({
+  source_user_id: z.string().uuid(),
+  force:          z.boolean().optional(),
+});
+export type CopyFromUserBody = z.infer<typeof copyFromUserSchema>;
+
+export const bulkUpdateSlotSchema = z.object({
+  department_id: z.string().uuid(),
+  slot_id:       z.string().uuid(),
+  approver_id:   z.string().uuid().nullable(),
+});
+export type BulkUpdateSlotBody = z.infer<typeof bulkUpdateSlotSchema>;
+
+export const upsertTemplatePatternsSchema = z.object({
+  patterns: z.array(z.object({
+    pattern_id: z.string().uuid(),
+    is_default: z.boolean(),
+    priority:   z.number().int().nonnegative(),
+  })),
+});
+export type UpsertTemplatePatternsBody = z.infer<typeof upsertTemplatePatternsSchema>;
+
+export const upsertConditionsSchema = z.object({
+  conditions: z.array(z.object({
+    pattern_id:      z.string().uuid(),
+    user_id:         z.string().uuid().nullable().optional(),
+    condition_type:  z.enum(['AMOUNT_LT', 'AMOUNT_GTE', 'DEPT_IN', 'DEPT_NOT_IN']),
+    condition_value: z.string().min(1),
+    stop_at_slot_id: z.string().uuid(),
+  })),
+});
+export type UpsertConditionsBody = z.infer<typeof upsertConditionsSchema>;

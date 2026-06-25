@@ -19,7 +19,6 @@ import {
   invalidateAdminReferenceCache,
 } from '../services/adminReferenceCache';
 import { decodeCursor, encodeCursor, parsePageLimit } from '../services/pagination';
-import { invalidateRoutePreviews } from './applicationRoutes';
 import { validateBody } from '../middlewares/validate';
 import {
   createUserSchema, type CreateUserBody,
@@ -27,7 +26,15 @@ import {
   createRouteSchema, type CreateRouteBody,
   addRouteStepSchema, type AddRouteStepBody,
   updatePermissionsSchema, type UpdatePermissionsBody,
+  upsertUserSlotsSchema, type UpsertUserSlotsBody,
+  copyFromUserSchema, type CopyFromUserBody,
+  bulkUpdateSlotSchema, type BulkUpdateSlotBody,
+  upsertTemplatePatternsSchema, type UpsertTemplatePatternsBody,
+  upsertConditionsSchema, type UpsertConditionsBody,
+  upsertPatternSchema, type UpsertPatternBody,
+  createSlotSchema, type CreateSlotBody,
 } from '../schemas/adminSchemas';
+import { invalidateRoutePreviews, invalidateChainPreviews } from './applicationRoutes';
 import type pg from 'pg';
 
 const router = Router();
@@ -244,25 +251,36 @@ router.delete('/users/:id', async (req: Request, res: Response): Promise<void> =
     }
     // ────────────────────────────────────────────────
 
-    if (req.query.hard === 'true') {
-      // Check if user is a named approver on any active route steps
-      const routeCheck = await query(
-        `SELECT ars.id AS step_id, ar.name AS route_name, ar.id AS route_id
-         FROM approval_route_steps ars
-         JOIN approval_routes ar ON ar.id = ars.route_id
-         WHERE ars.approver_id = $1`,
+    // Routing V2 guard: block deactivation if user has pending approval steps or
+    // appears as an approver in other users' slot assignments.
+    const [pendingSteps, slotAssignments] = await Promise.all([
+      query(
+        `SELECT a.application_number, ast.label, ast.stage
+         FROM approval_steps ast
+         JOIN applications a ON a.id = ast.application_id
+         WHERE ast.approver_id = $1 AND ast.status = 'PENDING'
+         ORDER BY a.created_at DESC LIMIT 50`,
         [req.params.id],
-      );
-      if (routeCheck.rows.length > 0) {
-        res.status(409).json({
-          error: 'route_assignments',
-          routes: routeCheck.rows.map((r: { route_id: string; route_name: string }) => ({
-            id: r.route_id,
-            name: r.route_name,
-          })),
-        });
-        return;
-      }
+      ),
+      query(
+        `SELECT owner.full_name AS owner_name, s.label_ja AS slot_label
+         FROM user_approval_slots uas
+         JOIN users owner ON owner.id = uas.user_id AND owner.is_active = TRUE
+         JOIN approval_slots s ON s.id = uas.slot_id
+         WHERE uas.approver_id = $1`,
+        [req.params.id],
+      ),
+    ]);
+    if (pendingSteps.rows.length > 0 || slotAssignments.rows.length > 0) {
+      res.status(409).json({
+        error:            'slot_and_step_assignments',
+        pending_steps:    pendingSteps.rows,
+        slot_assignments: slotAssignments.rows,
+      });
+      return;
+    }
+
+    if (req.query.hard === 'true') {
       // Hard delete: anonymise PII so the email slot is freed for reuse, keep row for FK integrity.
       // deleted_name / deleted_email preserved nowhere — this is intentional (GDPR erasure).
       await query(
@@ -1138,6 +1156,317 @@ router.put('/users/:id/capability-overrides', async (req: Request, res: Response
   } catch (err) {
     console.error('[admin] set overrides failed:', err);
     res.status(500).json({ error: '権限オーバーライドの更新に失敗しました' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ROUTING V2 — Approval slots, patterns, conditions
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /admin/approval-slots — full slot catalog
+router.get('/approval-slots', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const r = await query(
+      `SELECT id, slot_code, label_ja, slot_type, sort_order
+       FROM approval_slots ORDER BY sort_order ASC`,
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error('[admin] approval-slots list failed:', err);
+    res.status(500).json({ error: 'スロット一覧の取得に失敗しました' });
+  }
+});
+
+// POST /admin/approval-slots — create a new slot position
+router.post('/approval-slots', validateBody(createSlotSchema), async (req: Request, res: Response): Promise<void> => {
+  const { label_ja, slot_type } = req.body as CreateSlotBody;
+  const prefix = slot_type === 'RINGI' ? 'ringi' : slot_type === 'SETTLEMENT' ? 'settle' : 'confirm';
+  try {
+    const r = await withTransaction(async (client) => {
+      // Auto-generate slot_code (prefix_N) and sort_order (max + 1 within type)
+      const countRes = await client.query(
+        `SELECT COUNT(*) AS cnt, COALESCE(MAX(sort_order), 0) AS max_order
+         FROM approval_slots WHERE slot_type = $1`,
+        [slot_type],
+      );
+      const n         = Number((countRes.rows[0] as any).cnt) + 1;
+      const maxOrder  = Number((countRes.rows[0] as any).max_order);
+      const slotCode  = `${prefix}_${n}`;
+      // sort_order: ringi group < settle group < confirm group — stay within type range
+      const typeOffset = slot_type === 'RINGI' ? 0 : slot_type === 'SETTLEMENT' ? 100 : 200;
+      const sortOrder = maxOrder > 0 ? maxOrder + 1 : typeOffset + n;
+      const ins = await client.query(
+        `INSERT INTO approval_slots (slot_code, label_ja, slot_type, sort_order)
+         VALUES ($1, $2, $3, $4) RETURNING id, slot_code, label_ja, slot_type, sort_order`,
+        [slotCode, label_ja, slot_type, sortOrder],
+      );
+      return ins.rows[0];
+    });
+    res.status(201).json(r);
+  } catch (err) {
+    console.error('[admin] create slot failed:', err);
+    res.status(500).json({ error: 'スロットの作成に失敗しました' });
+  }
+});
+
+// GET /admin/users/:id/approval-slots — user's 18-slot grid (all slots, even unset)
+router.get('/users/:id/approval-slots', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const r = await query(
+      `SELECT s.id AS slot_id, s.slot_code, s.label_ja, s.slot_type, s.sort_order,
+              uas.approver_id,
+              u.full_name AS approver_name, u.avatar_url AS approver_avatar
+       FROM approval_slots s
+       LEFT JOIN user_approval_slots uas ON uas.slot_id = s.id AND uas.user_id = $1
+       LEFT JOIN users u ON u.id = uas.approver_id
+       ORDER BY s.sort_order ASC`,
+      [req.params.id],
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error('[admin] user approval-slots get failed:', err);
+    res.status(500).json({ error: 'ユーザーのスロット取得に失敗しました' });
+  }
+});
+
+// PUT /admin/users/:id/approval-slots — upsert slot assignments
+router.put('/users/:id/approval-slots', validateBody(upsertUserSlotsSchema), async (req: Request, res: Response): Promise<void> => {
+  const { slots } = req.body as UpsertUserSlotsBody;
+  try {
+    await withTransaction(async (client) => {
+      for (const { slot_id, approver_id } of slots) {
+        await client.query(
+          `INSERT INTO user_approval_slots (user_id, slot_id, approver_id, updated_by)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (user_id, slot_id) DO UPDATE
+             SET approver_id = EXCLUDED.approver_id,
+                 updated_by  = EXCLUDED.updated_by`,
+          [req.params.id, slot_id, approver_id, req.user!.id],
+        );
+      }
+    });
+    void invalidateChainPreviews(String(req.params.id));
+    res.json({ message: 'スロットを更新しました' });
+  } catch (err) {
+    console.error('[admin] user approval-slots upsert failed:', err);
+    res.status(500).json({ error: 'スロットの更新に失敗しました' });
+  }
+});
+
+// POST /admin/users/:id/approval-slots/copy-from — copy slot assignments from source user
+router.post('/users/:id/approval-slots/copy-from', validateBody(copyFromUserSchema), async (req: Request, res: Response): Promise<void> => {
+  const { source_user_id, force } = req.body as CopyFromUserBody;
+  try {
+    const r = await query(
+      `INSERT INTO user_approval_slots (user_id, slot_id, approver_id, updated_by)
+       SELECT $1, slot_id, approver_id, $3
+       FROM user_approval_slots
+       WHERE user_id = $2 AND approver_id IS NOT NULL
+       ON CONFLICT (user_id, slot_id) DO ${force ? 'UPDATE SET approver_id = EXCLUDED.approver_id, updated_by = EXCLUDED.updated_by' : 'NOTHING'}`,
+      [req.params.id, source_user_id, req.user!.id],
+    );
+    void invalidateChainPreviews(String(req.params.id));
+    res.json({ copied: r.rowCount ?? 0 });
+  } catch (err) {
+    console.error('[admin] copy-from-user slots failed:', err);
+    res.status(500).json({ error: 'スロットのコピーに失敗しました' });
+  }
+});
+
+// POST /admin/approval-slots/bulk-update — update one slot for all users in a department
+router.post('/approval-slots/bulk-update', validateBody(bulkUpdateSlotSchema), async (req: Request, res: Response): Promise<void> => {
+  const { department_id, slot_id, approver_id } = req.body as BulkUpdateSlotBody;
+  try {
+    const usersRes = await query(
+      `SELECT id FROM users WHERE department_id = $1 AND is_active = TRUE AND deleted_at IS NULL`,
+      [department_id],
+    );
+    const userIds = usersRes.rows.map((r: { id: string }) => r.id);
+    if (userIds.length === 0) { res.json({ updated_count: 0 }); return; }
+
+    let updated = 0;
+    await withTransaction(async (client) => {
+      for (const uid of userIds) {
+        const r = await client.query(
+          `INSERT INTO user_approval_slots (user_id, slot_id, approver_id, updated_by)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (user_id, slot_id) DO UPDATE
+             SET approver_id = EXCLUDED.approver_id, updated_by = EXCLUDED.updated_by`,
+          [uid, slot_id, approver_id, req.user!.id],
+        );
+        updated += r.rowCount ?? 0;
+      }
+    });
+    for (const uid of userIds) void invalidateChainPreviews(uid);
+    res.json({ updated_count: updated });
+  } catch (err) {
+    console.error('[admin] bulk-update slots failed:', err);
+    res.status(500).json({ error: '一括更新に失敗しました' });
+  }
+});
+
+// GET /admin/approval-patterns — all patterns with their active slots (includes slot_id for editing)
+router.get('/approval-patterns', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const [patterns, slots] = await Promise.all([
+      query(`SELECT id, name, description, is_active FROM approval_patterns ORDER BY name ASC`),
+      query(
+        `SELECT aps.pattern_id, s.id AS slot_id, s.slot_code, s.label_ja, s.slot_type, s.sort_order
+         FROM approval_pattern_slots aps
+         JOIN approval_slots s ON s.id = aps.slot_id
+         ORDER BY s.sort_order ASC`,
+      ),
+    ]);
+    const slotsByPattern = (slots.rows as Array<{ pattern_id: string; slot_id: string; slot_code: string; label_ja: string; slot_type: string; sort_order: number }>)
+      .reduce<Record<string, typeof slots.rows>>((acc, s) => {
+        if (!acc[s.pattern_id]) acc[s.pattern_id] = [];
+        acc[s.pattern_id].push(s);
+        return acc;
+      }, {});
+    const result = (patterns.rows as Array<{ id: string; name: string; description: string; is_active: boolean }>).map((p) => ({
+      ...p,
+      slots: (slotsByPattern[p.id] ?? []).map((s: any) => ({
+        slot_id: s.slot_id, slot_code: s.slot_code, label_ja: s.label_ja, slot_type: s.slot_type,
+      })),
+    }));
+    res.json(result);
+  } catch (err) {
+    console.error('[admin] approval-patterns list failed:', err);
+    res.status(500).json({ error: 'パターン一覧の取得に失敗しました' });
+  }
+});
+
+// POST /admin/approval-patterns — create new pattern
+router.post('/approval-patterns', validateBody(upsertPatternSchema), async (req: Request, res: Response): Promise<void> => {
+  const { name, description, slot_ids } = req.body as UpsertPatternBody;
+  try {
+    await withTransaction(async (client) => {
+      const r = await client.query(
+        `INSERT INTO approval_patterns (name, description, is_active) VALUES ($1, $2, true) RETURNING id`,
+        [name, description ?? null],
+      );
+      const patternId = (r.rows[0] as { id: string }).id;
+      for (const slotId of slot_ids) {
+        await client.query(
+          `INSERT INTO approval_pattern_slots (pattern_id, slot_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          [patternId, slotId],
+        );
+      }
+    });
+    res.status(201).json({ message: 'パターンを作成しました' });
+  } catch (err) {
+    console.error('[admin] create pattern failed:', err);
+    res.status(500).json({ error: 'パターンの作成に失敗しました' });
+  }
+});
+
+// PUT /admin/approval-patterns/:id — update name/description/slots
+router.put('/approval-patterns/:id', validateBody(upsertPatternSchema), async (req: Request, res: Response): Promise<void> => {
+  const { name, description, slot_ids } = req.body as UpsertPatternBody;
+  try {
+    await withTransaction(async (client) => {
+      await client.query(
+        `UPDATE approval_patterns SET name = $1, description = $2 WHERE id = $3`,
+        [name, description ?? null, req.params.id],
+      );
+      await client.query(`DELETE FROM approval_pattern_slots WHERE pattern_id = $1`, [req.params.id]);
+      for (const slotId of slot_ids) {
+        await client.query(
+          `INSERT INTO approval_pattern_slots (pattern_id, slot_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          [req.params.id, slotId],
+        );
+      }
+    });
+    void invalidateChainPreviews(String(req.params.id));
+    res.json({ message: 'パターンを更新しました' });
+  } catch (err) {
+    console.error('[admin] update pattern failed:', err);
+    res.status(500).json({ error: 'パターンの更新に失敗しました' });
+  }
+});
+
+// GET /admin/templates/:id/patterns — pattern assignments for a template
+router.get('/templates/:id/patterns', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const r = await query(
+      `SELECT ftp.id, ftp.pattern_id, ap.name AS pattern_name, ftp.is_default, ftp.priority
+       FROM form_template_patterns ftp
+       JOIN approval_patterns ap ON ap.id = ftp.pattern_id
+       WHERE ftp.template_id = $1
+       ORDER BY ftp.is_default DESC, ftp.priority DESC`,
+      [req.params.id],
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error('[admin] template patterns get failed:', err);
+    res.status(500).json({ error: 'テンプレートのパターン取得に失敗しました' });
+  }
+});
+
+// PUT /admin/templates/:id/patterns — replace pattern assignments for a template
+router.put('/templates/:id/patterns', validateBody(upsertTemplatePatternsSchema), async (req: Request, res: Response): Promise<void> => {
+  const { patterns } = req.body as UpsertTemplatePatternsBody;
+  try {
+    await withTransaction(async (client) => {
+      await client.query(`DELETE FROM form_template_patterns WHERE template_id = $1`, [req.params.id]);
+      for (const { pattern_id, is_default, priority } of patterns) {
+        await client.query(
+          `INSERT INTO form_template_patterns (template_id, pattern_id, is_default, priority)
+           VALUES ($1, $2, $3, $4)`,
+          [req.params.id, pattern_id, is_default, priority],
+        );
+      }
+    });
+    void invalidateRoutePreviews(String(req.params.id));
+    res.json({ message: 'パターンを更新しました' });
+  } catch (err) {
+    console.error('[admin] template patterns upsert failed:', err);
+    res.status(500).json({ error: 'パターンの更新に失敗しました' });
+  }
+});
+
+// GET /admin/templates/:id/conditions — condition rules for a template
+router.get('/templates/:id/conditions', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const r = await query(
+      `SELECT ac.id, ac.pattern_id, ap.name AS pattern_name,
+              ac.user_id, u.full_name AS user_name,
+              ac.condition_type, ac.condition_value,
+              ac.stop_at_slot_id, s.label_ja AS stop_at_label
+       FROM approval_conditions ac
+       JOIN approval_patterns ap ON ap.id = ac.pattern_id
+       JOIN approval_slots s ON s.id = ac.stop_at_slot_id
+       LEFT JOIN users u ON u.id = ac.user_id
+       WHERE ac.template_id = $1
+       ORDER BY ap.name, ac.user_id NULLS LAST`,
+      [req.params.id],
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error('[admin] template conditions get failed:', err);
+    res.status(500).json({ error: '条件の取得に失敗しました' });
+  }
+});
+
+// PUT /admin/templates/:id/conditions — replace condition rules for a template
+router.put('/templates/:id/conditions', validateBody(upsertConditionsSchema), async (req: Request, res: Response): Promise<void> => {
+  const { conditions } = req.body as UpsertConditionsBody;
+  try {
+    await withTransaction(async (client) => {
+      await client.query(`DELETE FROM approval_conditions WHERE template_id = $1`, [req.params.id]);
+      for (const { pattern_id, user_id, condition_type, condition_value, stop_at_slot_id } of conditions) {
+        await client.query(
+          `INSERT INTO approval_conditions
+             (template_id, pattern_id, user_id, condition_type, condition_value, stop_at_slot_id)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [req.params.id, pattern_id, user_id ?? null, condition_type, condition_value, stop_at_slot_id],
+        );
+      }
+    });
+    res.json({ message: '条件を更新しました' });
+  } catch (err) {
+    console.error('[admin] template conditions upsert failed:', err);
+    res.status(500).json({ error: '条件の更新に失敗しました' });
   }
 });
 

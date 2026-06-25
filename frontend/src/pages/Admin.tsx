@@ -13,6 +13,8 @@ import InlineConfirm from '../components/common/InlineConfirm';
 import AdminAppDetailModal from '../components/admin/AdminAppDetailModal';
 import FormsTab                    from '../components/admin/FormsTab';
 import NotificationTemplatesTab   from '../components/admin/NotificationTemplatesTab';
+import SlotsTab                   from '../components/admin/SlotsTab';
+import PatternsTab                from '../components/admin/PatternsTab';
 import RingoLoader from '../components/common/RingoLoader';
 import { Sk } from '../components/common/Skeleton';
 import Toast, { useToast } from '../components/common/Toast';
@@ -324,9 +326,9 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
 
 // ─── Users Tab ────────────────────────────────────────────────────────────────
 
-function UsersTab({ showToast, onGoToRoutes }: {
+function UsersTab({ showToast, onGoToSlots }: {
   showToast: (m: string, t?: 'success' | 'error' | 'info') => void;
-  onGoToRoutes: () => void;
+  onGoToSlots: () => void;
 }) {
   const queryClient = useQueryClient();
   const { t } = useLang();
@@ -337,7 +339,12 @@ function UsersTab({ showToast, onGoToRoutes }: {
   const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('all');
   // Inline confirm — only one row can be in confirm state at a time
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
-  const [routeConflict, setRouteConflict] = useState<{ userId: string; routes: { id: string; name: string }[] } | null>(null);
+  const [routeConflict, setRouteConflict] = useState<{
+    userId: string;
+    routes?: { id: string; name: string }[];
+    pending_steps?: { application_number: string; label: string; stage: string }[];
+    slot_assignments?: { owner_name: string; slot_label: string }[];
+  } | null>(null);
 
   // Admin reference data — changes rarely (few times/month). Cache aggressively.
   const { data: users = [], isLoading } = useQuery<User[]>({
@@ -395,6 +402,9 @@ function UsersTab({ showToast, onGoToRoutes }: {
       const body = err?.data;
       if (variables.hard && body?.error === 'route_assignments' && Array.isArray(body.routes)) {
         setRouteConflict({ userId: variables.id, routes: body.routes });
+        setConfirmingId(null);
+      } else if (variables.hard && body?.error === 'slot_and_step_assignments') {
+        setRouteConflict({ userId: variables.id, pending_steps: body.pending_steps, slot_assignments: body.slot_assignments });
         setConfirmingId(null);
       } else {
         showToast(`削除失敗: ${err.message}`, 'error');
@@ -496,22 +506,42 @@ function UsersTab({ showToast, onGoToRoutes }: {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-warmgray-800">アーカイブできません</p>
-                <p className="text-xs text-warmgray-600 mt-1">このユーザーは以下の承認ルートに設定されています。先にルートから外してください。</p>
+                <p className="text-xs text-warmgray-600 mt-1">このユーザーは以下の承認設定に関連しています。先に解除してください。</p>
                 <ul className="mt-2.5 space-y-1">
-                  {routeConflict.routes.map((r) => (
+                  {routeConflict.routes?.map((r) => (
                     <li key={r.id} className="text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200/70 rounded-lg px-2.5 py-1">
                       {r.name}
                     </li>
                   ))}
+                  {routeConflict.pending_steps && routeConflict.pending_steps.length > 0 && (
+                    <>
+                      <li className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 pt-1">承認待ちステップ</li>
+                      {routeConflict.pending_steps.map((s, i) => (
+                        <li key={i} className="text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200/70 rounded-lg px-2.5 py-1">
+                          {s.application_number} — {s.label}
+                        </li>
+                      ))}
+                    </>
+                  )}
+                  {routeConflict.slot_assignments && routeConflict.slot_assignments.length > 0 && (
+                    <>
+                      <li className="text-[10px] font-bold uppercase tracking-widest text-warmgray-400 pt-1">スロット割り当て</li>
+                      {routeConflict.slot_assignments.map((s, i) => (
+                        <li key={i} className="text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200/70 rounded-lg px-2.5 py-1">
+                          {s.owner_name} の {s.slot_label}
+                        </li>
+                      ))}
+                    </>
+                  )}
                 </ul>
               </div>
             </div>
             <div className="flex items-center gap-2 mt-4 pt-4 border-t border-white/40">
               <button
-                onClick={() => { setRouteConflict(null); onGoToRoutes(); }}
+                onClick={() => { setRouteConflict(null); onGoToSlots(); }}
                 className="btn-primary flex-1 text-xs"
               >
-                ルート設定を開く →
+                スロット設定を開く →
               </button>
               <button
                 onClick={() => setRouteConflict(null)}
@@ -837,7 +867,7 @@ function ChainArrow() {
   );
 }
 
-function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error' | 'info') => void }) {
+export function RoutesTab({ showToast }: { showToast: (m: string, t?: 'success' | 'error' | 'info') => void }) {
   const queryClient = useQueryClient();
   const { lang, t } = useLang();
   const [addingStepToRoute, setAddingStepToRoute] = useState<string | null>(null);
@@ -2206,18 +2236,19 @@ function AllowanceTab({ showToast }: { showToast: (msg: string, type?: 'success'
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-type Tab = 'routes' | 'users' | 'applications' | 'permissions' | 'forms' | 'allowance' | 'notifications';
+type Tab = 'slots' | 'patterns' | 'users' | 'applications' | 'permissions' | 'forms' | 'allowance' | 'notifications';
 
 export default function Admin() {
   const [searchParams] = useSearchParams();
-  const VALID_TABS: Tab[] = ['routes', 'users', 'applications', 'permissions', 'forms', 'allowance', 'notifications'];
-  const initialTab = (searchParams.get('tab') ?? 'routes') as Tab;
-  const [tab, setTab] = useState<Tab>(VALID_TABS.includes(initialTab) ? initialTab : 'routes');
+  const VALID_TABS: Tab[] = ['slots', 'patterns', 'users', 'applications', 'permissions', 'forms', 'allowance', 'notifications'];
+  const initialTab = (searchParams.get('tab') ?? 'slots') as Tab;
+  const [tab, setTab] = useState<Tab>(VALID_TABS.includes(initialTab) ? initialTab : 'slots');
   const { t, lang } = useLang();
   const { toast, show: showToast, dismiss } = useToast();
 
   const TAB_CONFIG: { key: Tab; label: string; icon: string }[] = [
-    { key: 'routes',       label: t('admin_routes_tab'),  icon: '🔀' },
+    { key: 'slots',        label: '承認スロット',             icon: '🔲' },
+    { key: 'patterns',     label: 'パターン設定',             icon: '🔀' },
     { key: 'users',        label: t('admin_users_tab'),   icon: '👥' },
     { key: 'applications', label: t('admin_apps_tab'),    icon: '📋' },
     { key: 'forms',        label: t('admin_forms_tab'),   icon: '📝' },
@@ -2252,8 +2283,9 @@ export default function Admin() {
         </div>
 
         <div key={tab} className="animate-fade-up min-h-[60vh]">
-          {tab === 'routes'       && <RoutesTab showToast={showToast} />}
-          {tab === 'users'        && <UsersTab showToast={showToast} onGoToRoutes={() => setTab('routes')} />}
+          {tab === 'slots'        && <SlotsTab showToast={showToast} />}
+          {tab === 'patterns'     && <PatternsTab showToast={showToast} />}
+          {tab === 'users'        && <UsersTab showToast={showToast} onGoToSlots={() => setTab('slots')} />}
           {tab === 'applications' && <ApplicationsTab showToast={showToast} />}
           {tab === 'forms'        && <FormsTab showToast={showToast} />}
           {tab === 'permissions'  && <PermissionsTab showToast={showToast} />}

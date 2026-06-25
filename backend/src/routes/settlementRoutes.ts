@@ -4,7 +4,8 @@ import { requireAuth } from '../middlewares/authMiddleware';
 import { mutationLimiter } from '../middlewares/rateLimit';
 import { insertOutboxEvent } from '../services/eventOutbox';
 import { computeApplicationRecipients } from '../services/eventRecipients';
-import { resolveApprovalSteps, skipStepsThroughApplicant, type ResolvedStep } from '../services/approvalStepService';
+import { skipStepsThroughApplicant, type ResolvedStep } from '../services/approvalStepService';
+import { resolveChainFromUserSlots } from '../services/approvalChainService';
 import { applyComputedFormData, validateFormData } from '../services/formValidation';
 import { notifyApplicationEvent }                 from '../services/notificationService';
 import type pg from 'pg';
@@ -30,13 +31,14 @@ async function insertSettlementApprovalSteps(
 
 // POST /settlements — create settlement and start settlement approval route
 router.post('/', async (req: Request, res: Response): Promise<void> => {
-  const { application_id, actual_amount, settlement_data, route_id } = req.body as {
-    application_id: string;
-    actual_amount: number;
+  const { application_id, actual_amount, settlement_data, pattern_id: chosen_pattern_id } = req.body as {
+    application_id:  string;
+    actual_amount:   number;
     settlement_data: Record<string, unknown>;
-    route_id: string;
+    pattern_id?:     string;
   };
-  const applicant_id = req.user!.id;
+  const applicant_id  = req.user!.id;
+  const department_id = req.user!.department_id;
 
   try {
     const result = await withTransaction(async (client: pg.PoolClient) => {
@@ -85,10 +87,15 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         [application_id],
       );
 
-      const routePolicy = skipStepsThroughApplicant(
-        await resolveApprovalSteps(client, route_id, '精算ルート'),
-        applicant_id,
-      );
+      const { steps: rawSettleSteps, patternId: resolvedPatternId } = await resolveChainFromUserSlots(client, {
+        applicantId:  applicant_id,
+        departmentId: department_id ?? null,
+        templateId:   app.template_id,
+        formData:     settlement_data ?? {},
+        patternId:    chosen_pattern_id,
+        stageFilter:  'SETTLEMENT',
+      });
+      const routePolicy = skipStepsThroughApplicant(rawSettleSteps, applicant_id);
       const resolvedSteps = routePolicy.steps;
 
       if (resolvedSteps.length > 0) {
@@ -104,7 +111,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         `INSERT INTO audit_logs (action, entity_type, entity_id, metadata)
          VALUES ('SETTLEMENT_SUBMIT', 'application', $1, $2::jsonb)`,
         [application_id, JSON.stringify({
-          route_id,
+          pattern_id: resolvedPatternId,
           steps: resolvedSteps.length,
           skipped_steps: routePolicy.skipped_steps,
           skipped_through_step_order: routePolicy.skipped_through_step_order,

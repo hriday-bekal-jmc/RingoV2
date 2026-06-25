@@ -1,9 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { query, withTransaction } from '../config/db';
 import { requireAuth } from '../middlewares/authMiddleware';
-import { assertCanReadApp, assertValidRouteForTemplate } from '../middlewares/authz';
+import { assertCanReadApp } from '../middlewares/authz';
 import { mutationLimiter } from '../middlewares/rateLimit';
-import { resolveApprovalSteps, skipStepsThroughApplicant, type ResolvedStep } from '../services/approvalStepService';
+import { skipStepsThroughApplicant, type ResolvedStep } from '../services/approvalStepService';
+import { resolveChainFromUserSlots, previewChainForUser } from '../services/approvalChainService';
 import { applyComputedFormData, validateFormData } from '../services/formValidation';
 import { insertOutboxEvent } from '../services/eventOutbox';
 import { deleteFilesForApplication } from '../services/fileCleanup';
@@ -17,9 +18,17 @@ import { validateBody } from '../middlewares/validate';
 
 const ROUTE_PREVIEW_HARD_TTL = 7200; // 2 h — routes almost never change
 
-/** Called by adminRoutes when any route/step is mutated. */
+/** Called by adminRoutes when any route/step is mutated (legacy system). */
 export async function invalidateRoutePreviews(templateId: string): Promise<void> {
   await invalidateCachePattern(`route-preview:${templateId}:*`);
+}
+
+/** Called by adminRoutes when user slot assignments or template patterns change. */
+export async function invalidateChainPreviews(userOrTemplateId: string): Promise<void> {
+  await Promise.all([
+    invalidateCachePattern(`chain-preview:*:${userOrTemplateId}`),
+    invalidateCachePattern(`chain-preview:${userOrTemplateId}:*`),
+  ]);
 }
 import {
   createApplicationSchema, type CreateApplicationBody,
@@ -184,86 +193,46 @@ async function insertApprovalSteps(
   );
 }
 
-// GET /applications/route-preview?template_id=X&stage=RINGI|SETTLEMENT
+// GET /applications/route-preview?template_id=X&pattern_id=Y (optional)
+// Returns the chain this user would see for the given template + pattern.
+// Chain is per-user (slot assignments differ per person), cached 5 min.
 router.get('/route-preview', async (req: Request, res: Response): Promise<void> => {
-  const { template_id, stage = 'RINGI' } = req.query as { template_id?: string; stage?: string };
-  const department_id = req.user!.department_id;
+  const { template_id, pattern_id } = req.query as { template_id?: string; pattern_id?: string };
+  const applicantId = req.user!.id;
 
   if (!template_id) { res.status(400).json({ error: 'template_id required' }); return; }
-  if (!department_id) { res.status(422).json({ error: '部署が設定されていません。管理者にお問い合わせください。' }); return; }
 
-  const routeStage = stage === 'SETTLEMENT' ? 'SETTLEMENT' : 'RINGI';
-
-  interface CachedRoutePreview {
-    routeRows: Array<{ id: string; name: string; is_default: boolean }>;
-    stepRows:  Array<{ route_id: string; step_order: number; approver_id: string | null; label: string; action_type: string; approver_name: string | null; approver_role: string | null; approver_avatar: string | null }>;
-  }
+  const cacheKey = `chain-preview:${template_id}:${applicantId}${pattern_id ? `:${pattern_id}` : ''}`;
 
   try {
-    const cacheKey = `route-preview:${template_id}:${department_id}:${routeStage}`;
-    let cached = await getJsonCache<CachedRoutePreview>(cacheKey);
+    const cached = await getJsonCache(cacheKey);
+    if (cached) { res.json(cached); return; }
 
-    let routeRows: CachedRoutePreview['routeRows'];
-    let stepRows:  CachedRoutePreview['stepRows'];
+    const { pool } = await import('../config/db');
+    const client = await pool.connect();
+    try {
+      const preview = await previewChainForUser(client, applicantId, template_id, pattern_id);
 
-    if (cached) {
-      ({ routeRows, stepRows } = cached);
-    } else {
-      const routes = await query(
-        `SELECT r.id, r.name, r.is_default
-         FROM approval_routes r
-         WHERE r.template_id = $1
-           AND r.department_id = $2
-           AND r.stage = $3
-           AND r.is_active = TRUE
-         ORDER BY r.is_default DESC, r.name ASC`,
-        [template_id, department_id, routeStage],
-      );
-
-      if (routes.rows.length === 0) {
-        res.json({ routes: [], department_has_route: false }); return;
-      }
-
-      const steps = await query(
-        `SELECT s.route_id, s.step_order, s.approver_id, s.label, s.action_type,
-                u.full_name AS approver_name, u.role AS approver_role,
-                u.avatar_url AS approver_avatar
-         FROM approval_route_steps s
-         LEFT JOIN users u ON s.approver_id = u.id
-         WHERE s.route_id = ANY($1::uuid[])
-         ORDER BY s.route_id, s.step_order`,
-        [routes.rows.map((r: { id: string }) => r.id)],
-      );
-
-      routeRows = routes.rows as CachedRoutePreview['routeRows'];
-      stepRows  = steps.rows  as CachedRoutePreview['stepRows'];
-      void setJsonCache(cacheKey, { routeRows, stepRows }, ROUTE_PREVIEW_HARD_TTL);
-    }
-
-    if (routeRows.length === 0) {
-      res.json({ routes: [], department_has_route: false }); return;
-    }
-
-    const stepsByRoute = stepRows.reduce<Record<string, CachedRoutePreview['stepRows']>>((acc, s) => {
-      if (!acc[s.route_id]) acc[s.route_id] = [];
-      acc[s.route_id].push(s);
-      return acc;
-    }, {});
-
-    // Per-user filter: skip steps where applicant is already the approver (applied in-memory, not cached)
-    const applicantId = req.user!.id;
-    const result = routeRows.map((r) => {
-      const routeSteps = stepsByRoute[r.id] || [];
-      const ownStepIndex = routeSteps.findIndex((s) => s.approver_id === applicantId);
-      return {
-        ...r,
-        steps: ownStepIndex >= 0 ? routeSteps.slice(ownStepIndex + 1) : routeSteps,
-        skipped_steps: ownStepIndex >= 0 ? ownStepIndex + 1 : 0,
+      const applicantTrim = skipStepsThroughApplicant(preview.steps, applicantId);
+      const result = {
+        routes: [{
+          id:           preview.pattern_id,
+          name:         preview.pattern_name,
+          is_default:   true,
+          steps:        applicantTrim.steps,
+          skipped_steps: applicantTrim.skipped_steps,
+        }],
+        all_patterns:        preview.all_patterns,
+        department_has_route: preview.steps.length > 0 || preview.all_patterns.length > 0,
       };
-    });
-
-    res.json({ routes: result, department_has_route: true });
-  } catch (err) {
+      void setJsonCache(cacheKey, result, 300); // 5 min — user-specific, refreshes quickly
+      res.json(result);
+    } finally {
+      client.release();
+    }
+  } catch (err: unknown) {
+    const e = err as { status?: number; message?: string };
+    if (e.status === 422) { res.status(422).json({ error: e.message }); return; }
     console.error('[applications] route-preview failed:', err);
     res.status(500).json({ error: 'ルートの取得に失敗しました' });
   }
@@ -357,7 +326,7 @@ router.patch('/:id', validateBody(saveApplicationSchema), async (req: Request, r
 
 // POST /applications/:id/resubmit — RETURNED → PENDING_APPROVAL (fresh approval steps)
 router.post('/:id/resubmit', validateBody(submitApplicationSchema), async (req: Request, res: Response): Promise<void> => {
-  const { form_data, route_id: chosen_route_id } = req.body as SubmitApplicationBody;
+  const { form_data, pattern_id: chosen_pattern_id } = req.body as SubmitApplicationBody;
   const applicant_id = req.user!.id;
   const department_id = req.user!.department_id;
 
@@ -367,16 +336,15 @@ router.post('/:id/resubmit', validateBody(submitApplicationSchema), async (req: 
     const result = await withTransaction(async (client: pg.PoolClient) => {
       // Lock RETURNED application owned by applicant
       const appRes = await client.query(
-        `SELECT id, template_id, route_id FROM applications
+        `SELECT id, template_id FROM applications
          WHERE id = $1 AND applicant_id = $2 AND status = 'RETURNED' FOR UPDATE`,
         [req.params.id, applicant_id],
       );
       if (appRes.rows.length === 0) {
         throw Object.assign(new Error('差し戻し済み申請が見つかりません'), { status: 404 });
       }
-      const { template_id, route_id: prev_route_id } = appRes.rows[0] as {
+      const { template_id } = appRes.rows[0] as {
         template_id: string;
-        route_id: string | null;
       };
       const schemaRes = await client.query(
         `SELECT COALESCE(v.schema_definition, active_v.schema_definition) AS schema_definition
@@ -401,30 +369,16 @@ router.post('/:id/resubmit', validateBody(submitApplicationSchema), async (req: 
         }
       }
 
-      // Resolve route (prefer caller-supplied, then previous, then default)
-      let route_id: string = chosen_route_id || prev_route_id || '';
-      if (!route_id) {
-        const routeRes = await client.query(
-          `SELECT id FROM approval_routes
-           WHERE template_id = $1 AND department_id = $2 AND stage = 'RINGI'
-             AND is_active = TRUE AND is_default = TRUE
-           LIMIT 1`,
-          [template_id, department_id],
-        );
-        if (routeRes.rows.length === 0) {
-          throw Object.assign(new Error('承認ルートが設定されていません'), { status: 422 });
-        }
-        route_id = routeRes.rows[0].id as string;
-      } else if (chosen_route_id) {
-        // Caller-supplied route — must match template+dept+stage+active
-        await assertValidRouteForTemplate(client, route_id, template_id, department_id, 'RINGI');
-      }
-
-      // Resolve route → concrete steps (single batched role lookup)
-      const routePolicy = skipStepsThroughApplicant(
-        await resolveApprovalSteps(client, route_id),
-        applicant_id,
-      );
+      // Resolve chain via User × Pattern model
+      const { steps: rawSteps, patternId: resolvedPatternId } = await resolveChainFromUserSlots(client, {
+        applicantId:  applicant_id,
+        departmentId: department_id,
+        templateId:   template_id,
+        formData:     typeof form_data === 'object' && form_data ? form_data : {},
+        patternId:    chosen_pattern_id ?? undefined,
+        stageFilter:  'RINGI',
+      });
+      const routePolicy = skipStepsThroughApplicant(rawSteps, applicant_id);
       const resolvedSteps = routePolicy.steps;
 
       // Determine step_order offset (100 per round, so history is preserved in order)
@@ -448,19 +402,19 @@ router.post('/:id/resubmit', validateBody(submitApplicationSchema), async (req: 
       if (normalizedFormData) {
         await client.query(
           `UPDATE applications
-           SET status = 'PENDING_APPROVAL', route_id = $1,
+           SET status = 'PENDING_APPROVAL', approval_pattern_id = $1,
                submitted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
                form_data = $2::jsonb
            WHERE id = $3`,
-          [route_id, JSON.stringify(normalizedFormData), req.params.id],
+          [resolvedPatternId, JSON.stringify(normalizedFormData), req.params.id],
         );
       } else {
         await client.query(
           `UPDATE applications
-           SET status = 'PENDING_APPROVAL', route_id = $1,
+           SET status = 'PENDING_APPROVAL', approval_pattern_id = $1,
                submitted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
            WHERE id = $2`,
-          [route_id, req.params.id],
+          [resolvedPatternId, req.params.id],
         );
       }
 
@@ -478,7 +432,7 @@ router.post('/:id/resubmit', validateBody(submitApplicationSchema), async (req: 
         `INSERT INTO audit_logs (action, entity_type, entity_id, metadata)
          VALUES ('RESUBMIT', 'application', $1, $2::jsonb)`,
         [req.params.id, JSON.stringify({
-          route_id,
+          pattern_id: resolvedPatternId,
           offset,
           steps: resolvedSteps.length,
           skipped_steps: routePolicy.skipped_steps,
@@ -520,7 +474,7 @@ router.post('/:id/resubmit', validateBody(submitApplicationSchema), async (req: 
 
 // POST /applications/:id/submit — convert DRAFT → PENDING_APPROVAL with approval steps
 router.post('/:id/submit', async (req: Request, res: Response): Promise<void> => {
-  const { route_id: chosen_route_id } = req.body as { route_id?: string };
+  const { pattern_id: chosen_pattern_id } = req.body as { pattern_id?: string };
   const applicant_id = req.user!.id;
   const department_id = req.user!.department_id;
 
@@ -545,41 +499,27 @@ router.post('/:id/submit', async (req: Request, res: Response): Promise<void> =>
       const isDirectSettlement = draftRow.pattern_id === 2;
       const routeStage: ApprovalStage = isDirectSettlement ? 'SETTLEMENT' : 'RINGI';
 
-      // Resolve route — pattern_id picks SETTLEMENT vs RINGI bucket
-      let route_id: string = chosen_route_id || '';
-      if (!route_id) {
-        const routeRes = await client.query(
-          `SELECT id FROM approval_routes
-           WHERE template_id = $1 AND department_id = $2 AND stage = $3 AND is_active = TRUE AND is_default = TRUE
-           LIMIT 1`,
-          [template_id, department_id, routeStage],
-        );
-        if (routeRes.rows.length === 0) {
-          throw Object.assign(
-            new Error(isDirectSettlement ? '精算承認ルートが設定されていません' : '承認ルートが設定されていません'),
-            { status: 422 },
-          );
-        }
-        route_id = routeRes.rows[0].id as string;
-      } else {
-        await assertValidRouteForTemplate(client, route_id, template_id, department_id, routeStage);
-      }
-
-      const submitRoutePolicy = skipStepsThroughApplicant(
-        await resolveApprovalSteps(client, route_id),
-        applicant_id,
-      );
+      // Resolve chain via User × Pattern model
+      const { steps: rawSubmitSteps, patternId: resolvedPatternId } = await resolveChainFromUserSlots(client, {
+        applicantId:  applicant_id,
+        departmentId: department_id,
+        templateId:   template_id,
+        formData:     {},
+        patternId:    chosen_pattern_id ?? undefined,
+        stageFilter:  routeStage as 'RINGI' | 'SETTLEMENT',
+      });
+      const submitRoutePolicy = skipStepsThroughApplicant(rawSubmitSteps, applicant_id);
       const resolvedSubmitSteps = submitRoutePolicy.steps;
 
       // Update application: pattern_id=2 → PENDING_SETTLEMENT + settlement_submitted_at, else PENDING_APPROVAL
       const initialStatus = isDirectSettlement ? 'PENDING_SETTLEMENT' : 'PENDING_APPROVAL';
       await client.query(
         `UPDATE applications
-         SET status = $3, route_id = $2,
+         SET status = $3, approval_pattern_id = $2,
              submitted_at = CURRENT_TIMESTAMP,
              settlement_submitted_at = CASE WHEN $4 THEN CURRENT_TIMESTAMP ELSE settlement_submitted_at END
          WHERE id = $1`,
-        [req.params.id, route_id, initialStatus, isDirectSettlement],
+        [req.params.id, resolvedPatternId, initialStatus, isDirectSettlement],
       );
 
       const assignedNumber = await ensureApplicationNumber(client, String(req.params.id));
@@ -615,7 +555,7 @@ router.post('/:id/submit', async (req: Request, res: Response): Promise<void> =>
         `INSERT INTO audit_logs (action, entity_type, entity_id, metadata)
          VALUES ('DRAFT_SUBMIT', 'application', $1, $2::jsonb)`,
         [req.params.id, JSON.stringify({
-          route_id,
+          pattern_id: resolvedPatternId,
           steps: resolvedSubmitSteps.length,
           skipped_steps: submitRoutePolicy.skipped_steps,
           skipped_through_step_order: submitRoutePolicy.skipped_through_step_order,
@@ -655,7 +595,7 @@ router.post('/:id/submit', async (req: Request, res: Response): Promise<void> =>
 
 // POST /applications/:id/start-settlement — APPROVED app → PENDING_SETTLEMENT
 router.post('/:id/start-settlement', validateBody(startSettlementSchema), async (req: Request, res: Response): Promise<void> => {
-  const { settlement_data, route_id: chosen_route_id } = req.body as StartSettlementBody;
+  const { settlement_data, pattern_id: chosen_pattern_id } = req.body as StartSettlementBody;
   const applicant_id = req.user!.id;
   const department_id = req.user!.department_id;
 
@@ -716,33 +656,16 @@ router.post('/:id/start-settlement', validateBody(startSettlementSchema), async 
         }
       }
 
-      // Resolve SETTLEMENT route
-      let route_id: string = chosen_route_id || '';
-      if (!route_id) {
-        const routeRes = await client.query(
-          `SELECT id FROM approval_routes
-           WHERE template_id = $1 AND department_id = $2 AND stage = 'SETTLEMENT'
-             AND is_active = TRUE AND is_default = TRUE
-           LIMIT 1`,
-          [template_id, department_id],
-        );
-        if (routeRes.rows.length === 0) {
-          throw Object.assign(
-            new Error('精算承認ルートが設定されていません。管理者にお問い合わせください。'),
-            { status: 422 },
-          );
-        }
-        route_id = routeRes.rows[0].id as string;
-      } else {
-        // Caller-supplied route — must match template+dept+SETTLEMENT+active
-        await assertValidRouteForTemplate(client, route_id, template_id, department_id, 'SETTLEMENT');
-      }
-
-      // Resolve settlement route → concrete steps (single batched role lookup)
-      const settleRoutePolicy = skipStepsThroughApplicant(
-        await resolveApprovalSteps(client, route_id, '精算ルート'),
-        applicant_id,
-      );
+      // Resolve SETTLEMENT chain via User × Pattern model
+      const { steps: rawSettleSteps, patternId: resolvedPatternId } = await resolveChainFromUserSlots(client, {
+        applicantId:  applicant_id,
+        departmentId: department_id,
+        templateId:   template_id,
+        formData:     settlement_data ?? {},
+        patternId:    chosen_pattern_id ?? undefined,
+        stageFilter:  'SETTLEMENT',
+      });
+      const settleRoutePolicy = skipStepsThroughApplicant(rawSettleSteps, applicant_id);
       const resolvedSteps = settleRoutePolicy.steps;
 
       // Update application
@@ -787,7 +710,7 @@ router.post('/:id/start-settlement', validateBody(startSettlementSchema), async 
         `INSERT INTO audit_logs (action, entity_type, entity_id, metadata)
          VALUES ('SETTLEMENT_START', 'application', $1, $2::jsonb)`,
         [req.params.id, JSON.stringify({
-          route_id,
+          pattern_id: resolvedPatternId,
           steps: resolvedSteps.length,
           skipped_steps: settleRoutePolicy.skipped_steps,
           skipped_through_step_order: settleRoutePolicy.skipped_through_step_order,
@@ -829,7 +752,7 @@ router.post('/:id/start-settlement', validateBody(startSettlementSchema), async 
 // POST /applications/:id/resubmit-settlement — RETURNED (settlement phase) → PENDING_SETTLEMENT
 // Mirrors resubmit but for settlement round: keeps RINGI history, restarts settlement steps only.
 router.post('/:id/resubmit-settlement', validateBody(submitSettlementSchema), async (req: Request, res: Response): Promise<void> => {
-  const { settlement_data, route_id: chosen_route_id } = req.body as SubmitSettlementBody;
+  const { settlement_data, pattern_id: chosen_pattern_id } = req.body as SubmitSettlementBody;
   const applicant_id = req.user!.id;
   const department_id = req.user!.department_id;
 
@@ -839,7 +762,7 @@ router.post('/:id/resubmit-settlement', validateBody(submitSettlementSchema), as
     const result = await withTransaction(async (client: pg.PoolClient) => {
       // Lock app — must be RETURNED with a settlement step that was returned
       const appRes = await client.query(
-        `SELECT a.id, a.template_id, a.template_version_id, a.route_id
+        `SELECT a.id, a.template_id, a.template_version_id
          FROM applications a
          WHERE a.id = $1 AND a.applicant_id = $2 AND a.status = 'RETURNED'
          FOR UPDATE`,
@@ -911,30 +834,16 @@ router.post('/:id/resubmit-settlement', validateBody(submitSettlementSchema), as
         }
       }
 
-      // Resolve SETTLEMENT route
-      let route_id: string = chosen_route_id || '';
-      if (!route_id) {
-        const routeRes = await client.query(
-          `SELECT id FROM approval_routes
-           WHERE template_id = $1 AND department_id = $2 AND stage = 'SETTLEMENT'
-             AND is_active = TRUE AND is_default = TRUE
-           LIMIT 1`,
-          [template_id, department_id],
-        );
-        if (routeRes.rows.length === 0) {
-          throw Object.assign(new Error('精算承認ルートが設定されていません'), { status: 422 });
-        }
-        route_id = routeRes.rows[0].id as string;
-      } else {
-        // Caller-supplied — validate scope
-        await assertValidRouteForTemplate(client, route_id, template_id, department_id, 'SETTLEMENT');
-      }
-
-      // Resolve SETTLEMENT route → concrete steps (single batched role lookup)
-      const settleRoutePolicy = skipStepsThroughApplicant(
-        await resolveApprovalSteps(client, route_id, '精算ルート'),
-        applicant_id,
-      );
+      // Resolve SETTLEMENT chain via User × Pattern model
+      const { steps: rawResubmitSettleSteps, patternId: resolvedPatternId } = await resolveChainFromUserSlots(client, {
+        applicantId:  applicant_id,
+        departmentId: department_id,
+        templateId:   template_id,
+        formData:     settlement_data ?? {},
+        patternId:    chosen_pattern_id ?? undefined,
+        stageFilter:  'SETTLEMENT',
+      });
+      const settleRoutePolicy = skipStepsThroughApplicant(rawResubmitSettleSteps, applicant_id);
       const resolvedSteps = settleRoutePolicy.steps;
 
       // Determine round offset for settlement (same logic as RINGI resubmit — preserves history)
@@ -1004,7 +913,7 @@ router.post('/:id/resubmit-settlement', validateBody(submitSettlementSchema), as
         `INSERT INTO audit_logs (action, entity_type, entity_id, metadata)
          VALUES ('SETTLEMENT_RESUBMIT', 'application', $1, $2::jsonb)`,
         [req.params.id, JSON.stringify({
-          route_id,
+          pattern_id: resolvedPatternId,
           offset: settleOffset,
           steps: resolvedSteps.length,
           skipped_steps: settleRoutePolicy.skipped_steps,
@@ -1046,7 +955,7 @@ router.post('/:id/resubmit-settlement', validateBody(submitSettlementSchema), as
 
 // POST /applications — submit new ringi
 router.post('/', validateBody(adminSubmitSchema), async (req: Request, res: Response): Promise<void> => {
-  const { template_id, stage, form_data, route_id: chosen_route_id } = req.body as AdminSubmitBody;
+  const { template_id, stage, form_data, pattern_id: chosen_pattern_id } = req.body as AdminSubmitBody;
 
   try {
     const result = await withTransaction(async (client: pg.PoolClient) => {
@@ -1072,44 +981,16 @@ router.post('/', validateBody(adminSubmitSchema), async (req: Request, res: Resp
       // their data shape (entries[] etc.) doesn't fit the standard field schema.
       const skipValidation = !!component_type;
       const routeStage  = isDirectSettlement ? 'SETTLEMENT' : 'RINGI';
-      const missingRouteErr = isDirectSettlement
-        ? '精算承認ルートが設定されていません。管理者にお問い合わせください。'
-        : 'この部署にはこのテンプレートの承認ルートが設定されていません。管理者にお問い合わせください。';
-
-      let route_id: string = chosen_route_id || '';
-
-      if (!route_id) {
-        const routeRes = await client.query(
-          `SELECT r.id FROM approval_routes r
-           WHERE r.template_id = $1 AND r.department_id = $2
-             AND r.stage = $3 AND r.is_active = TRUE AND r.is_default = TRUE
-           LIMIT 1`,
-          [template_id, department_id, routeStage],
-        );
-        if (routeRes.rows.length === 0) {
-          throw Object.assign(new Error(missingRouteErr), { status: 422 });
-        }
-        route_id = routeRes.rows[0].id as string;
-      } else {
-        const verify = await client.query(
-          `SELECT id FROM approval_routes
-           WHERE id = $1 AND template_id = $2 AND department_id = $3
-             AND stage = $4 AND is_active = TRUE`,
-          [route_id, template_id, department_id, routeStage],
-        );
-        if (verify.rows.length === 0) {
-          throw Object.assign(
-            new Error('選択したルートはこの部署・テンプレートに対して無効です。'),
-            { status: 422 },
-          );
-        }
-      }
-
-      // Resolve route → concrete steps (single batched role lookup)
-      const routePolicy = skipStepsThroughApplicant(
-        await resolveApprovalSteps(client, route_id, isDirectSettlement ? '精算ルート' : '承認ルート'),
-        applicant_id,
-      );
+      // Resolve chain via User × Pattern model
+      const { steps: rawDirectSteps, patternId: resolvedPatternId } = await resolveChainFromUserSlots(client, {
+        applicantId:  applicant_id,
+        departmentId: department_id,
+        templateId:   template_id,
+        formData:     form_data ?? {},
+        patternId:    chosen_pattern_id ?? undefined,
+        stageFilter:  routeStage as 'RINGI' | 'SETTLEMENT',
+      });
+      const routePolicy = skipStepsThroughApplicant(rawDirectSteps, applicant_id);
       const resolvedSteps = routePolicy.steps;
 
       // Capture active form template version — locks schema to what user submitted
@@ -1136,12 +1017,12 @@ router.post('/', validateBody(adminSubmitSchema), async (req: Request, res: Resp
 
       const appRes = await client.query(
         `INSERT INTO applications
-           (applicant_id, template_id, template_version_id, route_id, form_data, status,
+           (applicant_id, template_id, template_version_id, approval_pattern_id, form_data, status,
             submitted_at, settlement_submitted_at)
          VALUES ($1, $2, $3, $4, $5::jsonb, $6, CURRENT_TIMESTAMP, $7)
          RETURNING id, status`,
         [
-          applicant_id, template_id, versionId, route_id,
+          applicant_id, template_id, versionId, resolvedPatternId,
           JSON.stringify(normalizedFormData), initialStatus,
           isDirectSettlement ? new Date() : null,
         ],
@@ -1179,7 +1060,8 @@ router.post('/', validateBody(adminSubmitSchema), async (req: Request, res: Resp
         [app.id, JSON.stringify({
           template_id,
           stage: isDirectSettlement ? 'SETTLEMENT' : (stage ?? 'RINGI'),
-          pattern_id,
+          workflow_pattern: pattern_id,
+          approval_pattern_id: resolvedPatternId,
           steps: resolvedSteps.length,
           skipped_steps: routePolicy.skipped_steps,
           skipped_through_step_order: routePolicy.skipped_through_step_order,

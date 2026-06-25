@@ -28,6 +28,7 @@ interface ApprovalRoute {
 
 interface RoutePreview {
   routes: ApprovalRoute[];
+  all_patterns: { id: string; name: string; is_default: boolean }[];
   department_has_route: boolean;
 }
 
@@ -41,7 +42,7 @@ export default function NewApplication() {
   const queryClient = useQueryClient();
   const { t, lang } = useLang();
   const { toast, show: showToast, dismiss } = useToast();
-  const [selectedRouteId, setSelectedRouteId] = useState<string>('');
+  const [selectedPatternId, setSelectedPatternId] = useState<string>('');
   const [routeExpanded, setRouteExpanded] = useState(true);
 
   const { data: template, isLoading: templateLoading, isError: templateError } = useQuery({
@@ -59,35 +60,33 @@ export default function NewApplication() {
 
   const showTemplateLoader = useDelayedLoading(templateLoading);
 
-  // pattern_id=2 (e.g. transportation) → direct settlement, no ringi phase → show SETTLEMENT routes
-  const routeStage = template?.pattern_id === 2 ? 'SETTLEMENT' : 'RINGI';
+  // Reset selected pattern when template changes
+  useEffect(() => { setSelectedPatternId(''); }, [template?.id]);
 
   const { data: routePreview, isLoading: routeLoading } = useQuery<RoutePreview>({
-    queryKey: ['route-preview', template?.id, routeStage],
+    queryKey: ['route-preview', template?.id, selectedPatternId],
     queryFn: async (): Promise<RoutePreview> => {
-      const res = await apiClient.get(`/applications/route-preview?template_id=${template.id}&stage=${routeStage}`);
-      return res.data as RoutePreview;
+      const url = `/applications/route-preview?template_id=${template.id}${selectedPatternId ? `&pattern_id=${selectedPatternId}` : ''}`;
+      return (await apiClient.get(url)).data as RoutePreview;
     },
     enabled: !!template?.id,
-    // Always refetch — routes are dept-filtered; stale cache shows wrong dept's routes
     staleTime: 0,
   });
 
+  // Set default pattern on first load (only when selectedPatternId is still empty)
   useEffect(() => {
-    if (!routePreview) return;
-    const def = routePreview.routes.find((r) => r.is_default) ?? routePreview.routes[0];
-    if (def) setSelectedRouteId(def.id);
-  }, [routePreview]);
+    if (!routePreview || selectedPatternId) return;
+    const def = routePreview.all_patterns?.find(p => p.is_default) ?? routePreview.all_patterns?.[0];
+    if (def) setSelectedPatternId(def.id);
+  }, [routePreview, selectedPatternId]);
 
-  const selectedRoute = routePreview?.routes.find((r) => r.id === selectedRouteId)
-    ?? routePreview?.routes[0];
+  const selectedRoute = routePreview?.routes[0];
 
   const handleFormSubmit = async (payload: any) => {
     try {
       await apiClient.post('/applications', {
         ...payload,
-        // route_id passed for all patterns — backend validates against pattern's expected stage
-        route_id: selectedRouteId || undefined,
+        pattern_id: selectedPatternId || undefined,
       });
       queryClient.invalidateQueries({ queryKey: ['myApplications'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard', 'summary'] });
@@ -181,23 +180,23 @@ export default function NewApplication() {
                   <div className="flex items-start gap-2.5 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
                     <span className="text-base">⚠️</span>
                     <p>
-                      {template.pattern_id === 2
-                        ? (lang === 'ja' ? 'この部署の精算承認ルートが設定されていません。管理者にお問い合わせください。' : 'No settlement approval route configured for your department. Contact your admin.')
-                        : t('route_no_route_warn')}
+                      {lang === 'ja'
+                        ? 'このフォームの承認パターンが設定されていません。管理者にお問い合わせください。'
+                        : 'No approval pattern configured for this form. Contact your admin.'}
                     </p>
                   </div>
                 )}
 
-                {routePreview && routePreview.routes.length > 1 && (
+                {routePreview && (routePreview.all_patterns?.length ?? 0) > 1 && (
                   <div className="space-y-1.5">
                     <label className="label">{t('route_select')}</label>
                     <CustomSelect
-                      options={routePreview.routes.map((r) => ({
-                        value: r.id,
-                        label: `${r.name}${r.is_default ? t('route_default_suffix') : ''}`,
+                      options={(routePreview.all_patterns ?? []).map((p) => ({
+                        value: p.id,
+                        label: `${p.name}${p.is_default ? t('route_default_suffix') : ''}`,
                       }))}
-                      value={selectedRouteId}
-                      onChange={setSelectedRouteId}
+                      value={selectedPatternId}
+                      onChange={setSelectedPatternId}
                     />
                   </div>
                 )}
