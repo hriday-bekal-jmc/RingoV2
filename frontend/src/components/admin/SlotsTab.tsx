@@ -3,14 +3,18 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../../services/apiClient';
 import CustomSelect from '../forms/CustomSelect';
 
-interface User { id: string; full_name: string; department_name?: string; is_active: boolean }
+interface User { id: string; full_name: string; department_name?: string; department_id?: string; is_active: boolean }
+interface Department { id: string; name: string; code: string }
 interface ApprovalSlot { id: string; slot_code: string; label_ja: string; slot_type: string; sort_order: number }
 interface SlotAssignment { slot_id: string; approver_id: string | null }
+
+type SubTab = 'user' | 'dept' | 'replace';
 
 export default function SlotsTab({ showToast }: {
   showToast: (m: string, t?: 'success' | 'error' | 'info') => void;
 }) {
   const queryClient = useQueryClient();
+  const [subTab, setSubTab] = useState<SubTab>('user');
   const [selectedUserId, setSelectedUserId] = useState('');
   const [copyFromUserId, setCopyFromUserId] = useState('');
   const [showCopyFrom, setShowCopyFrom] = useState(false);
@@ -86,110 +90,106 @@ export default function SlotsTab({ showToast }: {
   const confirmSlots = slots.filter(s => s.slot_type === 'CONFIRM');
   const isDirty = Object.keys(dirty).length > 0;
 
+  const SUB_TABS: { key: SubTab; label: string }[] = [
+    { key: 'user',    label: 'ユーザー別' },
+    { key: 'dept',    label: '部署デフォルト' },
+    { key: 'replace', label: '承認者置き換え' },
+  ];
+
   return (
     <div className="space-y-5">
       <div className="card space-y-4">
         <div>
           <p className="section-title">承認スロット管理</p>
-          <p className="text-xs text-warmgray-500 mt-0.5">ユーザーごとに18スロットの承認者を設定します。未設定スロットは自動でスキップされます。</p>
+          <p className="text-xs text-warmgray-500 mt-0.5">ユーザー別・部署別にスロットを設定。部署デフォルトはユーザー個別設定がない場合のフォールバックです。</p>
         </div>
 
-        <div className="flex items-end gap-3 flex-wrap">
-          <div className="flex-1 min-w-[200px]">
-            <label className="label">ユーザーを選択</label>
-            <CustomSelect
-              options={[{ value: '', label: '─ ユーザーを選択 ─' }, ...userOptions]}
-              value={selectedUserId}
-              onChange={(v) => { setSelectedUserId(v); setDirty({}); }}
-            />
-          </div>
-          {selectedUserId && (
+        {/* Sub-tab bar */}
+        <div className="flex gap-1 border-b border-warmgray-100">
+          {SUB_TABS.map(st => (
             <button
-              onClick={() => setShowCopyFrom(s => !s)}
-              className="btn-ghost text-sm border border-warmgray-200"
+              key={st.key}
+              onClick={() => setSubTab(st.key)}
+              className={`text-sm font-semibold pb-2 px-2 border-b-2 transition-colors ${
+                subTab === st.key
+                  ? 'border-warmgray-800 text-warmgray-800'
+                  : 'border-transparent text-warmgray-400 hover:text-warmgray-600'
+              }`}
             >
-              他ユーザーからコピー
+              {st.label}
             </button>
-          )}
+          ))}
         </div>
-
-        {showCopyFrom && selectedUserId && (
-          <div className="flex items-end gap-3 p-3 bg-amber-50/60 border border-amber-200/60 rounded-xl flex-wrap">
-            <div className="flex-1 min-w-[200px]">
-              <label className="label">コピー元ユーザー</label>
-              <CustomSelect
-                options={[{ value: '', label: '─ 選択 ─' }, ...userOptions.filter(u => u.value !== selectedUserId)]}
-                value={copyFromUserId}
-                onChange={setCopyFromUserId}
-              />
-            </div>
-            <button
-              disabled={!copyFromUserId || copyMutation.isPending}
-              onClick={() => copyMutation.mutate()}
-              className="btn-primary text-sm"
-            >
-              {copyMutation.isPending ? 'コピー中...' : 'コピー実行'}
-            </button>
-            <button
-              onClick={() => { setShowCopyFrom(false); setCopyFromUserId(''); }}
-              className="btn-ghost text-sm text-warmgray-500"
-            >
-              キャンセル
-            </button>
-          </div>
-        )}
       </div>
 
-      {selectedUserId ? (
-        <div className="card space-y-5">
-          {assignmentsLoading ? (
-            <div className="text-center text-warmgray-400 text-sm py-8">読み込み中...</div>
-          ) : (
-            <>
-              <SlotGroup
-                title="稟議フェーズ"
-                slots={ringiSlots}
-                effectiveMap={effectiveMap}
-                approverOptions={approverOptions}
-                dirty={dirty}
-                setDirty={setDirty}
-              />
-              <SlotGroup
-                title="精算フェーズ"
-                slots={settleSlots}
-                effectiveMap={effectiveMap}
-                approverOptions={approverOptions}
-                dirty={dirty}
-                setDirty={setDirty}
-              />
-              {confirmSlots.length > 0 && (
-                <SlotGroup
-                  title="確認フェーズ"
-                  slots={confirmSlots}
-                  effectiveMap={effectiveMap}
-                  approverOptions={approverOptions}
-                  dirty={dirty}
-                  setDirty={setDirty}
+        {subTab === 'user' && (
+          <>
+            <div className="flex items-end gap-3 flex-wrap">
+              <div className="flex-1 min-w-[200px]">
+                <label className="label">ユーザーを選択</label>
+                <CustomSelect
+                  options={[{ value: '', label: '─ ユーザーを選択 ─' }, ...userOptions]}
+                  value={selectedUserId}
+                  onChange={(v) => { setSelectedUserId(v); setDirty({}); }}
                 />
-              )}
-
-              <div className="flex items-center justify-end gap-3 pt-2 border-t border-white/40">
-                {isDirty && <span className="text-xs text-amber-600">未保存の変更があります</span>}
-                <button
-                  disabled={saveMutation.isPending}
-                  onClick={() => saveMutation.mutate()}
-                  className="btn-primary"
-                >
-                  {saveMutation.isPending ? '保存中...' : '保存'}
-                </button>
               </div>
-            </>
-          )}
-        </div>
-      ) : (
-        <div className="card text-center py-12 text-warmgray-400 text-sm">
-          ユーザーを選択してスロットを設定してください
-        </div>
+              {selectedUserId && (
+                <button onClick={() => setShowCopyFrom(s => !s)} className="btn-ghost text-sm border border-warmgray-200">
+                  他ユーザーからコピー
+                </button>
+              )}
+            </div>
+            {showCopyFrom && selectedUserId && (
+              <div className="flex items-end gap-3 p-3 bg-amber-50/60 border border-amber-200/60 rounded-xl flex-wrap">
+                <div className="flex-1 min-w-[200px]">
+                  <label className="label">コピー元ユーザー</label>
+                  <CustomSelect
+                    options={[{ value: '', label: '─ 選択 ─' }, ...userOptions.filter(u => u.value !== selectedUserId)]}
+                    value={copyFromUserId}
+                    onChange={setCopyFromUserId}
+                  />
+                </div>
+                <button disabled={!copyFromUserId || copyMutation.isPending} onClick={() => copyMutation.mutate()} className="btn-primary text-sm">
+                  {copyMutation.isPending ? 'コピー中...' : 'コピー実行'}
+                </button>
+                <button onClick={() => { setShowCopyFrom(false); setCopyFromUserId(''); }} className="btn-ghost text-sm text-warmgray-500">キャンセル</button>
+              </div>
+            )}
+          </>
+        )}
+
+      {subTab === 'user' && (
+        selectedUserId ? (
+          <div className="card space-y-5">
+            {assignmentsLoading ? (
+              <div className="text-center text-warmgray-400 text-sm py-8">読み込み中...</div>
+            ) : (
+              <>
+                <SlotGroup title="稟議フェーズ"  slots={ringiSlots}   effectiveMap={effectiveMap} approverOptions={approverOptions} dirty={dirty} setDirty={setDirty} />
+                <SlotGroup title="精算フェーズ"  slots={settleSlots}  effectiveMap={effectiveMap} approverOptions={approverOptions} dirty={dirty} setDirty={setDirty} />
+                {confirmSlots.length > 0 && (
+                  <SlotGroup title="確認フェーズ" slots={confirmSlots} effectiveMap={effectiveMap} approverOptions={approverOptions} dirty={dirty} setDirty={setDirty} />
+                )}
+                <div className="flex items-center justify-end gap-3 pt-2 border-t border-white/40">
+                  {isDirty && <span className="text-xs text-amber-600">未保存の変更があります</span>}
+                  <button disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()} className="btn-primary">
+                    {saveMutation.isPending ? '保存中...' : '保存'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="card text-center py-12 text-warmgray-400 text-sm">ユーザーを選択してスロットを設定してください</div>
+        )
+      )}
+
+      {subTab === 'dept' && (
+        <DeptSlotsSection slots={slots} approverOptions={approverOptions} showToast={showToast} />
+      )}
+
+      {subTab === 'replace' && (
+        <ReplaceApproverSection users={activeUsers} showToast={showToast} />
       )}
     </div>
   );
@@ -233,6 +233,190 @@ function SlotGroup({ title, slots, effectiveMap, approverOptions, dirty, setDirt
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ── Dept slots section ────────────────────────────────────────────────────────
+
+function DeptSlotsSection({ slots, approverOptions, showToast }: {
+  slots: ApprovalSlot[];
+  approverOptions: { value: string; label: string }[];
+  showToast: (m: string, t?: 'success' | 'error' | 'info') => void;
+}) {
+  const ringiSlots   = slots.filter(s => s.slot_type === 'RINGI');
+  const settleSlots  = slots.filter(s => s.slot_type === 'SETTLEMENT');
+  const confirmSlots = slots.filter(s => s.slot_type === 'CONFIRM');
+  const queryClient = useQueryClient();
+  const [selectedDeptId, setSelectedDeptId] = useState('');
+  const [dirty, setDirty] = useState<Record<string, string | null>>({});
+
+  const { data: departments = [] } = useQuery<Department[]>({
+    queryKey: ['admin', 'departments'],
+    queryFn: async () => (await apiClient.get('/admin/departments')).data,
+    staleTime: 10 * 60_000,
+  });
+
+  const { data: deptAssignments = [], isLoading } = useQuery<SlotAssignment[]>({
+    queryKey: ['admin', 'dept-slots', selectedDeptId],
+    queryFn: async () => (await apiClient.get(`/admin/departments/${selectedDeptId}/approval-slots`)).data,
+    enabled: !!selectedDeptId,
+    staleTime: 60_000,
+  });
+
+  const assignmentMap = Object.fromEntries(deptAssignments.map(a => [a.slot_id, a.approver_id]));
+  const effectiveMap: Record<string, string | null> = { ...assignmentMap, ...dirty };
+  const isDirty = Object.keys(dirty).length > 0;
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const slotsPayload = slots.map(s => ({ slot_id: s.id, approver_id: effectiveMap[s.id] ?? null }));
+      await apiClient.put(`/admin/departments/${selectedDeptId}/approval-slots`, { slots: slotsPayload });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'dept-slots', selectedDeptId] });
+      setDirty({});
+      showToast('部署スロットを保存しました');
+    },
+    onError: (err: any) => showToast(`保存失敗: ${err.message}`, 'error'),
+  });
+
+  const deptOptions = [
+    { value: '', label: '─ 部署を選択 ─' },
+    ...departments.map(d => ({ value: d.id, label: d.name })),
+  ];
+
+  return (
+    <div className="space-y-5">
+      <div className="card space-y-3">
+        <div>
+          <p className="text-sm font-semibold text-warmgray-700">部署デフォルトスロット</p>
+          <p className="text-xs text-warmgray-500 mt-0.5">ユーザー個別設定がない場合のフォールバック。部署全体で同じ承認者を使う場合にここで設定します。</p>
+        </div>
+        <div className="max-w-sm">
+          <label className="label">部署を選択</label>
+          <CustomSelect
+            options={deptOptions}
+            value={selectedDeptId}
+            onChange={v => { setSelectedDeptId(v); setDirty({}); }}
+          />
+        </div>
+      </div>
+
+      {selectedDeptId && (
+        <div className="card space-y-5">
+          {isLoading ? (
+            <div className="text-center text-warmgray-400 text-sm py-8">読み込み中...</div>
+          ) : (
+            <>
+              <SlotGroup title="稟議フェーズ"  slots={ringiSlots}   effectiveMap={effectiveMap} approverOptions={approverOptions} dirty={dirty} setDirty={setDirty} />
+              <SlotGroup title="精算フェーズ"  slots={settleSlots}  effectiveMap={effectiveMap} approverOptions={approverOptions} dirty={dirty} setDirty={setDirty} />
+              {confirmSlots.length > 0 && (
+                <SlotGroup title="確認フェーズ" slots={confirmSlots} effectiveMap={effectiveMap} approverOptions={approverOptions} dirty={dirty} setDirty={setDirty} />
+              )}
+              <div className="flex items-center justify-end gap-3 pt-2 border-t border-white/40">
+                {isDirty && <span className="text-xs text-amber-600">未保存の変更があります</span>}
+                <button disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()} className="btn-primary">
+                  {saveMutation.isPending ? '保存中...' : '保存'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Replace approver section ──────────────────────────────────────────────────
+
+function ReplaceApproverSection({ users, showToast }: {
+  users: User[];
+  showToast: (m: string, t?: 'success' | 'error' | 'info') => void;
+}) {
+  const [fromUserId, setFromUserId] = useState('');
+  const [toUserId, setToUserId] = useState('__null__');
+  const [preview, setPreview] = useState<{ updated_count: number } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const userOptions = users.map(u => ({ value: u.id, label: `${u.full_name}${u.department_name ? ` (${u.department_name})` : ''}` }));
+  const toOptions = [
+    { value: '__null__', label: '─ 空き（スキップ）にする ─' },
+    ...userOptions,
+  ];
+
+  const execute = async () => {
+    if (!fromUserId) return;
+    setLoading(true);
+    setPreview(null);
+    try {
+      const res = await apiClient.post('/admin/approval-slots/replace-approver', {
+        from_user_id: fromUserId,
+        to_user_id:   toUserId === '__null__' ? null : toUserId,
+      });
+      setPreview(res.data);
+      showToast(`${res.data.updated_count} 件のスロットを置き換えました`);
+    } catch (e: any) {
+      showToast(`置き換え失敗: ${e.message}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="card space-y-5">
+      <div>
+        <p className="text-sm font-semibold text-warmgray-700">承認者一括置き換え</p>
+        <p className="text-xs text-warmgray-500 mt-0.5">
+          退職・異動時に、ある承認者が担当するすべてのユーザースロットを一括で別の人に変更します。
+          NULLを選ぶとそのスロットはスキップされます。
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="label">置き換え元（退職者・異動者）</label>
+          <CustomSelect
+            options={[{ value: '', label: '─ 選択 ─' }, ...userOptions]}
+            value={fromUserId}
+            onChange={v => { setFromUserId(v); setPreview(null); }}
+          />
+        </div>
+        <div>
+          <label className="label">置き換え先（後任者）</label>
+          <CustomSelect
+            options={toOptions.filter(o => o.value !== fromUserId)}
+            value={toUserId}
+            onChange={v => { setToUserId(v); setPreview(null); }}
+          />
+        </div>
+      </div>
+
+      {fromUserId && (
+        <div className={`rounded-xl border p-3 text-xs space-y-1 ${
+          toUserId === '__null__'
+            ? 'border-amber-200 bg-amber-50/50 text-amber-800'
+            : 'border-teal-200 bg-teal-50/50 text-teal-800'
+        }`}>
+          {toUserId === '__null__'
+            ? `⚠️ ${users.find(u => u.id === fromUserId)?.full_name ?? '選択者'} が担当するすべてのスロットを「未設定（スキップ）」にします。`
+            : `✓ ${users.find(u => u.id === fromUserId)?.full_name ?? '選択者'} → ${users.find(u => u.id === toUserId)?.full_name ?? '後任'} に全スロットを置き換えます。`}
+        </div>
+      )}
+
+      {preview && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-2.5 text-sm text-emerald-800 font-semibold">
+          ✓ {preview.updated_count} 件のスロットを更新しました
+        </div>
+      )}
+
+      <button
+        disabled={!fromUserId || loading}
+        onClick={execute}
+        className="btn-primary"
+      >
+        {loading ? '処理中...' : '一括置き換え実行'}
+      </button>
     </div>
   );
 }

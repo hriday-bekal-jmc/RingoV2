@@ -1,0 +1,38 @@
+const buttons = {
+  ja: {
+    btn_submit:       '申請する',
+    btn_draft:        '下書き保存',
+    btn_approve:      '承認する',
+    btn_return:       '差し戻し',
+    btn_reject:       '却下する',
+    btn_close:        '閉じる',
+    btn_save:         '保存する',
+    btn_cancel:       'キャンセル',
+    btn_settle:       '精算入力',
+    btn_settle_submit:'精算申請する',
+    btn_new_app:      '＋ 新規申請',
+    btn_view_all:     '全申請履歴を見る →',
+    btn_logout:       'ログアウト',
+    btn_resubmit:     '修正して再提出する',
+    btn_correct_resend: '訂正して再送信',
+  },
+  en: {
+    btn_submit:       'Submit',
+    btn_draft:        'Save Draft',
+    btn_approve:      'Approve',
+    btn_return:       'Return',
+    btn_reject:       'Reject',
+    btn_close:        'Close',
+    btn_save:         'Save',
+    btn_cancel:       'Cancel',
+    btn_settle:       'Submit Expenses',
+    btn_settle_submit:'Submit Settlement',
+    btn_new_app:      '+ New Application',
+    btn_view_all:     'View all history →',
+    btn_logout:       'Logout',
+    btn_resubmit:     'Edit & Resubmit',
+    btn_correct_resend: 'Correct & resend',
+  },
+} as const;
+
+export default buttons;

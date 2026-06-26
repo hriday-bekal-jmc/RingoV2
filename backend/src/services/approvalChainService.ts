@@ -47,7 +47,7 @@ export async function resolveChainFromUserSlots(
 ): Promise<{ steps: ResolvedStep[]; patternId: string }> {
   const patternId   = await resolvePatternId(client, ctx);
   const activeSlots = await loadPatternSlots(client, patternId);
-  const assignments = await loadUserSlotAssignments(client, ctx.applicantId, activeSlots);
+  const assignments = await loadUserSlotAssignments(client, ctx.applicantId, activeSlots, ctx.departmentId);
   const stopSlotId  = await evaluateConditions(client, ctx, patternId);
   const steps       = buildChain(assignments, stopSlotId, ctx.stageFilter ?? null);
   return { steps, patternId };
@@ -81,7 +81,7 @@ export async function previewChainForUser(
     loadPatternSlots(client, resolvedPatternId),
   ]);
 
-  const assignments = await loadUserSlotAssignments(client, applicantId, activeSlots);
+  const assignments = await loadUserSlotAssignments(client, applicantId, activeSlots, null);
 
   // Preview shows full chain (no stage filter, no conditions) so user sees all approvers
   const steps = buildChain(assignments, null, null);
@@ -134,21 +134,24 @@ async function loadPatternSlots(client: pg.PoolClient, patternId: string): Promi
 }
 
 async function loadUserSlotAssignments(
-  client:      pg.PoolClient,
-  applicantId: string,
-  activeSlots: SlotRow[],
+  client:       pg.PoolClient,
+  applicantId:  string,
+  activeSlots:  SlotRow[],
+  departmentId: string | null,
 ): Promise<SlotAssignment[]> {
   if (activeSlots.length === 0) return [];
   const slotIds = activeSlots.map((s) => s.id);
-  // LEFT JOIN: slots with no user_approval_slots row appear with approver_id = NULL
+  // Priority: user slot → dept slot fallback → NULL (skip)
+  // COALESCE(uas.approver_id, das.approver_id): user assignment wins; dept is fallback when user row absent or NULL
   const res = await client.query(
     `SELECT s.id AS slot_id, s.slot_code, s.label_ja, s.slot_type, s.sort_order,
-            uas.approver_id
+            COALESCE(uas.approver_id, das.approver_id) AS approver_id
      FROM approval_slots s
      LEFT JOIN user_approval_slots uas ON uas.slot_id = s.id AND uas.user_id = $1
-     WHERE s.id = ANY($2::uuid[])
+     LEFT JOIN dept_approval_slots das ON das.slot_id = s.id AND das.department_id = $2
+     WHERE s.id = ANY($3::uuid[])
      ORDER BY s.sort_order ASC`,
-    [applicantId, slotIds],
+    [applicantId, departmentId, slotIds],
   );
   return res.rows as SlotAssignment[];
 }

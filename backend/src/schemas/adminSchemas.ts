@@ -57,6 +57,21 @@ export type UpdatePermissionsBody = z.infer<typeof updatePermissionsSchema>;
 
 // ── Routing V2 schemas ────────────────────────────────────────────────────────
 
+export const replaceApproverSchema = z.object({
+  from_user_id:  z.string().uuid(),
+  to_user_id:    z.string().uuid().nullable(),   // null = set all matching slots to NULL (skip)
+  slot_id:       z.string().uuid().optional(),   // omit = replace across ALL slot positions
+});
+export type ReplaceApproverBody = z.infer<typeof replaceApproverSchema>;
+
+export const upsertDeptSlotsSchema = z.object({
+  slots: z.array(z.object({
+    slot_id:     z.string().uuid(),
+    approver_id: z.string().uuid().nullable(),
+  })).min(1).max(50),
+});
+export type UpsertDeptSlotsBody = z.infer<typeof upsertDeptSlotsSchema>;
+
 export const createSlotSchema = z.object({
   label_ja:  z.string().min(1).max(100),
   slot_type: z.enum(['RINGI', 'SETTLEMENT', 'CONFIRM']),

@@ -242,7 +242,7 @@ export default function PatternsTab({ showToast }: {
   showToast: (m: string, t?: 'success' | 'error' | 'info') => void;
 }) {
   const queryClient = useQueryClient();
-  const [editingPattern, setEditingPattern] = useState<Pattern | null | 'new'>('new' as any);
+  const [editingPattern, setEditingPattern] = useState<Pattern | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [activeSection, setActiveSection] = useState<'assignments' | 'conditions'>('assignments');

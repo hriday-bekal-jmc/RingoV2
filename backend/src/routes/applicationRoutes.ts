@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { query, withTransaction } from '../config/db';
+import { query, pool, withTransaction } from '../config/db';
 import { requireAuth } from '../middlewares/authMiddleware';
 import { assertCanReadApp } from '../middlewares/authz';
 import { mutationLimiter } from '../middlewares/rateLimit';
@@ -208,7 +208,6 @@ router.get('/route-preview', async (req: Request, res: Response): Promise<void> 
     const cached = await getJsonCache(cacheKey);
     if (cached) { res.json(cached); return; }
 
-    const { pool } = await import('../config/db');
     const client = await pool.connect();
     try {
       const preview = await previewChainForUser(client, applicantId, template_id, pattern_id);
