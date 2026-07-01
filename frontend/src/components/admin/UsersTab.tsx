@@ -12,6 +12,7 @@ import CustomSelect from '../forms/CustomSelect';
 import { useLang } from '../../context/LanguageContext';
 import UserAvatar from '../common/UserAvatar';
 import { RoleBadge } from './RoleBadge';
+import ApproverPicker from './ApproverPicker';
 import type { User, Department } from './adminTypes';
 
 const ROLES = [
@@ -25,13 +26,115 @@ const ROLES = [
 interface UserModalProps {
   user?: User;
   departments: Department[];
+  allUsers: User[];
   onClose: () => void;
   onSave: (data: Record<string, any>) => void;
   isSaving: boolean;
+  showToast: (m: string, t?: 'success' | 'error' | 'info') => void;
 }
 
-function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalProps) {
+// ── Approval-route (slot) editor — embedded in the user edit modal ────────────
+interface ApprovalSlot { id: string; slot_code: string; label_ja: string; slot_type: string; sort_order: number }
+interface SlotAssignment { slot_id: string; approver_id: string | null }
+
+export interface SlotPayloadItem { slot_id: string; approver_id: string | null }
+
+// Route editor. Owns its own data + dirty state and emits the full save payload
+// up to the parent (null when clean) — the parent's single "保存" performs the PUT.
+// No imperative refs: the emitted payload is always the latest committed render.
+function UserSlotsEditor({ userId, allUsers, departments, onPayloadChange }: {
+  userId: string;
+  allUsers: User[];
+  departments: Department[];
+  onPayloadChange: (payload: SlotPayloadItem[] | null) => void;
+}) {
+  const [dirty, setDirty] = useState<Record<string, string | null>>({});
+
+  const { data: slots = [] } = useQuery<ApprovalSlot[]>({
+    queryKey: ['admin', 'approval-slots'],
+    queryFn: async () => (await apiClient.get('/admin/approval-slots')).data,
+    staleTime: 30 * 60_000,
+  });
+
+  const { data: assignments = [], isLoading } = useQuery<SlotAssignment[]>({
+    queryKey: ['admin', 'user-slots', userId],
+    queryFn: async () => (await apiClient.get(`/admin/users/${userId}/approval-slots`)).data,
+    staleTime: 60_000,
+  });
+
+  const assignmentMap = Object.fromEntries(assignments.map(a => [a.slot_id, a.approver_id]));
+  const effectiveMap: Record<string, string | null> = { ...assignmentMap, ...dirty };
+  const isDirty = Object.keys(dirty).length > 0;
+
+  // Emit the full payload upward whenever the selection changes (null = no edits).
+  useEffect(() => {
+    if (!isDirty || slots.length === 0) { onPayloadChange(null); return; }
+    onPayloadChange(slots.map(s => ({ slot_id: s.id, approver_id: effectiveMap[s.id] ?? null })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty, slots, assignments]);
+
+  const groups: { title: string; type: string }[] = [
+    { title: '稟議フェーズ', type: 'RINGI' },
+    { title: '精算フェーズ', type: 'SETTLEMENT' },
+    { title: '確認フェーズ', type: 'CONFIRM' },
+  ];
+
+  if (isLoading) return <div className="text-center text-warmgray-400 text-sm py-8">読み込み中...</div>;
+
+  return (
+    <div className="space-y-5">
+      {isDirty && (
+        <p className="text-xs text-amber-600">未保存の変更があります。「保存」で確定します。</p>
+      )}
+      {groups.map(({ title, type }) => {
+        const groupSlots = slots.filter(s => s.slot_type === type);
+        if (groupSlots.length === 0) return null;
+        return (
+          <div key={type} className="space-y-2">
+            <p className="text-xs font-bold uppercase tracking-widest text-warmgray-400">{title}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {groupSlots.map(slot => {
+                const current = effectiveMap[slot.id] ?? null;
+                const isChanged = dirty[slot.id] !== undefined;
+                return (
+                  <div
+                    key={slot.id}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-colors ${
+                      isChanged ? 'border-amber-300 bg-amber-50/40' : 'border-warmgray-100 bg-white/40'
+                    }`}
+                  >
+                    <div className="w-28 shrink-0">
+                      <p className="text-xs font-semibold text-warmgray-700">{slot.label_ja}</p>
+                      <p className="text-[10px] text-warmgray-400">{slot.slot_code}</p>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <ApproverPicker
+                        users={allUsers}
+                        departments={departments}
+                        value={current ?? ''}
+                        onChange={(v) => setDirty(prev => ({ ...prev, [slot.id]: v || null }))}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function UserModal({ user, departments, allUsers, onClose, onSave, isSaving, showToast }: UserModalProps) {
   const isNew = !user;
+  const queryClient = useQueryClient();
+  const [showSlots, setShowSlots] = useState(false);
+  const [slotsOpened, setSlotsOpened] = useState(false);   // mount editor once, keep mounted so edits survive collapse
+  const [slotPayload, setSlotPayload] = useState<SlotPayloadItem[] | null>(null);
+  const [flushing, setFlushing] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const slotsDirty = slotPayload !== null;
   const { t, lang } = useLang();
   const { data: assignableRoles = [] } = useAssignableRoles();
   const roleOptions = (assignableRoles.length > 0
@@ -70,10 +173,31 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
 
   const set = (k: string, v: any) => setForm((p) => ({ ...p, [k]: v }));
 
-  const handleSave = () => {
+  // Single save: commit the route edits first (if any), then user fields.
+  // If the route save fails, keep the modal open so nothing is silently lost.
+  const handleSave = async () => {
+    if (slotPayload && user) {
+      setFlushing(true);
+      try {
+        await apiClient.put(`/admin/users/${user.id}/approval-slots`, { slots: slotPayload });
+        queryClient.invalidateQueries({ queryKey: ['admin', 'user-slots', user.id] });
+        setSlotPayload(null);
+      } catch (e: any) {
+        showToast(`承認ルートの保存に失敗しました: ${e.message}`, 'error');
+        setFlushing(false);
+        return;
+      }
+      setFlushing(false);
+    }
     const payload: Record<string, any> = { ...form, department_id: form.department_id || null, cap_overrides: capOverrides };
     if (!payload.password) delete payload.password;
     onSave(payload);
+  };
+
+  // Guard against discarding unsaved route edits — app-styled confirm, not window.confirm.
+  const requestClose = () => {
+    if (slotsDirty) { setConfirmDiscard(true); return; }
+    onClose();
   };
 
   // Portal to document.body so the modal escapes any parent's stacking/
@@ -82,7 +206,7 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
   // instead of the viewport — causing offset placement + no proper scroll).
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-warmgray-900/50 backdrop-blur-sm px-3 md:px-4 overflow-y-auto [scrollbar-gutter:stable] py-6">
-      <div className="glass rounded-3xl w-full max-w-lg p-5 md:p-8 space-y-5 shadow-2xl animate-scale-in my-auto">
+      <div className={`glass rounded-3xl w-full p-5 md:p-8 space-y-5 shadow-2xl animate-scale-in my-auto ${showSlots ? 'max-w-4xl' : 'max-w-lg'}`}>
         <div className="flex items-center gap-3">
           {!isNew && <UserAvatar name={form.full_name || '?'} avatarUrl={user?.avatar_url} size={10} />}
           <div>
@@ -230,17 +354,93 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
           </div>
         )}
 
+        {/* Approval-route (slot) editor — expands the modal to ~2x width */}
+        {!isNew && (
+          <div className="border-t border-white/30 pt-4">
+            <button
+              type="button"
+              aria-expanded={showSlots}
+              onClick={() => { setShowSlots((s) => !s); setSlotsOpened(true); }}
+              className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-white/60 border border-white/70 hover:bg-white/90 transition-colors group"
+            >
+              <div className="flex items-center gap-2.5 text-left">
+                <span className="text-lg leading-none">🔀</span>
+                <div>
+                  <p className="text-sm font-semibold text-warmgray-800">
+                    {lang === 'en' ? 'Approval route' : '承認ルート設定'}
+                    {slotsDirty && <span className="ml-2 text-[10px] font-bold text-amber-600 align-middle">● 未保存</span>}
+                  </p>
+                  <p className="text-[11px] text-warmgray-400">
+                    {lang === 'en' ? 'Assign approvers per slot for this user' : 'このユーザーのスロット別承認者を設定'}
+                  </p>
+                </div>
+              </div>
+              <span className={`text-warmgray-400 transition-transform ${showSlots ? 'rotate-90' : ''}`}>▸</span>
+            </button>
+            {/* Mounted once opened, hidden (not unmounted) on collapse so in-progress edits survive. */}
+            {slotsOpened && (
+              <div className={showSlots ? 'mt-4' : 'hidden'}>
+                <UserSlotsEditor
+                  userId={user!.id}
+                  allUsers={allUsers}
+                  departments={departments}
+                  onPayloadChange={setSlotPayload}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex justify-end gap-3 pt-2">
-          <button className="btn-outline" onClick={onClose}>{t('btn_cancel')}</button>
+          <button className="btn-outline" onClick={requestClose}>{t('btn_cancel')}</button>
           <button
             className="btn-primary"
             onClick={handleSave}
-            disabled={isSaving || !form.full_name || !form.email}
+            disabled={isSaving || flushing || !form.full_name || !form.email}
           >
-            {isSaving ? t('admin_saving') : t('btn_save')}
+            {isSaving || flushing ? t('admin_saving') : t('btn_save')}
           </button>
         </div>
       </div>
+
+      {/* Discard-changes confirm — app-styled, portaled to body so its fixed
+          positioning escapes the modal backdrop's backdrop-filter containing block. */}
+      {confirmDiscard && createPortal(
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-warmgray-900/50 backdrop-blur-sm" onClick={() => setConfirmDiscard(false)} />
+          <div className="relative glass rounded-2xl shadow-2xl w-full max-w-sm p-5 space-y-4 animate-scale-in">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                </svg>
+              </div>
+              <div className="min-w-0">
+                <p className="text-base font-bold text-warmgray-800">
+                  {lang === 'en' ? 'Discard unsaved changes?' : '未保存の変更を破棄しますか？'}
+                </p>
+                <p className="text-xs text-warmgray-500 mt-1">
+                  {lang === 'en'
+                    ? 'You have unsaved approval-route edits. Closing will discard them.'
+                    : '承認ルートに未保存の変更があります。閉じると破棄されます。'}
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => { setConfirmDiscard(false); onClose(); }}
+                className="flex-1 text-sm font-bold px-4 py-2 rounded-xl bg-red-500 text-white hover:bg-red-600 transition-colors"
+              >
+                {lang === 'en' ? 'Discard' : '破棄して閉じる'}
+              </button>
+              <button onClick={() => setConfirmDiscard(false)} className="btn-ghost text-warmgray-500">
+                {lang === 'en' ? 'Keep editing' : '編集を続ける'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>,
     document.body,
   );
@@ -248,9 +448,8 @@ function UserModal({ user, departments, onClose, onSave, isSaving }: UserModalPr
 
 // ─── Users Tab ────────────────────────────────────────────────────────────────
 
-export default function UsersTab({ showToast, onGoToSlots }: {
+export default function UsersTab({ showToast }: {
   showToast: (m: string, t?: 'success' | 'error' | 'info') => void;
-  onGoToSlots: () => void;
 }) {
   const queryClient = useQueryClient();
   const { t } = useLang();
@@ -354,18 +553,22 @@ export default function UsersTab({ showToast, onGoToSlots }: {
       {editUser === 'new' && (
         <UserModal
           departments={departments}
+          allUsers={users}
           onClose={() => setEditUser(null)}
           onSave={(data) => createUser.mutate(data)}
           isSaving={createUser.isPending}
+          showToast={showToast}
         />
       )}
       {editUser && editUser !== 'new' && (
         <UserModal
           user={editUser}
           departments={departments}
+          allUsers={users}
           onClose={() => setEditUser(null)}
           onSave={(data) => updateUser.mutate({ id: editUser.id, ...data })}
           isSaving={updateUser.isPending}
+          showToast={showToast}
         />
       )}
 
@@ -499,13 +702,7 @@ export default function UsersTab({ showToast, onGoToSlots }: {
               </div>
             )}
 
-            <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/40">
-              <button
-                onClick={() => { setRouteConflict(null); onGoToSlots(); }}
-                className="btn-primary flex-1 text-xs"
-              >
-                スロット設定を開く →
-              </button>
+            <div className="flex items-center justify-end gap-2 mt-3 pt-3 border-t border-white/40">
               <button
                 onClick={() => setRouteConflict(null)}
                 className="btn-ghost text-xs text-warmgray-500"

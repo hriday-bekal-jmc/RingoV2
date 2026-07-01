@@ -61,6 +61,7 @@ export const replaceApproverSchema = z.object({
   from_user_id:  z.string().uuid(),
   to_user_id:    z.string().uuid().nullable(),   // null = set all matching slots to NULL (skip)
   slot_id:       z.string().uuid().optional(),   // omit = replace across ALL slot positions
+  dry_run:       z.boolean().optional(),         // true = return impact counts, no mutation
 });
 export type ReplaceApproverBody = z.infer<typeof replaceApproverSchema>;
 
@@ -89,7 +90,7 @@ export const upsertUserSlotsSchema = z.object({
   slots: z.array(z.object({
     slot_id:     z.string().uuid(),
     approver_id: z.string().uuid().nullable(),
-  })).min(1).max(20),
+  })).min(1).max(50),   // catalog can grow via custom slots; keep headroom
 });
 export type UpsertUserSlotsBody = z.infer<typeof upsertUserSlotsSchema>;
 

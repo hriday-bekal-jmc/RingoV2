@@ -55,7 +55,7 @@ router.get('/users', async (_req: Request, res: Response): Promise<void> => {
       FROM users u
       LEFT JOIN departments d ON u.department_id = d.id
       WHERE u.deleted_at IS NULL
-      ORDER BY u.created_at DESC
+      ORDER BY u.created_at DESC, u.id
     `, [[...SUPER_ADMIN_EMAILS]]);
     res.json(result.rows);
   } catch (err) {

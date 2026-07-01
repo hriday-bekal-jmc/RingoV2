@@ -154,21 +154,45 @@ router.post('/approval-slots/bulk-update', validateBody(bulkUpdateSlotSchema), a
 });
 
 router.post('/approval-slots/replace-approver', validateBody(replaceApproverSchema), async (req: Request, res: Response): Promise<void> => {
-  const { from_user_id, to_user_id, slot_id } = req.body as ReplaceApproverBody;
+  const { from_user_id, to_user_id, slot_id, dry_run } = req.body as ReplaceApproverBody;
   try {
+    // Preview: report impact without mutating. slot_count = future submissions
+    // affected; pending_step_count = in-flight approvals that stay with the old
+    // approver (frozen by design — replacement only changes future routes).
+    if (dry_run) {
+      const [slotRes, stepRes] = await Promise.all([
+        slot_id
+          ? query(`SELECT COUNT(*)::int AS cnt FROM user_approval_slots WHERE approver_id = $1 AND slot_id = $2`, [from_user_id, slot_id])
+          : query(`SELECT COUNT(*)::int AS cnt FROM user_approval_slots WHERE approver_id = $1`, [from_user_id]),
+        query(`SELECT COUNT(*)::int AS cnt FROM approval_steps WHERE approver_id = $1 AND status = 'PENDING'`, [from_user_id]),
+      ]);
+      res.json({ slot_count: slotRes.rows[0].cnt, pending_step_count: stepRes.rows[0].cnt });
+      return;
+    }
+
     let updatedCount = 0;
+    let affectedOwners: string[] = [];
     await withTransaction(async (client) => {
+      // Capture affected slot owners BEFORE the update — once approver_id is
+      // rewritten (esp. to NULL) we can no longer find them by from_user_id.
+      const owners = slot_id
+        ? await client.query(
+            `SELECT DISTINCT user_id FROM user_approval_slots WHERE approver_id = $1 AND slot_id = $2`,
+            [from_user_id, slot_id],
+          )
+        : await client.query(
+            `SELECT DISTINCT user_id FROM user_approval_slots WHERE approver_id = $1`,
+            [from_user_id],
+          );
+      affectedOwners = (owners.rows as { user_id: string }[]).map(r => r.user_id);
+
       const base = `UPDATE user_approval_slots SET approver_id = $1, updated_by = $2 WHERE approver_id = $3`;
       const r = slot_id
         ? await client.query(`${base} AND slot_id = $4`, [to_user_id, req.user!.id, from_user_id, slot_id])
         : await client.query(base, [to_user_id, req.user!.id, from_user_id]);
       updatedCount = r.rowCount ?? 0;
     });
-    const affected = await query(
-      `SELECT DISTINCT user_id FROM user_approval_slots WHERE approver_id = $1`,
-      [to_user_id ?? from_user_id],
-    );
-    for (const row of affected.rows as { user_id: string }[]) void invalidateChainPreviews(row.user_id);
+    for (const userId of affectedOwners) void invalidateChainPreviews(userId);
     res.json({ updated_count: updatedCount });
   } catch (err) {
     console.error('[admin] replace-approver failed:', err);

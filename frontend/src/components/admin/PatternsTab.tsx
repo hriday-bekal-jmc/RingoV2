@@ -1,9 +1,10 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../../services/apiClient';
 import CustomSelect from '../forms/CustomSelect';
 import { ROLE_MAP, type Role } from '../../config/permissions';
-import type { Department } from './adminTypes';
+import type { Department, User } from './adminTypes';
 
 interface PatternSlot { slot_id: string; slot_code: string; label_ja: string; slot_type: string }
 interface Pattern { id: string; name: string; description: string | null; is_active: boolean; slots: PatternSlot[] }
@@ -62,7 +63,7 @@ function PatternEditor({ pattern, slots: initialSlots, onClose, showToast }: {
       // Add to local list + auto-activate in this pattern
       setLocalSlots(prev => [...prev, newSlot]);
       setActiveSlotIds(prev => new Set([...prev, newSlot.id]));
-      // Invalidate global slots cache so SlotsTab sees it too
+      // Invalidate global slots cache so other views see it too
       queryClient.invalidateQueries({ queryKey: ['admin', 'approval-slots'] });
     } catch (err: any) {
       showToast(`スロット作成失敗: ${err.message}`, 'error');
@@ -396,6 +397,12 @@ export default function PatternsTab({ showToast }: {
     staleTime: 10 * 60_000,
   });
 
+  const { data: users = [] } = useQuery<User[]>({
+    queryKey: ['admin', 'users'],
+    queryFn: async () => (await apiClient.get('/admin/users')).data,
+    staleTime: 5 * 60_000,
+  });
+
   const { data: templatePatterns = [], isLoading: tpLoading } = useQuery<TemplatePattern[]>({
     queryKey: ['admin', 'template-patterns', selectedTemplateId],
     queryFn: async () => (await apiClient.get(`/admin/templates/${selectedTemplateId}/patterns`)).data,
@@ -576,6 +583,149 @@ export default function PatternsTab({ showToast }: {
           <div className="text-center py-10 text-warmgray-400 text-sm">フォームを選択してください</div>
         )}
       </div>
+
+      {/* Approver replacement — retirement / transfer handling */}
+      <ReplaceApproverSection users={users.filter(u => u.is_active)} showToast={showToast} />
+    </div>
+  );
+}
+
+// ── Approver replacement section ──────────────────────────────────────────────
+
+interface ReplaceImpact { slot_count: number; pending_step_count: number }
+
+function ReplaceApproverSection({ users, showToast }: {
+  users: User[];
+  showToast: (m: string, t?: 'success' | 'error' | 'info') => void;
+}) {
+  const queryClient = useQueryClient();
+  const [fromUserId, setFromUserId] = useState('');
+  const [toUserId, setToUserId] = useState('__null__');
+  const [impact, setImpact] = useState<ReplaceImpact | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const fromUser = users.find(u => u.id === fromUserId);
+  const toUser   = toUserId === '__null__' ? null : users.find(u => u.id === toUserId);
+  const isNull   = toUserId === '__null__';
+
+  const userOptions = users.map(u => ({ value: u.id, label: `${u.full_name}${u.department_name ? ` (${u.department_name})` : ''}` }));
+  const toOptions = [{ value: '__null__', label: '─ 空き（スキップ）にする ─' }, ...userOptions];
+
+  // Dry-run: fetch impact counts whenever the source user changes.
+  const loadImpact = async (uid: string) => {
+    setImpact(null);
+    if (!uid) return;
+    try {
+      const res = await apiClient.post('/admin/approval-slots/replace-approver', { from_user_id: uid, to_user_id: null, dry_run: true });
+      setImpact(res.data as ReplaceImpact);
+    } catch { /* preview is best-effort; execute still guards */ }
+  };
+
+  const execute = async () => {
+    if (!fromUserId) return;
+    setLoading(true);
+    try {
+      const res = await apiClient.post('/admin/approval-slots/replace-approver', {
+        from_user_id: fromUserId,
+        to_user_id:   isNull ? null : toUserId,
+      });
+      // Chain previews for affected applicants changed — drop cached user-slot queries.
+      queryClient.invalidateQueries({ queryKey: ['admin', 'user-slots'] });
+      showToast(`${res.data.updated_count} 件のスロットを置き換えました`);
+      setConfirming(false);
+      setFromUserId('');
+      setToUserId('__null__');
+      setImpact(null);
+    } catch (e: any) {
+      showToast(`置き換え失敗: ${e.message}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="card space-y-5">
+      <div>
+        <p className="section-title">承認者一括置き換え</p>
+        <p className="text-xs text-warmgray-500 mt-0.5">
+          退職・異動時に、ある承認者が担当するすべてのユーザースロットを一括で別の人に変更します。
+          空きを選ぶとそのスロットはスキップされます。
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="label">置き換え元（退職者・異動者）</label>
+          <CustomSelect
+            options={[{ value: '', label: '─ 選択 ─' }, ...userOptions]}
+            value={fromUserId}
+            onChange={v => { setFromUserId(v); void loadImpact(v); }}
+          />
+        </div>
+        <div>
+          <label className="label">置き換え先（後任者）</label>
+          <CustomSelect
+            options={toOptions.filter(o => o.value !== fromUserId)}
+            value={toUserId}
+            onChange={setToUserId}
+          />
+        </div>
+      </div>
+
+      {fromUserId && impact && (
+        <div className="rounded-xl border border-warmgray-200 bg-white/50 p-3 text-xs space-y-1.5">
+          <p className="text-warmgray-700">
+            <span className="font-bold">{impact.slot_count}</span> 件のスロットが変更されます（今後の申請に反映）。
+          </p>
+          {impact.pending_step_count > 0 && (
+            <p className="text-amber-700">
+              ⚠️ 現在承認待ちの <span className="font-bold">{impact.pending_step_count}</span> 件は変更されません（進行中の承認は元の承認者のまま）。
+            </p>
+          )}
+          {impact.slot_count === 0 && (
+            <p className="text-warmgray-400">このユーザーは承認者として割り当てられていません。</p>
+          )}
+        </div>
+      )}
+
+      <button
+        disabled={!fromUserId || !impact || impact.slot_count === 0}
+        onClick={() => setConfirming(true)}
+        className="btn-primary"
+      >
+        一括置き換え
+      </button>
+
+      {confirming && fromUser && createPortal(
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-warmgray-900/50 backdrop-blur-sm" onClick={() => !loading && setConfirming(false)} />
+          <div className="relative glass rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-4 animate-scale-in">
+            <p className="text-base font-bold text-warmgray-800">承認者を置き換えますか？</p>
+            <div className={`rounded-xl border p-3 text-sm ${isNull ? 'border-amber-200 bg-amber-50/60 text-amber-800' : 'border-teal-200 bg-teal-50/60 text-teal-800'}`}>
+              {isNull
+                ? <><span className="font-semibold">{fromUser.full_name}</span> が担当する全スロットを「未設定（スキップ）」にします。</>
+                : <><span className="font-semibold">{fromUser.full_name}</span> → <span className="font-semibold">{toUser?.full_name}</span> に全スロットを置き換えます。</>}
+            </div>
+            <ul className="text-xs text-warmgray-600 space-y-1 list-disc pl-4">
+              <li><span className="font-bold text-warmgray-800">{impact?.slot_count ?? 0}</span> 件のスロットが変更され、今後の申請に反映されます。</li>
+              {(impact?.pending_step_count ?? 0) > 0 && (
+                <li className="text-amber-700">現在承認待ちの <span className="font-bold">{impact!.pending_step_count}</span> 件は変更されません。進行中の承認は個別に対応してください。</li>
+              )}
+              <li>この操作は元に戻せません。</li>
+            </ul>
+            <div className="flex gap-2 pt-1">
+              <button onClick={execute} disabled={loading} className="btn-primary flex-1">
+                {loading ? '処理中...' : '置き換える'}
+              </button>
+              <button onClick={() => setConfirming(false)} disabled={loading} className="btn-ghost text-warmgray-500">
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
@@ -681,6 +831,7 @@ function RoleMultiSelect({ value, onChange }: { value: string; onChange: (v: str
           <button
             key={role}
             type="button"
+            aria-pressed={on}
             onClick={() => toggle(role)}
             className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-colors ${
               on
@@ -715,6 +866,7 @@ function DeptMultiSelect({ value, onChange, departments }: {
           <button
             key={dept.id}
             type="button"
+            aria-pressed={on}
             onClick={() => toggle(dept.id)}
             className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-colors ${
               on

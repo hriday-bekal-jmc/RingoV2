@@ -5,7 +5,6 @@ import Toast, { useToast } from '../components/common/Toast';
 import { useLang } from '../context/LanguageContext';
 import FormsTab                    from '../components/admin/FormsTab';
 import NotificationTemplatesTab   from '../components/admin/NotificationTemplatesTab';
-import SlotsTab                   from '../components/admin/SlotsTab';
 import PatternsTab                from '../components/admin/PatternsTab';
 import UsersTab                   from '../components/admin/UsersTab';
 import ApplicationsTab            from '../components/admin/ApplicationsTab';
@@ -14,25 +13,24 @@ import AllowanceTab               from '../components/admin/AllowanceTab';
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-type Tab = 'slots' | 'patterns' | 'users' | 'applications' | 'permissions' | 'forms' | 'allowance' | 'notifications';
+type Tab = 'users' | 'patterns' | 'applications' | 'forms' | 'allowance' | 'notifications' | 'permissions';
 
 export default function Admin() {
   const [searchParams] = useSearchParams();
-  const VALID_TABS: Tab[] = ['slots', 'patterns', 'users', 'applications', 'permissions', 'forms', 'allowance', 'notifications'];
-  const initialTab = (searchParams.get('tab') ?? 'slots') as Tab;
-  const [tab, setTab] = useState<Tab>(VALID_TABS.includes(initialTab) ? initialTab : 'slots');
+  const VALID_TABS: Tab[] = ['users', 'patterns', 'applications', 'forms', 'allowance', 'notifications', 'permissions'];
+  const initialTab = (searchParams.get('tab') ?? 'users') as Tab;
+  const [tab, setTab] = useState<Tab>(VALID_TABS.includes(initialTab) ? initialTab : 'users');
   const { t, lang } = useLang();
   const { toast, show: showToast, dismiss } = useToast();
 
   const TAB_CONFIG: { key: Tab; label: string; icon: string }[] = [
-    { key: 'slots',        label: '承認スロット',             icon: '🔲' },
-    { key: 'patterns',     label: 'パターン設定',             icon: '🔀' },
     { key: 'users',        label: t('admin_users_tab'),   icon: '👥' },
+    { key: 'patterns',     label: 'パターン設定',             icon: '🔀' },
     { key: 'applications', label: t('admin_apps_tab'),    icon: '📋' },
     { key: 'forms',        label: t('admin_forms_tab'),   icon: '📝' },
     { key: 'allowance',    label: '日当レート',             icon: '💴' },
-    { key: 'permissions',  label: t('admin_perms_tab'),   icon: '🛡️' },
     { key: 'notifications', label: lang === 'ja' ? '通知テンプレート' : 'Notifications', icon: '🔔' },
+    { key: 'permissions',  label: t('admin_perms_tab'),   icon: '🛡️' },
   ];
 
   return (
@@ -61,9 +59,8 @@ export default function Admin() {
         </div>
 
         <div key={tab} className="animate-fade-up min-h-[60vh]">
-          {tab === 'slots'        && <SlotsTab showToast={showToast} />}
           {tab === 'patterns'     && <PatternsTab showToast={showToast} />}
-          {tab === 'users'        && <UsersTab showToast={showToast} onGoToSlots={() => setTab('slots')} />}
+          {tab === 'users'        && <UsersTab showToast={showToast} />}
           {tab === 'applications' && <ApplicationsTab showToast={showToast} />}
           {tab === 'forms'        && <FormsTab showToast={showToast} />}
           {tab === 'permissions'  && <PermissionsTab showToast={showToast} />}
