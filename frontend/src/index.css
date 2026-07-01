@@ -335,11 +335,16 @@
   from { opacity: 0; transform: translateY(100%); }
   to   { opacity: 1; transform: translateY(0); }
 }
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(100%); }
+  to   { opacity: 1; transform: translateX(0); }
+}
 
-.animate-fade-up   { animation: fadeInUp 0.35s ease-out both; }
-.animate-scale-in  { animation: scaleIn  0.25s ease-out both; }
-.animate-fade-in   { animation: fadeIn   0.18s ease-out both; }
-.animate-slide-up  { animation: slideUp  0.28s cubic-bezier(0.32,0.72,0,1) both; }
+.animate-fade-up      { animation: fadeInUp      0.35s ease-out both; }
+.animate-scale-in     { animation: scaleIn       0.25s ease-out both; }
+.animate-fade-in      { animation: fadeIn        0.18s ease-out both; }
+.animate-slide-up     { animation: slideUp       0.28s cubic-bezier(0.32,0.72,0,1) both; }
+.animate-slide-right  { animation: slideInRight  0.28s cubic-bezier(0.22,1,0.36,1) both; }
 
 /* ── Thin scrollbar for glass dropdowns ── */
 .dropdown-scroll::-webkit-scrollbar        { width: 4px; }

@@ -13,12 +13,13 @@ import type { ResolvedStep } from './approvalStepService';
 export type SlotType = 'RINGI' | 'SETTLEMENT' | 'CONFIRM';
 
 export interface ChainContext {
-  applicantId:  string;
-  departmentId: string | null;
-  templateId:   string;
-  formData:     Record<string, unknown>;
-  patternId?:   string;           // caller-supplied pattern (secondary pattern override)
-  stageFilter?: SlotType | null;  // filter chain to one stage; null = all
+  applicantId:    string;
+  departmentId:   string | null;
+  applicantRole?: string | null;
+  templateId:     string;
+  formData:       Record<string, unknown>;
+  patternId?:     string;           // caller-supplied pattern (secondary pattern override)
+  stageFilter?:   SlotType | null;  // filter chain to one stage; null = all
 }
 
 interface SlotRow {
@@ -35,7 +36,7 @@ interface SlotAssignment extends SlotRow {
 }
 
 interface ConditionRule {
-  condition_type:  'AMOUNT_LT' | 'AMOUNT_GTE' | 'DEPT_IN' | 'DEPT_NOT_IN';
+  condition_type:  'AMOUNT_LT' | 'AMOUNT_GTE' | 'DEPT_IN' | 'DEPT_NOT_IN' | 'ROLE_IN' | 'ROLE_NOT_IN';
   condition_value: string;
   stop_at_slot_id: string;
 }
@@ -65,7 +66,9 @@ export async function previewChainForUser(
   pattern_id:   string;
   all_patterns: Array<{ id: string; name: string; is_default: boolean }>;
 }> {
-  const ctx: ChainContext = { applicantId, departmentId: null, templateId, formData: {}, patternId };
+  const roleRes = await client.query(`SELECT role FROM users WHERE id = $1`, [applicantId]);
+  const applicantRole = (roleRes.rows[0] as { role: string } | undefined)?.role ?? null;
+  const ctx: ChainContext = { applicantId, departmentId: null, applicantRole, templateId, formData: {}, patternId };
   const resolvedPatternId = await resolvePatternId(client, ctx);
 
   const [patternRes, allPatternsRes, activeSlots] = await Promise.all([
@@ -85,6 +88,23 @@ export async function previewChainForUser(
 
   // Preview shows full chain (no stage filter, no conditions) so user sees all approvers
   const steps = buildChain(assignments, null, null);
+
+  // Enrich with actual approver names + avatars — single batch query
+  if (steps.length > 0) {
+    const ids = [...new Set(steps.map(s => s.approver_id))];
+    const usersRes = await client.query(
+      `SELECT id, full_name, avatar_url FROM users WHERE id = ANY($1::uuid[])`,
+      [ids],
+    );
+    const byId = new Map(
+      (usersRes.rows as { id: string; full_name: string; avatar_url: string | null }[])
+        .map(u => [u.id, u]),
+    );
+    for (const step of steps) {
+      const u = byId.get(step.approver_id);
+      if (u) { step.approver_name = u.full_name; step.approver_avatar = u.avatar_url; }
+    }
+  }
 
   return {
     steps,
@@ -173,7 +193,7 @@ async function evaluateConditions(
 
   const amount = extractAmount(ctx.formData);
   for (const rule of res.rows as ConditionRule[]) {
-    if (matchesCondition(rule, amount, ctx.departmentId)) {
+    if (matchesCondition(rule, amount, ctx.departmentId, ctx.applicantRole ?? null)) {
       return rule.stop_at_slot_id;
     }
   }
@@ -199,18 +219,16 @@ function extractAmount(formData: Record<string, unknown>): number {
   return 0;
 }
 
-function matchesCondition(rule: ConditionRule, amount: number, departmentId: string | null): boolean {
+function matchesCondition(rule: ConditionRule, amount: number, departmentId: string | null, applicantRole: string | null): boolean {
+  const csvValues = (v: string) => v.split(',').map((s) => s.trim());
   switch (rule.condition_type) {
-    case 'AMOUNT_LT':
-      return amount < parseFloat(rule.condition_value);
-    case 'AMOUNT_GTE':
-      return amount >= parseFloat(rule.condition_value);
-    case 'DEPT_IN':
-      return !!departmentId && rule.condition_value.split(',').map((s) => s.trim()).includes(departmentId);
-    case 'DEPT_NOT_IN':
-      return !departmentId || !rule.condition_value.split(',').map((s) => s.trim()).includes(departmentId);
-    default:
-      return false;
+    case 'AMOUNT_LT':   return amount < parseFloat(rule.condition_value);
+    case 'AMOUNT_GTE':  return amount >= parseFloat(rule.condition_value);
+    case 'DEPT_IN':     return !!departmentId && csvValues(rule.condition_value).includes(departmentId);
+    case 'DEPT_NOT_IN': return !departmentId || !csvValues(rule.condition_value).includes(departmentId);
+    case 'ROLE_IN':     return !!applicantRole && csvValues(rule.condition_value).includes(applicantRole);
+    case 'ROLE_NOT_IN': return !applicantRole || !csvValues(rule.condition_value).includes(applicantRole);
+    default:            return false;
   }
 }
 

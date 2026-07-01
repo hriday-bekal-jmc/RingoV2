@@ -10,6 +10,13 @@ import {
 
 const router = Router();
 
+// Seeded system slots — immutable, never deletable.
+const SYSTEM_SLOT_CODES = new Set([
+  'ringi_1','ringi_2','ringi_2_5','ringi_3','ringi_4','ringi_5','ringi_6',
+  'settle_1','settle_2','settle_3','settle_4','settle_5','settle_6','settle_mgr',
+  'confirm_1','confirm_2','confirm_3',
+]);
+
 // ─── Approval Slots catalog ───────────────────────────────────────────────────
 
 router.get('/approval-slots', async (_req: Request, res: Response): Promise<void> => {
@@ -51,6 +58,71 @@ router.post('/approval-slots', validateBody(createSlotSchema), async (req: Reque
   } catch (err) {
     console.error('[admin] create slot failed:', err);
     res.status(500).json({ error: 'スロットの作成に失敗しました' });
+  }
+});
+
+// GET /admin/approval-slots/:id/usage — impact counts before deletion
+router.get('/approval-slots/:id/usage', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const slotRes = await query(`SELECT id, slot_code, label_ja FROM approval_slots WHERE id = $1`, [req.params.id]);
+    if (slotRes.rows.length === 0) { res.status(404).json({ error: 'スロットが見つかりません' }); return; }
+    const slot = slotRes.rows[0] as { id: string; slot_code: string; label_ja: string };
+
+    const [userCount, patternCount, conditionCount] = await Promise.all([
+      query(`SELECT COUNT(*) AS cnt FROM user_approval_slots  WHERE slot_id        = $1`, [req.params.id]),
+      query(`SELECT COUNT(*) AS cnt FROM approval_pattern_slots WHERE slot_id      = $1`, [req.params.id]),
+      query(`SELECT COUNT(*) AS cnt FROM approval_conditions WHERE stop_at_slot_id = $1`, [req.params.id]),
+    ]);
+    res.json({
+      label_ja:          slot.label_ja,
+      is_system:         SYSTEM_SLOT_CODES.has(slot.slot_code),
+      user_assignments:  Number((userCount.rows[0] as any).cnt),
+      pattern_count:     Number((patternCount.rows[0] as any).cnt),
+      condition_count:   Number((conditionCount.rows[0] as any).cnt),
+    });
+  } catch (err) {
+    console.error('[admin] slot usage failed:', err);
+    res.status(500).json({ error: '使用状況の取得に失敗しました' });
+  }
+});
+
+// DELETE /admin/approval-slots/:id
+// Blocks system slots. CASCADE removes: pattern_slots, user_slots, dept_slots, conditions.
+// In-flight approval_steps are unaffected (slot_id not stored on steps).
+router.delete('/approval-slots/:id', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const slotRes = await query(`SELECT id, slot_code FROM approval_slots WHERE id = $1`, [req.params.id]);
+    if (slotRes.rows.length === 0) { res.status(404).json({ error: 'スロットが見つかりません' }); return; }
+    const slot = slotRes.rows[0] as { id: string; slot_code: string };
+
+    if (SYSTEM_SLOT_CODES.has(slot.slot_code)) {
+      res.status(403).json({ error: 'システムスロットは削除できません。パターンから外すだけにしてください。' });
+      return;
+    }
+
+    // Collect impact + affected user IDs before CASCADE removes them
+    const [affectedUsersRes, patternCount, conditionCount] = await Promise.all([
+      query(`SELECT DISTINCT user_id FROM user_approval_slots WHERE slot_id = $1`, [req.params.id]),
+      query(`SELECT COUNT(*) AS cnt FROM approval_pattern_slots WHERE slot_id = $1`, [req.params.id]),
+      query(`SELECT COUNT(*) AS cnt FROM approval_conditions WHERE stop_at_slot_id = $1`, [req.params.id]),
+    ]);
+    const affectedUserIds = affectedUsersRes.rows.map((r: { user_id: string }) => r.user_id);
+
+    await query(`DELETE FROM approval_slots WHERE id = $1`, [req.params.id]);
+
+    for (const uid of affectedUserIds) void invalidateChainPreviews(uid);
+
+    res.json({
+      message: 'スロットを削除しました',
+      removed: {
+        user_assignments: affectedUserIds.length,
+        patterns:         Number((patternCount.rows[0] as any).cnt),
+        conditions:       Number((conditionCount.rows[0] as any).cnt),
+      },
+    });
+  } catch (err) {
+    console.error('[admin] delete slot failed:', err);
+    res.status(500).json({ error: 'スロットの削除に失敗しました' });
   }
 });
 

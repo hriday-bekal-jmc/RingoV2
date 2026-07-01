@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../../services/apiClient';
 import CustomSelect from '../forms/CustomSelect';
+import { ROLE_MAP, type Role } from '../../config/permissions';
+import type { Department } from './adminTypes';
 
 interface PatternSlot { slot_id: string; slot_code: string; label_ja: string; slot_type: string }
 interface Pattern { id: string; name: string; description: string | null; is_active: boolean; slots: PatternSlot[] }
@@ -12,10 +14,19 @@ interface Condition {
   id?: string;
   pattern_id: string;
   user_id?: string | null;
-  condition_type: 'AMOUNT_LT' | 'AMOUNT_GTE' | 'DEPT_IN' | 'DEPT_NOT_IN';
+  condition_type: 'AMOUNT_LT' | 'AMOUNT_GTE' | 'DEPT_IN' | 'DEPT_NOT_IN' | 'ROLE_IN' | 'ROLE_NOT_IN';
   condition_value: string;
   stop_at_slot_id: string;
 }
+
+// System slot codes that cannot be deleted (mirrors backend SYSTEM_SLOT_CODES).
+const SYSTEM_SLOT_CODES = new Set([
+  'ringi_1','ringi_2','ringi_2_5','ringi_3','ringi_4','ringi_5','ringi_6',
+  'settle_1','settle_2','settle_3','settle_4','settle_5','settle_6','settle_mgr',
+  'confirm_1','confirm_2','confirm_3',
+]);
+
+interface SlotUsage { label_ja: string; is_system: boolean; user_assignments: number; pattern_count: number; condition_count: number }
 
 const SLOT_TYPE_COLOR: Record<string, string> = {
   RINGI:      'bg-ringo-50 text-ringo-700 border-ringo-200/60',
@@ -39,6 +50,8 @@ function PatternEditor({ pattern, slots: initialSlots, onClose, showToast }: {
   );
   // Local slots list — grows when user adds new slots via "+"
   const [localSlots, setLocalSlots] = useState<ApprovalSlot[]>(initialSlots);
+  const [slotToDelete, setSlotToDelete] = useState<ApprovalSlot | null>(null);
+  const [slotUsage, setSlotUsage] = useState<SlotUsage | null>(null);
 
   const isCreate = !pattern;
 
@@ -54,6 +67,32 @@ function PatternEditor({ pattern, slots: initialSlots, onClose, showToast }: {
     } catch (err: any) {
       showToast(`スロット作成失敗: ${err.message}`, 'error');
       throw err;
+    }
+  };
+
+  const handleDeleteSlot = async (slot: ApprovalSlot) => {
+    try {
+      const res = await apiClient.get(`/admin/approval-slots/${slot.id}/usage`);
+      setSlotUsage(res.data as SlotUsage);
+      setSlotToDelete(slot);
+    } catch (err: any) {
+      showToast(`使用状況の取得失敗: ${err.message}`, 'error');
+    }
+  };
+
+  const confirmDeleteSlot = async () => {
+    if (!slotToDelete) return;
+    try {
+      await apiClient.delete(`/admin/approval-slots/${slotToDelete.id}`);
+      setLocalSlots(prev => prev.filter(s => s.id !== slotToDelete.id));
+      setActiveSlotIds(prev => { const next = new Set(prev); next.delete(slotToDelete.id); return next; });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'approval-slots'] });
+      showToast('スロットを削除しました');
+    } catch (err: any) {
+      showToast(`削除失敗: ${err.message}`, 'error');
+    } finally {
+      setSlotToDelete(null);
+      setSlotUsage(null);
     }
   };
 
@@ -87,78 +126,144 @@ function PatternEditor({ pattern, slots: initialSlots, onClose, showToast }: {
   const confirmSlots = localSlots.filter(s => s.slot_type === 'CONFIRM');
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-warmgray-900/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative glass rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-5 space-y-4 animate-scale-in">
-        <div className="flex items-center justify-between">
-          <p className="text-base font-bold text-warmgray-800">
-            {isCreate ? '新規パターン作成' : 'パターン編集'}
-          </p>
-          <button onClick={onClose} className="text-warmgray-400 hover:text-warmgray-700 text-xl leading-none">×</button>
-        </div>
+    <>
+      {slotToDelete && slotUsage && (
+        <SlotDeleteConfirm
+          usage={slotUsage}
+          onConfirm={confirmDeleteSlot}
+          onCancel={() => { setSlotToDelete(null); setSlotUsage(null); }}
+        />
+      )}
 
-        {/* Name */}
-        <div>
-          <label className="label">パターン名 <span className="text-ringo-500">*</span></label>
-          <input
-            type="text"
-            value={name}
-            onChange={e => setName(e.target.value)}
-            placeholder="例：稟議→精算（購入）"
-            className="input"
-          />
-        </div>
+      {/* Slide-over panel — right side, page stays bright */}
+      <div className="fixed inset-0 z-50 flex justify-end">
+        {/* Subtle scrim — barely dims, just signals focus */}
+        <div
+          className="absolute inset-0 bg-warmgray-900/20"
+          onClick={onClose}
+        />
 
-        {/* Description */}
-        <div>
-          <label className="label">説明（任意）</label>
-          <input
-            type="text"
-            value={description}
-            onChange={e => setDescription(e.target.value)}
-            placeholder="このパターンの用途"
-            className="input"
-          />
-        </div>
+        {/* Panel */}
+        <div className="relative w-full sm:w-[460px] h-full flex flex-col bg-white/95 backdrop-blur-xl border-l border-warmgray-200/60 shadow-[−8px_0_40px_rgba(60,40,20,0.10)] animate-slide-right">
 
-        {/* Slot toggles */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <label className="label mb-0">有効スロット（承認ポジション）</label>
-            <span className="text-xs text-warmgray-400">{activeSlotIds.size} 件選択</span>
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-warmgray-100">
+            <div>
+              <p className="text-base font-bold text-warmgray-800">
+                {isCreate ? '新規パターン作成' : 'パターン編集'}
+              </p>
+              <p className="text-xs text-warmgray-400 mt-0.5">
+                {isCreate ? 'スロットを選択してパターンを定義します' : 'スロット構成を変更できます'}
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-full flex items-center justify-center text-warmgray-400 hover:text-warmgray-700 hover:bg-warmgray-100 transition-colors text-lg leading-none"
+            >
+              ×
+            </button>
           </div>
 
-          <SlotToggleGroup title="稟議フェーズ"  slotType="RINGI"      slots={ringiSlots}   active={activeSlotIds} onToggle={toggleSlot} onNewSlot={handleNewSlot} />
-          <SlotToggleGroup title="精算フェーズ"  slotType="SETTLEMENT" slots={settleSlots}  active={activeSlotIds} onToggle={toggleSlot} onNewSlot={handleNewSlot} />
-          <SlotToggleGroup title="確認フェーズ"  slotType="CONFIRM"    slots={confirmSlots} active={activeSlotIds} onToggle={toggleSlot} onNewSlot={handleNewSlot} />
-        </div>
+          {/* Scrollable body */}
+          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+            <div>
+              <label className="label">パターン名 <span className="text-ringo-500">*</span></label>
+              <input
+                type="text"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="例：稟議→精算（購入）"
+                className="input"
+              />
+            </div>
 
-        <div className="flex gap-2 pt-2 border-t border-white/40">
-          <button
-            disabled={!name.trim() || saveMutation.isPending}
-            onClick={() => saveMutation.mutate()}
-            className="btn-primary flex-1"
-          >
-            {saveMutation.isPending ? '保存中...' : isCreate ? '作成' : '更新'}
+            <div>
+              <label className="label">説明（任意）</label>
+              <input
+                type="text"
+                value={description}
+                onChange={e => setDescription(e.target.value)}
+                placeholder="このパターンの用途"
+                className="input"
+              />
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="label mb-0">有効スロット（承認ポジション）</label>
+                <span className="text-xs text-warmgray-400">{activeSlotIds.size} 件選択</span>
+              </div>
+              <SlotToggleGroup title="稟議フェーズ"  slotType="RINGI"      slots={ringiSlots}   active={activeSlotIds} onToggle={toggleSlot} onNewSlot={handleNewSlot} onDeleteSlot={handleDeleteSlot} />
+              <SlotToggleGroup title="精算フェーズ"  slotType="SETTLEMENT" slots={settleSlots}  active={activeSlotIds} onToggle={toggleSlot} onNewSlot={handleNewSlot} onDeleteSlot={handleDeleteSlot} />
+              <SlotToggleGroup title="確認フェーズ"  slotType="CONFIRM"    slots={confirmSlots} active={activeSlotIds} onToggle={toggleSlot} onNewSlot={handleNewSlot} onDeleteSlot={handleDeleteSlot} />
+            </div>
+          </div>
+
+          {/* Sticky footer */}
+          <div className="px-6 py-4 border-t border-warmgray-100 bg-white/80 flex gap-2">
+            <button
+              disabled={!name.trim() || saveMutation.isPending}
+              onClick={() => saveMutation.mutate()}
+              className="btn-primary flex-1"
+            >
+              {saveMutation.isPending ? '保存中...' : isCreate ? '作成する' : '変更を保存'}
+            </button>
+            <button onClick={onClose} className="btn-ghost text-warmgray-500 px-4">
+              キャンセル
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function SlotDeleteConfirm({ usage, onConfirm, onCancel }: {
+  usage: SlotUsage;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const hasImpact = usage.user_assignments > 0 || usage.pattern_count > 0 || usage.condition_count > 0;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-warmgray-900/50 backdrop-blur-sm" onClick={onCancel} />
+      <div className="relative glass rounded-2xl shadow-2xl w-full max-w-sm p-5 space-y-4 animate-scale-in">
+        <p className="text-base font-bold text-warmgray-800">スロットを削除しますか？</p>
+        <p className="text-sm text-warmgray-600">
+          「<span className="font-semibold">{usage.label_ja}</span>」を完全に削除します。この操作は取り消せません。
+        </p>
+        {hasImpact && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-1 text-xs text-amber-800">
+            <p className="font-bold">影響範囲：</p>
+            {usage.user_assignments > 0 && <p>・ユーザースロット割り当て {usage.user_assignments} 件が削除されます</p>}
+            {usage.pattern_count > 0    && <p>・パターンから除外されます（{usage.pattern_count} パターン）</p>}
+            {usage.condition_count > 0  && <p>・条件設定 {usage.condition_count} 件が削除されます</p>}
+          </div>
+        )}
+        <div className="flex gap-2 pt-1">
+          <button onClick={onConfirm} className="flex-1 text-sm font-bold px-4 py-2 rounded-xl bg-red-500 text-white hover:bg-red-600 transition-colors">
+            削除する
           </button>
-          <button onClick={onClose} className="btn-ghost text-warmgray-500">キャンセル</button>
+          <button onClick={onCancel} className="btn-ghost text-warmgray-500">キャンセル</button>
         </div>
       </div>
     </div>
   );
 }
 
-function SlotToggleGroup({ title, slotType, slots, active, onToggle, onNewSlot }: {
+function SlotToggleGroup({ title, slotType, slots, active, onToggle, onNewSlot, onDeleteSlot }: {
   title: string;
   slotType: string;
   slots: ApprovalSlot[];
   active: Set<string>;
   onToggle: (id: string) => void;
   onNewSlot: (slotType: string, label: string) => Promise<void>;
+  onDeleteSlot: (slot: ApprovalSlot) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [newLabel, setNewLabel] = useState('');
   const [saving, setSaving] = useState(false);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
 
   const submit = async () => {
     if (!newLabel.trim()) return;
@@ -178,19 +283,37 @@ function SlotToggleGroup({ title, slotType, slots, active, onToggle, onNewSlot }
       <div className="flex flex-wrap gap-2 items-center">
         {slots.map(s => {
           const on = active.has(s.id);
+          const isSystem = SYSTEM_SLOT_CODES.has(s.slot_code);
+          const hovered = hoveredId === s.id;
           return (
-            <button
+            <div
               key={s.id}
-              type="button"
-              onClick={() => onToggle(s.id)}
-              className={`text-xs font-semibold px-2.5 py-1 rounded-full border transition-all ${
-                on
-                  ? SLOT_TYPE_COLOR[s.slot_type] + ' border opacity-100 shadow-sm'
-                  : 'bg-warmgray-50 text-warmgray-400 border-warmgray-200 opacity-60'
-              }`}
+              className="relative inline-flex"
+              onMouseEnter={() => setHoveredId(s.id)}
+              onMouseLeave={() => setHoveredId(null)}
             >
-              {on ? '✓ ' : ''}{s.label_ja}
-            </button>
+              <button
+                type="button"
+                onClick={() => onToggle(s.id)}
+                className={`text-xs font-semibold px-2.5 py-1 rounded-full border transition-all ${
+                  on
+                    ? SLOT_TYPE_COLOR[s.slot_type] + ' border opacity-100 shadow-sm'
+                    : 'bg-warmgray-50 text-warmgray-400 border-warmgray-200 opacity-60'
+                }`}
+              >
+                {on ? '✓ ' : ''}{s.label_ja}
+              </button>
+              {!isSystem && hovered && (
+                <button
+                  type="button"
+                  onClick={e => { e.stopPropagation(); onDeleteSlot(s); }}
+                  title="スロットを削除"
+                  className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center hover:bg-red-600 shadow-sm transition-colors leading-none"
+                >
+                  ×
+                </button>
+              )}
+            </div>
           );
         })}
 
@@ -265,6 +388,12 @@ export default function PatternsTab({ showToast }: {
     queryKey: ['admin', 'approval-slots'],
     queryFn: async () => (await apiClient.get('/admin/approval-slots')).data,
     staleTime: 30 * 60_000,
+  });
+
+  const { data: departments = [] } = useQuery<Department[]>({
+    queryKey: ['admin', 'departments'],
+    queryFn: async () => (await apiClient.get('/admin/departments')).data,
+    staleTime: 10 * 60_000,
   });
 
   const { data: templatePatterns = [], isLoading: tpLoading } = useQuery<TemplatePattern[]>({
@@ -434,6 +563,7 @@ export default function PatternsTab({ showToast }: {
                 conditions={effectiveConditions}
                 patterns={patterns}
                 slots={slots}
+                departments={departments}
                 onChange={setPendingConditions}
                 loading={condLoading}
                 dirty={pendingConditions !== null}
@@ -529,12 +659,85 @@ const CONDITION_TYPE_LABELS: Record<string, string> = {
   AMOUNT_GTE:  '金額 ≥',
   DEPT_IN:     '部署が含まれる',
   DEPT_NOT_IN: '部署が含まれない',
+  ROLE_IN:     '役職が含まれる',
+  ROLE_NOT_IN: '役職が含まれない',
 };
 
-function ConditionsSection({ conditions, patterns, slots, onChange, loading, dirty, onSave, saving }: {
+const ALL_ROLES = Object.keys(ROLE_MAP) as Role[];
+
+// Multi-select pill toggle for roles — stores comma-separated role codes in condition_value
+function RoleMultiSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const selected = new Set(value ? value.split(',').map(s => s.trim()).filter(Boolean) : []);
+  const toggle = (role: string) => {
+    const next = new Set(selected);
+    next.has(role) ? next.delete(role) : next.add(role);
+    onChange([...next].join(','));
+  };
+  return (
+    <div className="flex flex-wrap gap-1.5 pt-1">
+      {ALL_ROLES.map(role => {
+        const on = selected.has(role);
+        return (
+          <button
+            key={role}
+            type="button"
+            onClick={() => toggle(role)}
+            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-colors ${
+              on
+                ? 'bg-ringo-500 text-white border-ringo-500'
+                : 'bg-white text-warmgray-500 border-warmgray-200 hover:border-ringo-300'
+            }`}
+          >
+            {ROLE_MAP[role].label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function DeptMultiSelect({ value, onChange, departments }: {
+  value: string;
+  onChange: (v: string) => void;
+  departments: Department[];
+}) {
+  const selected = new Set(value ? value.split(',').map(s => s.trim()).filter(Boolean) : []);
+  const toggle = (id: string) => {
+    const next = new Set(selected);
+    next.has(id) ? next.delete(id) : next.add(id);
+    onChange([...next].join(','));
+  };
+  return (
+    <div className="flex flex-wrap gap-1.5 pt-1">
+      {departments.map(dept => {
+        const on = selected.has(dept.id);
+        return (
+          <button
+            key={dept.id}
+            type="button"
+            onClick={() => toggle(dept.id)}
+            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-colors ${
+              on
+                ? 'bg-teal-500 text-white border-teal-500'
+                : 'bg-white text-warmgray-500 border-warmgray-200 hover:border-teal-300'
+            }`}
+          >
+            {dept.name}
+          </button>
+        );
+      })}
+      {departments.length === 0 && (
+        <span className="text-[10px] text-warmgray-400">部署を読み込み中...</span>
+      )}
+    </div>
+  );
+}
+
+function ConditionsSection({ conditions, patterns, slots, departments, onChange, loading, dirty, onSave, saving }: {
   conditions: Condition[];
   patterns: Pattern[];
   slots: ApprovalSlot[];
+  departments: Department[];
   onChange: (c: Condition[]) => void;
   loading: boolean;
   dirty: boolean;
@@ -584,15 +787,21 @@ function ConditionsSection({ conditions, patterns, slots, onChange, loading, dir
               <label className="label">条件タイプ</label>
               <CustomSelect options={typeOptions} value={c.condition_type} onChange={v => update(idx, { condition_type: v as Condition['condition_type'] })} />
             </div>
-            <div>
+            <div className={c.condition_type.startsWith('ROLE') || c.condition_type.startsWith('DEPT') ? 'col-span-2' : ''}>
               <label className="label">値</label>
-              <input
-                type="text"
-                value={c.condition_value}
-                onChange={e => update(idx, { condition_value: e.target.value })}
-                placeholder={c.condition_type.startsWith('AMOUNT') ? '例: 10000' : '部署ID（カンマ区切り）'}
-                className="input"
-              />
+              {c.condition_type.startsWith('ROLE') ? (
+                <RoleMultiSelect value={c.condition_value} onChange={v => update(idx, { condition_value: v })} />
+              ) : c.condition_type.startsWith('DEPT') ? (
+                <DeptMultiSelect value={c.condition_value} onChange={v => update(idx, { condition_value: v })} departments={departments} />
+              ) : (
+                <input
+                  type="text"
+                  value={c.condition_value}
+                  onChange={e => update(idx, { condition_value: e.target.value })}
+                  placeholder="例: 10000"
+                  className="input"
+                />
+              )}
             </div>
             <div>
               <label className="label">このスロットで停止</label>

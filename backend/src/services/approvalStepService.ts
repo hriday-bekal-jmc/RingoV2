@@ -12,10 +12,13 @@
 import type pg from 'pg';
 
 export interface ResolvedStep {
-  step_order:  number;
-  approver_id: string;
-  label:       string;
-  action_type: string;
+  step_order:      number;
+  approver_id:     string;
+  label:           string;
+  action_type:     string;
+  // Preview-only enrichment (not stored in approval_steps)
+  approver_name?:   string;
+  approver_avatar?: string | null;
 }
 
 export interface ApplicantRouteTrimResult {

@@ -11,14 +11,21 @@ dotenv.config();
 //   - redis        — general purpose (cache reads/writes, ratelimit, etc.)
 //   - redisSub     — dedicated subscriber for SSE event bus
 //   - bullConnection — config object that BullMQ creates its own clients from
+// When REDIS_HOST is not explicitly set, Redis is optional — stop retrying on
+// first failure so the app runs silently without it. All callers have try/catch
+// fallbacks; the only loss is caching (every request hits Postgres directly).
+const redisOptional = !process.env.REDIS_HOST;
+
 const baseOptions = {
   host:     process.env.REDIS_HOST || 'localhost',
   port:     Number(process.env.REDIS_PORT) || 6379,
   password: process.env.REDIS_PASSWORD || undefined,
   maxRetriesPerRequest: null as null,
-  enableReadyCheck: true,
+  enableReadyCheck: !redisOptional,
   lazyConnect: false,
-  retryStrategy: (times: number) => Math.min(times * 100, 3000),
+  // Optional mode: try once, give up — no retry spam.
+  // Required mode: exponential backoff up to 3 s (production resilience).
+  retryStrategy: redisOptional ? () => null : (times: number) => Math.min(times * 100, 3000),
 };
 
 export const redis = new Redis(baseOptions);
@@ -57,8 +64,9 @@ attachDedupedLogging(redisSub, 'redis-sub');
 // BullMQ wants a plain options object, not a client — it manages its own
 // connections internally for queue + worker pairs.
 export const bullConnection = {
-  host:     process.env.REDIS_HOST || 'localhost',
-  port:     Number(process.env.REDIS_PORT) || 6379,
-  password: process.env.REDIS_PASSWORD || undefined,
+  host:            process.env.REDIS_HOST || 'localhost',
+  port:            Number(process.env.REDIS_PORT) || 6379,
+  password:        process.env.REDIS_PASSWORD || undefined,
   maxRetriesPerRequest: null as null,
+  retryStrategy:   redisOptional ? (() => null) : undefined,
 };

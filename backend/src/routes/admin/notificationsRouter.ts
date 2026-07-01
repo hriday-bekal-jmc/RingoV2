@@ -9,6 +9,7 @@ const router = Router();
 const VALID_EVENT_TYPES = new Set([
   'APP_SUBMITTED', 'APP_APPROVED', 'APP_RETURNED', 'APP_REJECTED',
   'SETTLEMENT_SUBMITTED', 'SETTLEMENT_APPROVED', 'STEP_ACTION_REQUIRED',
+  'SETTLEMENT_AMOUNT_ADJUSTED',
 ]);
 
 const NOTIFY_VARS_PATH = path.resolve(__dirname, '../../../../frontend/src/config/notificationVars.overrides.json');

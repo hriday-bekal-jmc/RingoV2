@@ -370,12 +370,13 @@ router.post('/:id/resubmit', validateBody(submitApplicationSchema), async (req: 
 
       // Resolve chain via User × Pattern model
       const { steps: rawSteps, patternId: resolvedPatternId } = await resolveChainFromUserSlots(client, {
-        applicantId:  applicant_id,
-        departmentId: department_id,
-        templateId:   template_id,
-        formData:     typeof form_data === 'object' && form_data ? form_data : {},
-        patternId:    chosen_pattern_id ?? undefined,
-        stageFilter:  'RINGI',
+        applicantId:    applicant_id,
+        departmentId:   department_id,
+        applicantRole:  req.user!.role,
+        templateId:     template_id,
+        formData:       typeof form_data === 'object' && form_data ? form_data : {},
+        patternId:      chosen_pattern_id ?? undefined,
+        stageFilter:    'RINGI',
       });
       const routePolicy = skipStepsThroughApplicant(rawSteps, applicant_id);
       const resolvedSteps = routePolicy.steps;
@@ -500,12 +501,13 @@ router.post('/:id/submit', async (req: Request, res: Response): Promise<void> =>
 
       // Resolve chain via User × Pattern model
       const { steps: rawSubmitSteps, patternId: resolvedPatternId } = await resolveChainFromUserSlots(client, {
-        applicantId:  applicant_id,
-        departmentId: department_id,
-        templateId:   template_id,
-        formData:     {},
-        patternId:    chosen_pattern_id ?? undefined,
-        stageFilter:  routeStage as 'RINGI' | 'SETTLEMENT',
+        applicantId:   applicant_id,
+        departmentId:  department_id,
+        applicantRole: req.user!.role,
+        templateId:    template_id,
+        formData:      {},
+        patternId:     chosen_pattern_id ?? undefined,
+        stageFilter:   routeStage as 'RINGI' | 'SETTLEMENT',
       });
       const submitRoutePolicy = skipStepsThroughApplicant(rawSubmitSteps, applicant_id);
       const resolvedSubmitSteps = submitRoutePolicy.steps;
@@ -657,12 +659,13 @@ router.post('/:id/start-settlement', validateBody(startSettlementSchema), async 
 
       // Resolve SETTLEMENT chain via User × Pattern model
       const { steps: rawSettleSteps, patternId: resolvedPatternId } = await resolveChainFromUserSlots(client, {
-        applicantId:  applicant_id,
-        departmentId: department_id,
-        templateId:   template_id,
-        formData:     settlement_data ?? {},
-        patternId:    chosen_pattern_id ?? undefined,
-        stageFilter:  'SETTLEMENT',
+        applicantId:   applicant_id,
+        departmentId:  department_id,
+        applicantRole: req.user!.role,
+        templateId:    template_id,
+        formData:      settlement_data ?? {},
+        patternId:     chosen_pattern_id ?? undefined,
+        stageFilter:   'SETTLEMENT',
       });
       const settleRoutePolicy = skipStepsThroughApplicant(rawSettleSteps, applicant_id);
       const resolvedSteps = settleRoutePolicy.steps;
@@ -835,12 +838,13 @@ router.post('/:id/resubmit-settlement', validateBody(submitSettlementSchema), as
 
       // Resolve SETTLEMENT chain via User × Pattern model
       const { steps: rawResubmitSettleSteps, patternId: resolvedPatternId } = await resolveChainFromUserSlots(client, {
-        applicantId:  applicant_id,
-        departmentId: department_id,
-        templateId:   template_id,
-        formData:     settlement_data ?? {},
-        patternId:    chosen_pattern_id ?? undefined,
-        stageFilter:  'SETTLEMENT',
+        applicantId:   applicant_id,
+        departmentId:  department_id,
+        applicantRole: req.user!.role,
+        templateId:    template_id,
+        formData:      settlement_data ?? {},
+        patternId:     chosen_pattern_id ?? undefined,
+        stageFilter:   'SETTLEMENT',
       });
       const settleRoutePolicy = skipStepsThroughApplicant(rawResubmitSettleSteps, applicant_id);
       const resolvedSteps = settleRoutePolicy.steps;
@@ -982,12 +986,13 @@ router.post('/', validateBody(adminSubmitSchema), async (req: Request, res: Resp
       const routeStage  = isDirectSettlement ? 'SETTLEMENT' : 'RINGI';
       // Resolve chain via User × Pattern model
       const { steps: rawDirectSteps, patternId: resolvedPatternId } = await resolveChainFromUserSlots(client, {
-        applicantId:  applicant_id,
-        departmentId: department_id,
-        templateId:   template_id,
-        formData:     form_data ?? {},
-        patternId:    chosen_pattern_id ?? undefined,
-        stageFilter:  routeStage as 'RINGI' | 'SETTLEMENT',
+        applicantId:   applicant_id,
+        departmentId:  department_id,
+        applicantRole: req.user!.role,
+        templateId:    template_id,
+        formData:      form_data ?? {},
+        patternId:     chosen_pattern_id ?? undefined,
+        stageFilter:   routeStage as 'RINGI' | 'SETTLEMENT',
       });
       const routePolicy = skipStepsThroughApplicant(rawDirectSteps, applicant_id);
       const resolvedSteps = routePolicy.steps;

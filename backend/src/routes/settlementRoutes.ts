@@ -88,12 +88,13 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       );
 
       const { steps: rawSettleSteps, patternId: resolvedPatternId } = await resolveChainFromUserSlots(client, {
-        applicantId:  applicant_id,
-        departmentId: department_id ?? null,
-        templateId:   app.template_id,
-        formData:     settlement_data ?? {},
-        patternId:    chosen_pattern_id,
-        stageFilter:  'SETTLEMENT',
+        applicantId:   applicant_id,
+        departmentId:  department_id ?? null,
+        applicantRole: req.user!.role,
+        templateId:    app.template_id,
+        formData:      settlement_data ?? {},
+        patternId:     chosen_pattern_id,
+        stageFilter:   'SETTLEMENT',
       });
       const routePolicy = skipStepsThroughApplicant(rawSettleSteps, applicant_id);
       const resolvedSteps = routePolicy.steps;

@@ -127,7 +127,7 @@ function ActionTile({
       <span className={`w-8 h-8 rounded-lg bg-gradient-to-br ${bg} flex items-center justify-center text-sm shadow-sm group-hover:shadow-md transition-all duration-150 shrink-0`}>
         {icon}
       </span>
-      <span className="text-[10px] font-semibold text-warmgray-600 group-hover:text-ringo-600 transition-colors leading-tight w-full">{label}</span>
+      <span className="text-[10px] font-semibold text-warmgray-600 group-hover:text-ringo-600 transition-colors leading-tight w-full break-words">{label}</span>
     </>
   );
 
@@ -144,7 +144,7 @@ function Section({ icon, title, children }: { icon: string; title: string; child
         <h3 className="text-xs font-bold uppercase tracking-widest text-warmgray-400">{title}</h3>
         <div className="flex-1 h-px bg-warmgray-100/80" />
       </div>
-      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 min-w-0">
         {children}
       </div>
     </div>
@@ -797,7 +797,7 @@ export default function Dashboard() {
               </div>
 
               {/* Admin-specific action tiles */}
-              <div className="card space-y-5 animate-fade-up">
+              <div className="card !p-4 sm:!p-6 space-y-5 animate-fade-up">
                 <div className="flex items-center justify-between -mb-1">
                   <span className="text-xs font-bold uppercase tracking-widest text-warmgray-400">{lang === 'en' ? 'Quick Actions' : 'クイックアクション'}</span>
                   <button
@@ -830,7 +830,7 @@ export default function Dashboard() {
 
               {/* Settlement sub-stats */}
               {overview?.settlement_overview && (
-                <div className="grid grid-cols-3 gap-3 animate-fade-up">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 animate-fade-up">
                   {[
                     { label: lang === 'en' ? 'Awaiting settle approval' : '精算承認待ち', val: overview.settlement_overview.awaiting_approval, cls: 'badge-mustard' },
                     { label: lang === 'en' ? 'Awaiting transfer' : '振込待ち', val: overview.settlement_overview.awaiting_transfer, cls: 'badge-teal' },
@@ -997,7 +997,7 @@ export default function Dashboard() {
 
                 {/* LEFT: Action tiles */}
                 <div className="space-y-4">
-                  <div className="card space-y-5 animate-fade-up">
+                  <div className="card !p-4 sm:!p-6 space-y-5 animate-fade-up">
                     <div className="flex items-center justify-between -mb-1">
                       <span className="text-xs font-bold uppercase tracking-widest text-warmgray-400">{lang === 'en' ? 'Quick Actions' : 'クイックアクション'}</span>
                       <button

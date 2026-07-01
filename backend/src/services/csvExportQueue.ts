@@ -29,6 +29,11 @@ export const csvExportQueue = new Queue(CSV_EXPORT_QUEUE_NAME, {
   },
 });
 
+// Suppress BullMQ's internal Redis connection errors from flooding the console.
+// The queue degrades gracefully — enqueue calls will throw (caught at call site),
+// but the rest of the app is unaffected when Redis is down.
+csvExportQueue.on('error', () => { /* Redis down — CSV exports unavailable */ });
+
 // ── Job payload ──────────────────────────────────────────────────────────────
 export interface CsvExportPayload {
   /** User who requested the export — used for ownership check on download. */
